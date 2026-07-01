@@ -4,21 +4,25 @@ import 'package:go_router/go_router.dart';
 import '../../auth/providers/auth_provider.dart';
 
 class DashboardScreen extends StatelessWidget {
+  const DashboardScreen({super.key});
+
   @override
   Widget build(BuildContext context) {
     final user = context.watch<AuthProvider>().user;
     
     return Scaffold(
       appBar: AppBar(
-        title: Text('Dashboard'),
+        title: const Text('Dashboard'),
         backgroundColor: Colors.blueGrey[900],
         foregroundColor: Colors.white,
         actions: [
           IconButton(
-            icon: Icon(Icons.logout),
+            icon: const Icon(Icons.logout),
             onPressed: () async {
               await context.read<AuthProvider>().logout();
-              context.go('/login');
+              if (context.mounted) {
+                context.go('/login');
+              }
             },
           )
         ],
@@ -28,10 +32,10 @@ class DashboardScreen extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.dashboard, size: 80, color: Colors.blueGrey[300]),
-            SizedBox(height: 16),
+            const SizedBox(height: 16),
             Text(
               'Welcome, ${user?['name'] ?? 'User'}',
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
             ),
             Text(
               'Role: ${user?['role'] ?? 'Unknown'}',

@@ -2,12 +2,12 @@
 
 namespace Tests\Feature;
 
-use App\Models\Brand;
-use App\Models\Category;
-use App\Models\Company;
-use App\Models\Outlet;
-use App\Models\Product;
-use App\Models\User;
+use App\Domains\Core\Models\Brand;
+use App\Domains\POS\Models\Category;
+use App\Domains\Core\Models\Company;
+use App\Domains\Core\Models\Outlet;
+use App\Domains\POS\Models\Product;
+use App\Domains\Core\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;

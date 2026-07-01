@@ -2,13 +2,13 @@
 
 namespace Database\Seeders;
 
-use App\Models\User;
-use App\Models\Outlet;
-use App\Models\Category;
-use App\Models\Product;
-use App\Models\ModifierGroup;
-use App\Models\ModifierOption;
-use App\Models\ProductVariant;
+use App\Domains\Core\Models\User;
+use App\Domains\Core\Models\Outlet;
+use App\Domains\POS\Models\Category;
+use App\Domains\POS\Models\Product;
+use App\Domains\POS\Models\ModifierGroup;
+use App\Domains\POS\Models\ModifierOption;
+use App\Domains\POS\Models\ProductVariant;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 

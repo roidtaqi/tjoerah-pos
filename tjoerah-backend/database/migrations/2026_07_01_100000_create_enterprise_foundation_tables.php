@@ -206,7 +206,7 @@ return new class extends Migration
             $table->string('transaction_type');
             $table->integer('points');
             $table->string('reference_type')->nullable();
-            $table->unsignedBigInteger('reference_id')->nullable();
+            $table->string('reference_id')->nullable();
             $table->text('notes')->nullable();
             $table->timestamps();
 
@@ -238,7 +238,7 @@ return new class extends Migration
         });
 
         Schema::create('orders', function (Blueprint $table) {
-            $table->id();
+            $table->uuid('id')->primary();
             $table->uuid('uuid')->nullable()->unique();
             $table->foreignId('company_id')->nullable()->constrained()->nullOnDelete();
             $table->foreignId('brand_id')->nullable()->constrained()->nullOnDelete();
@@ -267,8 +267,8 @@ return new class extends Migration
         });
 
         Schema::create('order_items', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('order_id')->constrained()->cascadeOnDelete();
+            $table->uuid('id')->primary();
+            $table->foreignUuid('order_id')->constrained()->cascadeOnDelete();
             $table->foreignId('product_id')->nullable()->constrained()->nullOnDelete();
             $table->foreignId('product_variant_id')->nullable()->constrained()->nullOnDelete();
             $table->string('snapshot_name');
@@ -288,8 +288,8 @@ return new class extends Migration
         });
 
         Schema::create('payments', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('order_id')->constrained()->cascadeOnDelete();
+            $table->uuid('id')->primary();
+            $table->foreignUuid('order_id')->constrained()->cascadeOnDelete();
             $table->string('method');
             $table->decimal('amount', 14, 2);
             $table->string('status')->default('pending');
@@ -303,8 +303,8 @@ return new class extends Migration
         });
 
         Schema::create('refunds', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('order_id')->constrained()->cascadeOnDelete();
+            $table->uuid('id')->primary();
+            $table->foreignUuid('order_id')->constrained()->cascadeOnDelete();
             $table->foreignId('payment_id')->nullable()->constrained()->nullOnDelete();
             $table->foreignId('user_id')->nullable()->constrained()->nullOnDelete();
             $table->decimal('amount', 14, 2);
@@ -316,8 +316,8 @@ return new class extends Migration
         });
 
         Schema::create('void_transactions', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('order_id')->constrained()->cascadeOnDelete();
+            $table->uuid('id')->primary();
+            $table->foreignUuid('order_id')->constrained()->cascadeOnDelete();
             $table->foreignId('order_item_id')->nullable()->constrained()->nullOnDelete();
             $table->foreignId('user_id')->nullable()->constrained()->nullOnDelete();
             $table->decimal('amount', 14, 2)->default(0);
@@ -329,7 +329,7 @@ return new class extends Migration
         Schema::create('table_sessions', function (Blueprint $table) {
             $table->id();
             $table->foreignId('table_id')->constrained('tables')->cascadeOnDelete();
-            $table->foreignId('order_id')->nullable()->constrained()->nullOnDelete();
+            $table->foreignUuid('order_id')->nullable()->constrained()->nullOnDelete();
             $table->string('status')->default('open');
             $table->timestamp('opened_at');
             $table->timestamp('closed_at')->nullable();
@@ -339,8 +339,8 @@ return new class extends Migration
         });
 
         Schema::create('kitchen_tickets', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('order_id')->constrained()->cascadeOnDelete();
+            $table->uuid('id')->primary();
+            $table->foreignUuid('order_id')->constrained()->cascadeOnDelete();
             $table->foreignId('outlet_id')->constrained()->cascadeOnDelete();
             $table->string('station')->default('kitchen');
             $table->string('status')->default('pending');
@@ -355,8 +355,8 @@ return new class extends Migration
         });
 
         Schema::create('kitchen_ticket_items', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('kitchen_ticket_id')->constrained()->cascadeOnDelete();
+            $table->uuid('id')->primary();
+            $table->foreignUuid('kitchen_ticket_id')->constrained()->cascadeOnDelete();
             $table->foreignId('order_item_id')->nullable()->constrained()->nullOnDelete();
             $table->string('name');
             $table->integer('qty')->default(1);
@@ -409,7 +409,7 @@ return new class extends Migration
             $table->decimal('after_quantity', 14, 4)->default(0);
             $table->decimal('unit_cost', 14, 4)->default(0);
             $table->string('reference_type')->nullable();
-            $table->unsignedBigInteger('reference_id')->nullable();
+            $table->string('reference_id')->nullable();
             $table->string('reference_number')->nullable();
             $table->text('reason')->nullable();
             $table->timestamps();

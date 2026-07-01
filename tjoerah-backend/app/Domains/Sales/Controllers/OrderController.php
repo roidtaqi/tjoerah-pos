@@ -4,9 +4,9 @@ namespace App\Domains\Sales\Controllers;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use App\Models\Order;
-use App\Models\Refund;
-use App\Models\VoidTransaction;
+use App\Domains\POS\Models\Order;
+use App\Domains\POS\Models\Refund;
+use App\Domains\POS\Models\VoidTransaction;
 use App\Domains\Sales\Services\OrderService;
 use App\Domains\Sales\DTOs\OrderData;
 

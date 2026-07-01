@@ -1,11 +1,11 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 
-class LocalDB {
-  static final LocalDB instance = LocalDB._init();
+class LocalDatabase {
+  static final LocalDatabase instance = LocalDatabase._init();
   static Database? _database;
 
-  LocalDB._init();
+  LocalDatabase._init();
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -25,42 +25,57 @@ class LocalDB {
   }
 
   Future _createDB(Database db, int version) async {
+    const idType = 'TEXT PRIMARY KEY'; // UUIDs
+    const textType = 'TEXT NOT NULL';
+    const integerType = 'INTEGER NOT NULL';
+    const realType = 'REAL NOT NULL';
+
     await db.execute('''
-      CREATE TABLE users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        server_id INTEGER,
-        name TEXT NOT NULL,
-        email TEXT NOT NULL,
-        role TEXT NOT NULL,
-        token TEXT
-      )
-    ''');
-    
-    await db.execute('''
-      CREATE TABLE sync_queue (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        endpoint TEXT NOT NULL,
-        method TEXT NOT NULL,
-        payload TEXT NOT NULL,
-        status TEXT NOT NULL,
-        created_at TEXT NOT NULL
+      CREATE TABLE products (
+        id $idType,
+        name $textType,
+        price $realType,
+        category_id TEXT,
+        sku TEXT,
+        station TEXT
       )
     ''');
 
     await db.execute('''
-      CREATE TABLE products (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        server_id INTEGER,
-        category_id INTEGER,
-        name TEXT NOT NULL,
-        sku TEXT,
-        base_price REAL NOT NULL,
-        is_active INTEGER DEFAULT 1
+      CREATE TABLE orders (
+        id $idType,
+        total $realType,
+        status $textType,
+        created_at $textType,
+        is_synced INTEGER DEFAULT 0
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE order_items (
+        id $idType,
+        order_id $textType,
+        product_id $textType,
+        quantity $integerType,
+        price $realType,
+        FOREIGN KEY (order_id) REFERENCES orders (id) ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE sync_queue (
+        id $idType,
+        operation $textType,
+        entity_type $textType,
+        payload $textType,
+        created_at $textType,
+        retry_count INTEGER DEFAULT 0,
+        status $textType
       )
     ''');
   }
 
-  Future close() async {
+  Future<void> close() async {
     final db = await instance.database;
     db.close();
   }

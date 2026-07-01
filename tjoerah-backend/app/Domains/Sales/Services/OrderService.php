@@ -5,7 +5,9 @@ namespace App\Domains\Sales\Services;
 use Illuminate\Support\Facades\DB;
 use App\Domains\Sales\DTOs\OrderData;
 use App\Domains\Sales\Repositories\OrderRepository;
-use App\Models\KitchenTicket;
+use App\Domains\KDS\Models\KitchenTicket;
+
+use App\Domains\Sales\Events\OrderCompleted;
 
 class OrderService
 {
@@ -19,6 +21,8 @@ class OrderService
             $order = $this->repository->createOrder($data);
 
             $this->createKitchenTickets($order);
+
+            OrderCompleted::dispatch($order);
 
             return $order->load(['items', 'payments', 'kitchenTickets.items']);
         });

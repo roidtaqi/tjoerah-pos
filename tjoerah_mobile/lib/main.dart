@@ -1,35 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'core/theme/app_theme.dart';
 import 'core/router/app_router.dart';
 import 'features/auth/providers/auth_provider.dart';
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  
-  final authProvider = AuthProvider();
-  await authProvider.checkAuthStatus();
-
+void main() {
   runApp(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider.value(value: authProvider),
+        ChangeNotifierProvider(create: (_) => AuthProvider()),
       ],
-      child: MyApp(),
+      child: const TjoerahPosApp(),
     ),
   );
 }
 
-class MyApp extends StatelessWidget {
+class TjoerahPosApp extends StatelessWidget {
+  const TjoerahPosApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp.router(
       title: 'Tjoerah POS',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        primarySwatch: Colors.blueGrey,
-        scaffoldBackgroundColor: Colors.grey[50],
-      ),
+      theme: AppTheme.lightTheme,
       routerConfig: appRouter,
+      debugShowCheckedModeBanner: false,
     );
   }
 }

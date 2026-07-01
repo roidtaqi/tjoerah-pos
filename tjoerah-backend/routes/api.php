@@ -2,23 +2,24 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\AuthController;
-use App\Http\Controllers\OutletController;
-use App\Http\Controllers\ProductCatalogController;
+use App\Domains\Core\Controllers\AuthController;
+use App\Domains\Core\Controllers\OutletController;
+use App\Domains\POS\Controllers\ProductCatalogController;
 use App\Domains\Sales\Controllers\OrderController;
-use App\Http\Controllers\Api\CustomerController;
-use App\Http\Controllers\Api\EmployeeController;
-use App\Http\Controllers\Api\InventoryController;
-use App\Http\Controllers\Api\KdsController;
-use App\Http\Controllers\Api\OrganizationController;
-use App\Http\Controllers\Api\PaymentController;
-use App\Http\Controllers\Api\PurchaseController;
-use App\Http\Controllers\Api\RbacController;
-use App\Http\Controllers\Api\ReceiptController;
-use App\Http\Controllers\Api\RecipeController;
-use App\Http\Controllers\Api\ReportingController;
-use App\Http\Controllers\Api\SyncController;
-use App\Http\Controllers\Api\TableManagementController;
+use App\Domains\CRM\Controllers\CustomerController;
+use App\Domains\Employee\Controllers\EmployeeController;
+use App\Domains\Inventory\Controllers\InventoryController;
+use App\Domains\KDS\Controllers\KdsController;
+use App\Domains\Core\Controllers\OrganizationController;
+use App\Domains\POS\Controllers\PaymentController;
+use App\Domains\Inventory\Controllers\PurchaseController;
+use App\Domains\Core\Controllers\RbacController;
+use App\Domains\POS\Controllers\ReceiptController;
+use App\Domains\Recipe\Controllers\RecipeController;
+use App\Domains\Reporting\Controllers\ReportingController;
+use App\Domains\Inventory\Controllers\WastageController;
+use App\Domains\POS\Controllers\SyncController;
+use App\Domains\POS\Controllers\TableManagementController;
 
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/auth/login', [AuthController::class, 'login']);
@@ -81,6 +82,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/inventory/adjustments', [InventoryController::class, 'adjustment']);
     Route::post('/inventory/opname', [InventoryController::class, 'opname']);
     Route::post('/inventory/transfers', [InventoryController::class, 'transfer']);
+    Route::post('/inventory/wastage', [WastageController::class, 'store']);
 
     Route::get('/recipes', [RecipeController::class, 'index']);
     Route::post('/recipes', [RecipeController::class, 'store']);
@@ -112,6 +114,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/reports/inventory', [ReportingController::class, 'inventory']);
     Route::get('/reports/profitability', [ReportingController::class, 'profitability']);
     Route::get('/reports/outlets', [ReportingController::class, 'outlets']);
+    Route::get('/reports/alerts', [ReportingController::class, 'alerts']);
 
     Route::get('/sync/pull', [SyncController::class, 'pull']);
     Route::post('/sync/push', [SyncController::class, 'push']);

@@ -2,8 +2,8 @@
 
 namespace App\Domains\Sales\Repositories;
 
-use App\Models\Order;
-use App\Models\Outlet;
+use App\Domains\POS\Models\Order;
+use App\Domains\Core\Models\Outlet;
 use App\Domains\Sales\DTOs\OrderData;
 
 class OrderRepository

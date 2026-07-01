@@ -1,0 +1,17 @@
+<?php
+
+namespace App\Domains\KDS\Models;
+
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Model;
+
+class KitchenTicketItem extends Model
+{
+    use HasUuids;
+
+    protected $guarded = [];
+
+    protected $casts = [
+        'modifiers' => 'array',
+    ];
+}
