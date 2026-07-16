@@ -1,87 +1,72 @@
 # Tjoerah POS Cloud Demo
 
-Arsitektur demo:
+Arsitektur demo gratis:
 
 ```text
 Flutter pada ponsel atau Chrome
         |
         v
-Laravel API di Northflank (selalu aktif)
+Laravel API di Back4App Containers Free
         |
         v
-PostgreSQL di Neon
+PostgreSQL di Neon Free
 ```
 
-Dengan arsitektur ini, komputer lokal tidak perlu menjalankan Laravel atau
-PostgreSQL. Setelah URL API cloud dijadikan nilai bawaan aplikasi, demonstrasi
-di perangkat cukup dimulai dengan:
+Komputer lokal tidak perlu menjalankan Laravel atau PostgreSQL. Setelah domain
+Back4App menjadi URL API bawaan Flutter, demonstrasi di perangkat cukup dimulai
+dengan:
 
 ```bash
 cd tjoerah_mobile
 flutter run
 ```
 
+## Karakteristik Paket Gratis
+
+Back4App Containers Free tidak meminta kartu kredit. Paketnya menyediakan satu
+container dengan 0,25 shared CPU, RAM 256 MB, transfer 100 GB, deployment dari
+GitHub, dan domain `b4a.run`. Container backend Tjoerah memakai sekitar 64 MB
+RAM pada pengujian lokal.
+
+Database transaksi tetap berada di Neon sehingga redeploy container tidak
+menghapus data.
+
 ## 1. Database Neon
 
 Project berikut sudah dibuat:
 
 ```text
-Name: tjoerah-pos
+Project: tjoerah-pos
 Region: AWS Europe (Frankfurt)
 Database: tjoerah_pos
 ```
 
-Ambil pooled connection string dari menu **Connect** di Neon Console dan
-pastikan URL berisi `sslmode=require`. Jangan memasukkannya ke Git.
+Ambil pooled connection string dari menu **Connect** di Neon Console. Pastikan
+URL berisi `sslmode=require` dan jangan menyimpannya di Git.
 
-## 2. Akun Northflank
+## 2. Deploy Backend ke Back4App
 
-1. Buka <https://app.northflank.com/signup> dan masuk menggunakan GitHub.
-2. Pilih paket **Developer Sandbox**.
-3. Buat project bernama `tjoerah-pos` di region Eropa yang tersedia.
-4. Hubungkan akun GitHub jika diminta.
-
-Developer Sandbox menyediakan layanan yang terus aktif tanpa tidur. Resource
-gratis terkecil memiliki 0,1 shared vCPU dan RAM 256 MB, sehingga container ini
-dibatasi menjadi satu PHP worker.
-
-## 3. Buat Combined Service
-
-Di dalam project `tjoerah-pos`, pilih **Create service > Combined service**:
+1. Masuk ke <https://www.back4app.com/> menggunakan GitHub.
+2. Pilih **Build new app**, lalu **Containers as a Service**.
+3. Hubungkan GitHub dan pilih repository `roidtaqi/tjoerah-pos`.
+4. Gunakan konfigurasi berikut:
 
 ```text
-Name: tjoerah-pos-api
-Repository: roidtaqi/tjoerah-pos
-Branch: main
-Build type: Dockerfile
-Dockerfile path: /tjoerah-backend/Dockerfile
-Build context: /tjoerah-backend
-Deployment plan: Sandbox / nf-compute-10
-Instances: 1
+App name: tjoerah-pos-api
+Branch: agent/northflank-cloud-demo
+Root directory: tjoerah-backend
+Plan: Free
+Auto deploy: enabled
 ```
 
-Aktifkan continuous deployment untuk branch `main`.
-
-Tambahkan public port:
+Dockerfile produksi sudah tersedia di root directory tersebut. Tambahkan tiga
+environment variable rahasia berikut sebelum membuat app:
 
 ```text
-Name: http
-Protocol: HTTP
-Internal port: 8080
-Public: enabled
+APP_KEY_BASE64=<base64 key 32 byte>
+DB_URL=<pooled connection string Neon>
+JWT_SECRET=<random secret>
 ```
-
-Tambahkan readiness health check:
-
-```text
-Protocol: HTTP
-Path: /up
-Port: 8080
-Initial delay: 30 seconds
-Period: 30 seconds
-```
-
-## 4. Runtime Variables
 
 Buat dua nilai rahasia dari folder `tjoerah-backend`:
 
@@ -90,57 +75,35 @@ php -r 'echo base64_encode(random_bytes(32)), PHP_EOL;'
 openssl rand -hex 48
 ```
 
-Nilai pertama menjadi `APP_KEY_BASE64`; nilai kedua menjadi `JWT_SECRET`.
-Masukkan runtime variables berikut melalui Northflank. Ganti nilai yang masih
-menggunakan tanda `<...>`:
+Nilai pertama digunakan untuk `APP_KEY_BASE64` dan nilai kedua untuk
+`JWT_SECRET`. Konfigurasi nonrahasia seperti PostgreSQL, SSL, logging, satu PHP
+worker, dan seeder demo sudah menjadi default image.
+
+Klik **Create App**. Container otomatis menjalankan migrasi, seeder akun demo,
+cache Laravel, dan server HTTP. Seeder aman dijalankan berulang kali.
+
+## 3. Hubungkan Flutter
+
+Setelah deployment berstatus **Available**, buka domain dari **App Overview**
+dan periksa:
 
 ```text
-APP_NAME=Tjoerah POS
-APP_ENV=production
-APP_KEY_BASE64=<hasil perintah pertama>
-APP_DEBUG=false
-APP_URL=https://<domain-code-run>
-APP_LOCALE=id
-APP_FALLBACK_LOCALE=id
-LOG_CHANNEL=stderr
-LOG_LEVEL=info
-DB_CONNECTION=pgsql
-DB_URL=<pooled connection string Neon>
-DB_SSLMODE=require
-SESSION_DRIVER=cookie
-CACHE_STORE=database
-QUEUE_CONNECTION=sync
-BROADCAST_CONNECTION=log
-FILESYSTEM_DISK=local
-JWT_SECRET=<hasil perintah kedua>
-JWT_TTL=480
-CORS_ALLOWED_ORIGINS=https://roidtaqi.github.io,http://localhost:3000,http://127.0.0.1:3000
-SEED_DEMO_DATA=true
-PHP_CLI_SERVER_WORKERS=1
+https://<service>.b4a.run/up
 ```
 
-Container otomatis menjalankan migrasi, seeder akun demo, dan cache Laravel
-setiap kali deployment dimulai. Seeder dapat dijalankan berulang kali tanpa
-mengganti password akun yang sudah ada.
+Tambahkan `APP_URL=https://<service>.b4a.run` pada environment variables setelah
+domain diketahui, lalu deploy ulang.
 
-## 5. Hubungkan Flutter
-
-Setelah deployment berstatus aktif, salin domain publik `code.run` dan periksa:
-
-```text
-https://<domain-code-run>/up
-```
-
-Sebelum URL tersebut dimasukkan sebagai nilai bawaan di `ApiClient`, aplikasi
-dapat diuji tanpa backend lokal dengan:
+Sebelum URL cloud dijadikan nilai bawaan aplikasi, pengujian dapat dilakukan
+dengan:
 
 ```bash
 flutter run \
-  --dart-define=API_BASE_URL=https://<domain-code-run>/api
+  --dart-define=API_BASE_URL=https://<service>.b4a.run/api
 ```
 
-Setelah nilai bawaan diperbarui dan aplikasi dibangun ulang, perintahnya menjadi
-cukup `flutter run`.
+Setelah nilai bawaan `ApiClient` diperbarui dan aplikasi dibangun ulang,
+perintahnya cukup `flutter run`.
 
 ## Akun Demo
 
@@ -150,7 +113,7 @@ Email: owner@tjoerah.com
 Password: password
 PIN: 1234
 
-Cashier
+Kasir
 Email: cashier@tjoerah.com
 Password: password
 PIN: 5678
@@ -158,17 +121,19 @@ PIN: 5678
 
 `1234` dan `5678` adalah PIN untuk login PIN, bukan password login email.
 
-## Batas Paket Gratis
+## Sebelum Presentasi
 
-Developer Sandbox ditujukan untuk demo dan pengembangan, bukan operasional
-produksi dengan SLA. Database tetap berada di Neon sehingga redeploy container
-tidak menghapus transaksi. Jika kebutuhan client bertambah, service dapat
-dipindahkan ke resource berbayar tanpa mengubah arsitektur aplikasi.
+1. Buka `https://<service>.b4a.run/up` dan pastikan respons berhasil.
+2. Jalankan `flutter run` dan lakukan satu login percobaan.
+3. Gunakan akun Owner untuk mendemonstrasikan seluruh menu.
+
+Paket gratis sesuai untuk demo dan pengembangan, bukan operasional produksi
+dengan SLA. Matikan `SEED_DEMO_DATA` dan ganti seluruh kredensial sebelum
+menggunakan deployment untuk data bisnis nyata.
 
 Referensi resmi:
 
-- <https://northflank.com/pricing>
-- <https://northflank.com/docs/v1/application/billing/pricing-on-northflank>
-- <https://northflank.com/docs/v1/application/build/build-with-a-dockerfile>
-- <https://northflank.com/docs/v1/application/network/expose-your-application>
+- <https://www.back4app.com/pricing/container-as-a-service>
+- <https://www.back4app.com/docs-containers>
+- <https://www.back4app.com/docs-containers/prepare-your-deployment>
 - <https://neon.com/pricing>

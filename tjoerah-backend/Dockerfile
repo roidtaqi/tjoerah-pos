@@ -45,7 +45,25 @@ RUN composer install \
         storage/logs \
         bootstrap/cache
 
-ENV PORT=8080 \
+ENV APP_NAME="Tjoerah POS" \
+    APP_ENV=production \
+    APP_DEBUG=false \
+    APP_LOCALE=id \
+    APP_FALLBACK_LOCALE=id \
+    APP_FAKER_LOCALE=id_ID \
+    LOG_CHANNEL=stderr \
+    LOG_LEVEL=info \
+    DB_CONNECTION=pgsql \
+    DB_SSLMODE=require \
+    SESSION_DRIVER=cookie \
+    CACHE_STORE=database \
+    QUEUE_CONNECTION=sync \
+    BROADCAST_CONNECTION=log \
+    FILESYSTEM_DISK=local \
+    JWT_TTL=480 \
+    CORS_ALLOWED_ORIGINS=https://roidtaqi.github.io,http://localhost:3000,http://127.0.0.1:3000 \
+    SEED_DEMO_DATA=true \
+    PORT=8080 \
     PHP_CLI_SERVER_WORKERS=1
 
 EXPOSE 8080
