@@ -1,125 +1,148 @@
 # Tjoerah POS Cloud Demo
 
-Arsitektur demo gratis:
+Arsitektur demo:
 
-- Flutter Web: GitHub Pages
-- Laravel API: Koyeb Free Web Service
-- PostgreSQL: Neon Free
-
-Frontend dan database tetap tersedia tanpa komputer lokal. Koyeb Free tidur
-setelah satu jam tanpa trafik dan bangun otomatis saat menerima request baru.
-Biasanya cold start memerlukan 1-5 detik. Buka endpoint `/up` sebelum presentasi
-untuk memastikan API sudah hangat.
-
-## 0. Publikasikan Source Code
-
-Koyeb dan GitHub Actions membaca repository GitHub, bukan perubahan yang masih
-berada di komputer lokal. Periksa, commit, lalu push seluruh perubahan yang akan
-dipresentasikan:
-
-```bash
-git status
-git add .github docs tjoerah-backend tjoerah_mobile
-git commit -m "Prepare Tjoerah POS cloud demo"
-git push origin main
+```text
+Flutter pada ponsel atau Chrome
+        |
+        v
+Laravel API di Northflank (selalu aktif)
+        |
+        v
+PostgreSQL di Neon
 ```
 
-## 1. Buat Database Neon
-
-1. Buat akun di <https://console.neon.tech>.
-2. Buat project `tjoerah-pos` di region AWS Europe (Frankfurt).
-3. Salin connection string PostgreSQL yang menggunakan SSL.
-4. Simpan connection string tersebut. Jangan masukkan ke Git.
-
-Paket Neon Free tidak memiliki batas waktu, menyediakan 0,5 GB storage, dan
-compute akan tidur ketika tidak digunakan.
-
-## 2. Buat Secret
-
-Jalankan perintah berikut dari folder `tjoerah-backend`:
+Dengan arsitektur ini, komputer lokal tidak perlu menjalankan Laravel atau
+PostgreSQL. Setelah URL API cloud dijadikan nilai bawaan aplikasi, demonstrasi
+di perangkat cukup dimulai dengan:
 
 ```bash
-php artisan key:generate --show
+cd tjoerah_mobile
+flutter run
+```
+
+## 1. Database Neon
+
+Project berikut sudah dibuat:
+
+```text
+Name: tjoerah-pos
+Region: AWS Europe (Frankfurt)
+Database: tjoerah_pos
+```
+
+Ambil pooled connection string dari menu **Connect** di Neon Console dan
+pastikan URL berisi `sslmode=require`. Jangan memasukkannya ke Git.
+
+## 2. Akun Northflank
+
+1. Buka <https://app.northflank.com/signup> dan masuk menggunakan GitHub.
+2. Pilih paket **Developer Sandbox**.
+3. Buat project bernama `tjoerah-pos` di region Eropa yang tersedia.
+4. Hubungkan akun GitHub jika diminta.
+
+Developer Sandbox menyediakan layanan yang terus aktif tanpa tidur. Resource
+gratis terkecil memiliki 0,1 shared vCPU dan RAM 256 MB, sehingga container ini
+dibatasi menjadi satu PHP worker.
+
+## 3. Buat Combined Service
+
+Di dalam project `tjoerah-pos`, pilih **Create service > Combined service**:
+
+```text
+Name: tjoerah-pos-api
+Repository: roidtaqi/tjoerah-pos
+Branch: main
+Build type: Dockerfile
+Dockerfile path: /tjoerah-backend/Dockerfile
+Build context: /tjoerah-backend
+Deployment plan: Sandbox / nf-compute-10
+Instances: 1
+```
+
+Aktifkan continuous deployment untuk branch `main`.
+
+Tambahkan public port:
+
+```text
+Name: http
+Protocol: HTTP
+Internal port: 8080
+Public: enabled
+```
+
+Tambahkan readiness health check:
+
+```text
+Protocol: HTTP
+Path: /up
+Port: 8080
+Initial delay: 30 seconds
+Period: 30 seconds
+```
+
+## 4. Runtime Variables
+
+Buat dua nilai rahasia dari folder `tjoerah-backend`:
+
+```bash
+php -r 'echo base64_encode(random_bytes(32)), PHP_EOL;'
 openssl rand -hex 48
 ```
 
-Nilai pertama digunakan sebagai `APP_KEY`. Nilai kedua digunakan sebagai
-`JWT_SECRET`.
-
-Di Koyeb, buka **Secrets** dan buat:
-
-```text
-TJOERAH_APP_KEY=<hasil php artisan key:generate --show>
-TJOERAH_JWT_SECRET=<hasil openssl rand -hex 48>
-NEON_DATABASE_URL=<connection string Neon>
-```
-
-## 3. Deploy Laravel ke Koyeb
-
-1. Masuk ke <https://app.koyeb.com> menggunakan GitHub.
-2. Pilih **Create Web Service**, lalu repository `roidtaqi/tjoerah-pos`.
-3. Pilih branch `main` dan builder **Buildpack**.
-4. Set work directory menjadi `tjoerah-backend`.
-5. Pilih instance **Free** dan region **Frankfurt**.
-6. Expose port `8000` menggunakan HTTP pada path `/`.
-7. Set health check HTTP ke path `/up` pada port `8000`.
-8. Masukkan environment berikut melalui **Bulk Edit**:
+Nilai pertama menjadi `APP_KEY_BASE64`; nilai kedua menjadi `JWT_SECRET`.
+Masukkan runtime variables berikut melalui Northflank. Ganti nilai yang masih
+menggunakan tanda `<...>`:
 
 ```text
 APP_NAME=Tjoerah POS
 APP_ENV=production
-APP_KEY={{ secret.TJOERAH_APP_KEY }}
+APP_KEY_BASE64=<hasil perintah pertama>
 APP_DEBUG=false
-APP_URL=https://{{ KOYEB_PUBLIC_DOMAIN }}
+APP_URL=https://<domain-code-run>
 APP_LOCALE=id
 APP_FALLBACK_LOCALE=id
 LOG_CHANNEL=stderr
 LOG_LEVEL=info
 DB_CONNECTION=pgsql
-DB_URL={{ secret.NEON_DATABASE_URL }}
+DB_URL=<pooled connection string Neon>
 DB_SSLMODE=require
 SESSION_DRIVER=cookie
 CACHE_STORE=database
 QUEUE_CONNECTION=sync
 BROADCAST_CONNECTION=log
 FILESYSTEM_DISK=local
-JWT_SECRET={{ secret.TJOERAH_JWT_SECRET }}
+JWT_SECRET=<hasil perintah kedua>
 JWT_TTL=480
 CORS_ALLOWED_ORIGINS=https://roidtaqi.github.io,http://localhost:3000,http://127.0.0.1:3000
 SEED_DEMO_DATA=true
+PHP_CLI_SERVER_WORKERS=1
 ```
 
-Deployment menjalankan migrasi dan seeder secara otomatis. Seeder aman untuk
-dijalankan ulang dan tidak mengubah password akun yang sudah ada.
+Container otomatis menjalankan migrasi, seeder akun demo, dan cache Laravel
+setiap kali deployment dimulai. Seeder dapat dijalankan berulang kali tanpa
+mengganti password akun yang sudah ada.
 
-Setelah status service menjadi **Healthy**, buka:
+## 5. Hubungkan Flutter
+
+Setelah deployment berstatus aktif, salin domain publik `code.run` dan periksa:
 
 ```text
-https://<domain-koyeb>/up
+https://<domain-code-run>/up
 ```
 
-## 4. Hubungkan Flutter Web
-
-Set repository variable GitHub menggunakan URL Koyeb:
+Sebelum URL tersebut dimasukkan sebagai nilai bawaan di `ApiClient`, aplikasi
+dapat diuji tanpa backend lokal dengan:
 
 ```bash
-gh variable set API_BASE_URL --body "https://<domain-koyeb>/api"
+flutter run \
+  --dart-define=API_BASE_URL=https://<domain-code-run>/api
 ```
 
-Di GitHub, buka **Settings > Pages** dan pilih **GitHub Actions** sebagai source.
-Kemudian jalankan workflow:
+Setelah nilai bawaan diperbarui dan aplikasi dibangun ulang, perintahnya menjadi
+cukup `flutter run`.
 
-```bash
-gh workflow run deploy-web.yml
-```
-
-Frontend akan tersedia di:
-
-```text
-https://roidtaqi.github.io/tjoerah-pos/
-```
-
-## 5. Akun Demo
+## Akun Demo
 
 ```text
 Owner
@@ -127,33 +150,25 @@ Email: owner@tjoerah.com
 Password: password
 PIN: 1234
 
-Kasir
+Cashier
 Email: cashier@tjoerah.com
 Password: password
 PIN: 5678
 ```
 
-## Menjalankan Web Lokal dengan API Cloud
-
-Server Laravel lokal tidak diperlukan. Gunakan URL Koyeb saat menjalankan
-Flutter di Chrome:
-
-```bash
-flutter run -d chrome \
-  --web-port 3000 \
-  --dart-define=API_BASE_URL=https://<domain-koyeb>/api
-```
+`1234` dan `5678` adalah PIN untuk login PIN, bukan password login email.
 
 ## Batas Paket Gratis
 
-Koyeb Free menyediakan 512 MB RAM dan akan tidur setelah satu jam tanpa trafik.
-Data tidak hilang karena PostgreSQL berada di Neon. Untuk server yang benar-benar
-tidak pernah tidur, gunakan Oracle Cloud Always Free atau Google Cloud Free Tier
-`e2-micro`; keduanya memerlukan pengelolaan VM dan biasanya verifikasi billing.
+Developer Sandbox ditujukan untuk demo dan pengembangan, bukan operasional
+produksi dengan SLA. Database tetap berada di Neon sehingga redeploy container
+tidak menghapus transaksi. Jika kebutuhan client bertambah, service dapat
+dipindahkan ke resource berbayar tanpa mengubah arsitektur aplikasi.
 
 Referensi resmi:
 
-- <https://www.koyeb.com/docs/reference/instances>
-- <https://www.koyeb.com/docs/run-and-scale/scale-to-zero>
+- <https://northflank.com/pricing>
+- <https://northflank.com/docs/v1/application/billing/pricing-on-northflank>
+- <https://northflank.com/docs/v1/application/build/build-with-a-dockerfile>
+- <https://northflank.com/docs/v1/application/network/expose-your-application>
 - <https://neon.com/pricing>
-- <https://docs.github.com/pages>

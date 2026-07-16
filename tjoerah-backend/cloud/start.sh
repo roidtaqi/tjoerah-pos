@@ -2,6 +2,15 @@
 
 set -eu
 
+if [ -z "${APP_KEY:-}" ] && [ -n "${APP_KEY_BASE64:-}" ]; then
+    export APP_KEY="base64:${APP_KEY_BASE64}"
+fi
+
+if [ -z "${APP_KEY:-}" ]; then
+    echo "APP_KEY or APP_KEY_BASE64 must be configured." >&2
+    exit 1
+fi
+
 attempt=1
 max_attempts=10
 
@@ -22,8 +31,4 @@ fi
 
 php artisan optimize
 
-if command -v heroku-php-nginx >/dev/null 2>&1; then
-    exec heroku-php-nginx public/
-fi
-
-exec php artisan serve --host=0.0.0.0 --port="${PORT:-8000}"
+exec php artisan serve --host=0.0.0.0 --port="${PORT:-8080}"
