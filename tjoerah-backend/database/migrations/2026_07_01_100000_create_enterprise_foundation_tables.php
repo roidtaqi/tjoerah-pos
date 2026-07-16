@@ -305,7 +305,7 @@ return new class extends Migration
         Schema::create('refunds', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->foreignUuid('order_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('payment_id')->nullable()->constrained()->nullOnDelete();
+            $table->foreignUuid('payment_id')->nullable()->constrained()->nullOnDelete();
             $table->foreignId('user_id')->nullable()->constrained()->nullOnDelete();
             $table->decimal('amount', 14, 2);
             $table->string('type')->default('full');
@@ -318,7 +318,7 @@ return new class extends Migration
         Schema::create('void_transactions', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->foreignUuid('order_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('order_item_id')->nullable()->constrained()->nullOnDelete();
+            $table->foreignUuid('order_item_id')->nullable()->constrained()->nullOnDelete();
             $table->foreignId('user_id')->nullable()->constrained()->nullOnDelete();
             $table->decimal('amount', 14, 2)->default(0);
             $table->text('reason');
@@ -357,7 +357,7 @@ return new class extends Migration
         Schema::create('kitchen_ticket_items', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->foreignUuid('kitchen_ticket_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('order_item_id')->nullable()->constrained()->nullOnDelete();
+            $table->foreignUuid('order_item_id')->nullable()->constrained()->nullOnDelete();
             $table->string('name');
             $table->integer('qty')->default(1);
             $table->json('modifiers')->nullable();

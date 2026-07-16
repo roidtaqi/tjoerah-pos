@@ -1,98 +1,147 @@
 import 'dart:convert';
-import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/database/database_helper.dart';
 import '../../../core/network/api_client.dart';
 import '../models/inventory_models.dart';
 
-class InventoryProvider extends ChangeNotifier {
-  List<InventoryItemModel> _items = [];
-  List<StockMovementModel> _movements = [];
-  bool _isLoading = false;
-  String? _error;
+class InventoryState {
+  final List<InventoryItemModel> items;
+  final List<StockMovementModel> movements;
 
-  List<InventoryItemModel> get items => _items;
-  List<StockMovementModel> get movements => _movements;
-  bool get isLoading => _isLoading;
-  String? get error => _error;
+  InventoryState({this.items = const [], this.movements = const []});
+}
 
-  InventoryProvider() {
-    loadInventory();
+class InventoryNotifier extends AsyncNotifier<InventoryState> {
+  @override
+  Future<InventoryState> build() async {
+    return _loadData();
   }
 
-  Future<void> loadInventory() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+  Future<InventoryState> _loadData() async {
+    final db = await DatabaseHelper.instance.database;
+    final itemsList = await db.query('inventory_items');
 
+    final items = itemsList.map((row) {
+      return InventoryItemModel(
+        id: int.parse(row['id'].toString()),
+        name: row['name'].toString(),
+        sku: row['sku']?.toString() ?? '',
+        itemType: 'raw_material', // default
+        unit: row['unit']?.toString() ?? 'pcs',
+        weightedAverageCost:
+            double.tryParse(row['weighted_average_cost'].toString()) ?? 0.0,
+        minimumStock: 10.0, // default dummy
+        currentStock: double.tryParse(row['current_stock'].toString()) ?? 0.0,
+      );
+    }).toList();
+
+    List<StockMovementModel> movements = [];
     try {
-      final itemsResponse = await ApiClient.get('/inventory');
       final movementsResponse = await ApiClient.get('/inventory/movements');
-
-      if (itemsResponse.statusCode == 200 && movementsResponse.statusCode == 200) {
-        final Map<String, dynamic> itemsData = jsonDecode(itemsResponse.body);
-        final List<dynamic> itemsList = itemsData['data'] ?? [];
-        _items = itemsList.map((e) => InventoryItemModel.fromJson(e as Map<String, dynamic>)).toList();
-
-        final Map<String, dynamic> movementsData = jsonDecode(movementsResponse.body);
+      if (movementsResponse.statusCode == 200) {
+        final Map<String, dynamic> movementsData = jsonDecode(
+          movementsResponse.body,
+        );
         final List<dynamic> movementsList = movementsData['data'] ?? [];
-        _movements = movementsList.map((e) => StockMovementModel.fromJson(e as Map<String, dynamic>)).toList();
-
-        _error = null;
-      } else {
-        _error = 'Failed to load stock data from server.';
+        movements = movementsList
+            .map((e) => StockMovementModel.fromJson(e as Map<String, dynamic>))
+            .toList();
       }
-    } catch (e) {
-      _error = 'Error: $e';
-    } finally {
-      _isLoading = false;
-      notifyListeners();
+    } catch (_) {
+      // Offline, no movements fetched
     }
+
+    return InventoryState(items: items, movements: movements);
+  }
+
+  Future<void> refresh() async {
+    state = const AsyncValue.loading();
+    state = await AsyncValue.guard(() => _loadData());
   }
 
   Future<bool> adjustStock({
     required int itemId,
-    required int warehouseId,
     required double qty,
     required String reason,
+    required String type, // 'adjustment' or 'spoilage'
   }) async {
-    try {
-      final response = await ApiClient.post('/inventory/adjustments', {
+    final db = await DatabaseHelper.instance.database;
+
+    // Save to offline incidents queue
+    final incidentId = DateTime.now().millisecondsSinceEpoch.toString();
+    await db.insert('offline_inventory_incidents', {
+      'id': incidentId,
+      'type': type,
+      'payload': jsonEncode({
         'inventory_item_id': itemId,
-        'warehouse_id': warehouseId,
+        'warehouse_id': 1, // Default warehouse
         'quantity': qty,
         'reason': reason,
-      });
+      }),
+      'created_at': DateTime.now().toIso8601String(),
+      'status': 'pending',
+    });
 
-      if (response.statusCode == 201) {
-        loadInventory();
-        return true;
-      }
-    } catch (_) {}
-    return false;
+    // Locally update current stock
+    final currentItem = state.value?.items.firstWhere((e) => e.id == itemId);
+    if (currentItem != null) {
+      // If adjustment, qty is delta. If spoilage, qty is absolute positive but reduces stock (delta is -qty)
+      final delta = type == 'spoilage' ? -qty.abs() : qty;
+      final newStock = currentItem.currentStock + delta;
+
+      await db.update(
+        'inventory_items',
+        {'current_stock': newStock},
+        where: 'id = ?',
+        whereArgs: [itemId.toString()],
+      );
+    }
+
+    // Refresh state
+    await refresh();
+
+    // Attempt sync immediately (fire and forget)
+    _syncOfflineIncidents();
+
+    return true;
   }
 
-  Future<bool> logWastage({
-    required int itemId,
-    required int warehouseId,
-    required int outletId,
-    required double qty,
-    required String reason,
-    String wasteType = 'spoilage',
-  }) async {
-    try {
-      final response = await ApiClient.post('/inventory/wastage', {
-        'inventory_item_id': itemId,
-        'warehouse_id': warehouseId,
-        'outlet_id': outletId,
-        'quantity': qty,
-        'waste_type': wasteType,
-        'reason': reason,
-      });
+  Future<void> _syncOfflineIncidents() async {
+    final db = await DatabaseHelper.instance.database;
+    final incidents = await db.query(
+      'offline_inventory_incidents',
+      where: 'status = ?',
+      whereArgs: ['pending'],
+    );
 
-      if (response.statusCode == 201) {
-        loadInventory();
-        return true;
+    for (var incident in incidents) {
+      final type = incident['type'].toString();
+      final payload = jsonDecode(incident['payload'].toString());
+
+      try {
+        final endpoint = type == 'spoilage'
+            ? '/inventory/wastage'
+            : '/inventory/adjustments';
+        final response = await ApiClient.post(endpoint, payload);
+
+        if (response.statusCode == 201) {
+          await db.delete(
+            'offline_inventory_incidents',
+            where: 'id = ?',
+            whereArgs: [incident['id']],
+          );
+        }
+      } catch (e) {
+        // Stop on first failure to keep order
+        break;
       }
-    } catch (_) {}
-    return false;
+    }
   }
+
+  Future<void> syncPendingIncidents() => _syncOfflineIncidents();
 }
+
+final inventoryProvider =
+    AsyncNotifierProvider<InventoryNotifier, InventoryState>(
+      () => InventoryNotifier(),
+    );

@@ -1,30 +1,42 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../../../core/theme/app_colors.dart';
-import '../providers/inventory_provider.dart';
-import '../models/inventory_models.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 
-class InventoryScreen extends StatefulWidget {
+import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_layout.dart';
+import '../../../core/utils/app_date_formatter.dart';
+import '../../../shared/components/app_badge.dart';
+import '../../../shared/components/app_bottom_sheet.dart';
+import '../../../shared/components/app_button.dart';
+import '../../../shared/components/app_card.dart';
+import '../../../shared/components/app_empty_state.dart';
+import '../../../shared/components/app_error_state.dart';
+import '../../../shared/components/app_loading_state.dart';
+import '../../../shared/components/app_metric_card.dart';
+import '../../../shared/components/app_search_bar.dart';
+import '../models/inventory_models.dart';
+import '../providers/inventory_provider.dart';
+
+class InventoryScreen extends ConsumerStatefulWidget {
   const InventoryScreen({super.key});
 
   @override
-  State<InventoryScreen> createState() => _InventoryScreenState();
+  ConsumerState<InventoryScreen> createState() => _InventoryScreenState();
 }
 
-class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProviderStateMixin {
-  late TabController _tabController;
-  final TextEditingController _searchController = TextEditingController();
-  String _searchQuery = '';
+class _InventoryScreenState extends ConsumerState<InventoryScreen>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabController;
+  final _searchController = TextEditingController();
+  String _query = '';
+  bool _lowStockOnly = false;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _searchController.addListener(() {
-      setState(() {
-        _searchQuery = _searchController.text.toLowerCase();
-      });
-    });
   }
 
   @override
@@ -36,270 +48,552 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => InventoryProvider(),
-      child: Consumer<InventoryProvider>(
-        builder: (context, provider, child) {
-          return Scaffold(
-            backgroundColor: AppColors.background,
-            appBar: AppBar(
-              title: const Text('Stock & Inventory', style: TextStyle(fontWeight: FontWeight.bold)),
-              bottom: TabBar(
-                controller: _tabController,
-                indicatorColor: AppColors.primary,
-                labelColor: AppColors.textPrimary,
-                unselectedLabelColor: AppColors.textSecondary,
-                tabs: const [
-                  Tab(text: 'Stock Balances'),
-                  Tab(text: 'Movement Logs'),
-                ],
+    final inventory = ref.watch(inventoryProvider);
+    final items = inventory.value?.items ?? const <InventoryItemModel>[];
+    final showTextActions = MediaQuery.sizeOf(context).width >= 760;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Inventori'),
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(text: 'Stok saat ini'),
+            Tab(text: 'Riwayat pergerakan'),
+          ],
+        ),
+        actions: [
+          IconButton(
+            tooltip: 'Muat ulang inventori',
+            onPressed: () => ref.read(inventoryProvider.notifier).refresh(),
+            icon: const Icon(Icons.refresh_rounded),
+          ),
+          if (showTextActions)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: OutlinedButton.icon(
+                onPressed: () => context.push('/recipes'),
+                icon: const Icon(Icons.menu_book_outlined, size: 19),
+                label: const Text('Resep'),
               ),
-              actions: [
-                IconButton(
-                  icon: const Icon(Icons.refresh),
-                  onPressed: () => provider.loadInventory(),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                  child: ElevatedButton.icon(
-                    onPressed: () => _showActionDialog(context, provider),
-                    icon: const Icon(Icons.add),
-                    label: const Text('Log Stock Incident'),
-                  ),
-                ),
-              ],
             ),
-            body: provider.isLoading && provider.items.isEmpty
-                ? const Center(child: CircularProgressIndicator())
-                : TabBarView(
-                    controller: _tabController,
-                    children: [
-                      _buildStockTab(context, provider),
-                      _buildMovementsTab(context, provider),
-                    ],
-                  ),
-          );
-        },
+          const SizedBox(width: 8),
+          if (showTextActions)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: FilledButton.icon(
+                onPressed: items.isEmpty
+                    ? null
+                    : () => _showIncidentSheet(items),
+                icon: const Icon(Icons.add_rounded, size: 19),
+                label: const Text('Catat stok'),
+              ),
+            )
+          else
+            IconButton.filled(
+              tooltip: 'Catat perubahan stok',
+              onPressed: items.isEmpty ? null : () => _showIncidentSheet(items),
+              icon: const Icon(Icons.add_rounded),
+            ),
+          const SizedBox(width: 8),
+        ],
+      ),
+      body: inventory.when(
+        loading: () =>
+            const AppLoadingState(message: 'Menghitung saldo stok...'),
+        error: (error, _) => AppErrorState(
+          message: 'Inventori lokal belum dapat dibaca.',
+          onRetry: () => ref.read(inventoryProvider.notifier).refresh(),
+        ),
+        data: (state) => TabBarView(
+          controller: _tabController,
+          children: [
+            _buildStockTab(state.items),
+            _buildMovementsTab(state.movements),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildStockTab(BuildContext context, InventoryProvider provider) {
-    final filteredItems = provider.items.where((item) {
-      return item.name.toLowerCase().contains(_searchQuery) || item.sku.toLowerCase().contains(_searchQuery);
+  Widget _buildStockTab(List<InventoryItemModel> items) {
+    final query = _query.trim().toLowerCase();
+    final visibleItems = items.where((item) {
+      final matchesQuery =
+          query.isEmpty ||
+          item.name.toLowerCase().contains(query) ||
+          item.sku.toLowerCase().contains(query);
+      return matchesQuery && (!_lowStockOnly || item.isLowStock);
     }).toList();
+    final lowStockCount = items.where((item) => item.isLowStock).length;
+    final inventoryValue = items.fold<double>(
+      0,
+      (sum, item) => sum + item.currentStock * item.weightedAverageCost,
+    );
+    final currency = _currency();
 
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: TextField(
-            controller: _searchController,
-            decoration: InputDecoration(
-              hintText: 'Search items by name or SKU...',
-              prefixIcon: const Icon(Icons.search, color: AppColors.textSecondary),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-              contentPadding: const EdgeInsets.symmetric(vertical: 0),
+    return SafeArea(
+      child: Padding(
+        padding: AppSpacing.page(context),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final itemWidth = constraints.maxWidth >= 800
+                    ? (constraints.maxWidth - 24) / 3
+                    : (constraints.maxWidth - 12) / 2;
+                return Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    SizedBox(
+                      width: itemWidth,
+                      height: 116,
+                      child: AppMetricCard(
+                        title: 'Item aktif',
+                        value: '${items.length}',
+                        icon: Icons.inventory_2_outlined,
+                      ),
+                    ),
+                    SizedBox(
+                      width: itemWidth,
+                      height: 116,
+                      child: AppMetricCard(
+                        title: 'Stok menipis',
+                        value: '$lowStockCount',
+                        icon: Icons.warning_amber_rounded,
+                        iconColor: lowStockCount > 0
+                            ? AppColors.warning
+                            : AppColors.success,
+                      ),
+                    ),
+                    if (constraints.maxWidth >= 800)
+                      SizedBox(
+                        width: itemWidth,
+                        height: 116,
+                        child: AppMetricCard(
+                          title: 'Nilai persediaan',
+                          value: currency.format(inventoryValue),
+                          icon: Icons.account_balance_wallet_outlined,
+                          iconColor: AppColors.info,
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: AppSearchBar(
+                    controller: _searchController,
+                    hintText: 'Cari nama item atau SKU',
+                    onChanged: (value) => setState(() => _query = value),
+                    onClear: () => setState(() => _query = ''),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilterChip(
+                  label: const Text('Stok menipis'),
+                  selected: _lowStockOnly,
+                  onSelected: (value) => setState(() => _lowStockOnly = value),
+                  avatar: const Icon(Icons.warning_amber_rounded, size: 18),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: visibleItems.isEmpty
+                  ? AppEmptyState(
+                      title: items.isEmpty
+                          ? 'Belum ada item inventori'
+                          : 'Item tidak ditemukan',
+                      message: items.isEmpty
+                          ? 'Sinkronkan data outlet untuk melihat saldo stok.'
+                          : 'Coba kata kunci atau filter lain.',
+                      icon: items.isEmpty
+                          ? Icons.inventory_2_outlined
+                          : Icons.search_off_rounded,
+                    )
+                  : _InventoryTable(items: visibleItems),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMovementsTab(List<StockMovementModel> movements) {
+    return SafeArea(
+      child: Padding(
+        padding: AppSpacing.page(context),
+        child: movements.isEmpty
+            ? const AppEmptyState(
+                title: 'Belum ada pergerakan stok',
+                message:
+                    'Penerimaan, penyesuaian, dan pemakaian akan muncul di sini.',
+                icon: Icons.swap_vert_rounded,
+              )
+            : AppCard(
+                padding: EdgeInsets.zero,
+                child: ListView.separated(
+                  itemCount: movements.length,
+                  separatorBuilder: (_, _) => const Divider(),
+                  itemBuilder: (context, index) =>
+                      _MovementRow(movement: movements[index]),
+                ),
+              ),
+      ),
+    );
+  }
+
+  Future<void> _showIncidentSheet(List<InventoryItemModel> items) async {
+    var selectedItem = items.first;
+    var selectedType = 'spoilage';
+    var submitting = false;
+    final quantityController = TextEditingController();
+    final reasonController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+
+    await AppBottomSheet.show<void>(
+      context,
+      title: 'Catat perubahan stok',
+      subtitle: 'Perubahan disimpan lokal dan masuk antrean sinkronisasi.',
+      child: StatefulBuilder(
+        builder: (sheetContext, setSheetState) => SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+          child: Form(
+            key: formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<InventoryItemModel>(
+                  initialValue: selectedItem,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Item inventori',
+                    prefixIcon: Icon(Icons.inventory_2_outlined),
+                  ),
+                  items: items
+                      .map(
+                        (item) => DropdownMenuItem(
+                          value: item,
+                          child: Text(
+                            item.name,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (item) {
+                    if (item != null) setSheetState(() => selectedItem = item);
+                  },
+                ),
+                const SizedBox(height: 14),
+                SegmentedButton<String>(
+                  expandedInsets: EdgeInsets.zero,
+                  segments: const [
+                    ButtonSegment(
+                      value: 'spoilage',
+                      icon: Icon(Icons.delete_outline_rounded),
+                      label: Text('Terbuang'),
+                    ),
+                    ButtonSegment(
+                      value: 'adjustment',
+                      icon: Icon(Icons.add_rounded),
+                      label: Text('Tambah stok'),
+                    ),
+                  ],
+                  selected: {selectedType},
+                  showSelectedIcon: false,
+                  onSelectionChanged: (selection) {
+                    setSheetState(() => selectedType = selection.first);
+                  },
+                ),
+                const SizedBox(height: 14),
+                TextFormField(
+                  controller: quantityController,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                  ],
+                  decoration: InputDecoration(
+                    labelText: 'Jumlah',
+                    suffixText: selectedItem.unit,
+                    prefixIcon: const Icon(Icons.numbers_rounded),
+                  ),
+                  validator: (value) {
+                    final quantity = double.tryParse(
+                      (value ?? '').replaceAll(',', '.'),
+                    );
+                    return quantity == null || quantity <= 0
+                        ? 'Masukkan jumlah lebih dari 0'
+                        : null;
+                  },
+                ),
+                const SizedBox(height: 14),
+                TextFormField(
+                  controller: reasonController,
+                  maxLines: 2,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: const InputDecoration(
+                    labelText: 'Alasan',
+                    hintText: 'Contoh: rusak saat penerimaan',
+                    prefixIcon: Icon(Icons.notes_rounded),
+                  ),
+                  validator: (value) => (value ?? '').trim().isEmpty
+                      ? 'Alasan wajib diisi'
+                      : null,
+                ),
+                const SizedBox(height: 18),
+                AppButton(
+                  text: 'Simpan perubahan',
+                  icon: Icons.check_rounded,
+                  isLoading: submitting,
+                  onPressed: () async {
+                    if (!(formKey.currentState?.validate() ?? false)) return;
+                    setSheetState(() => submitting = true);
+                    final quantity = double.parse(
+                      quantityController.text.replaceAll(',', '.'),
+                    );
+                    final success = await ref
+                        .read(inventoryProvider.notifier)
+                        .adjustStock(
+                          itemId: selectedItem.id,
+                          qty: quantity,
+                          reason: reasonController.text.trim(),
+                          type: selectedType,
+                        );
+                    if (!mounted || !sheetContext.mounted) return;
+                    if (success) {
+                      Navigator.pop(sheetContext);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Perubahan stok berhasil disimpan.'),
+                        ),
+                      );
+                    } else {
+                      setSheetState(() => submitting = false);
+                    }
+                  },
+                ),
+              ],
             ),
           ),
         ),
-        Expanded(
-          child: filteredItems.isEmpty
-              ? const Center(child: Text('No stock items match your search.'))
-              : ListView.separated(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                  itemCount: filteredItems.length,
-                  separatorBuilder: (context, index) => const Divider(height: 1),
-                  itemBuilder: (context, index) {
-                    final item = filteredItems[index];
-                    return ListTile(
-                      contentPadding: const EdgeInsets.symmetric(vertical: 8.0),
-                      leading: Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: item.isLowStock ? Colors.red[50] : Colors.grey[100],
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Icon(
-                          item.isLowStock ? Icons.warning_amber_rounded : Icons.inventory_2_outlined,
-                          color: item.isLowStock ? Colors.red : Colors.grey[600],
-                        ),
-                      ),
-                      title: Text(item.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Text('SKU: ${item.sku} | Cost: Rp ${item.weightedAverageCost.toStringAsFixed(0)}'),
-                      trailing: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text(
-                            '${item.currentStock.toStringAsFixed(0)} ${item.unit}',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: item.isLowStock ? Colors.red : AppColors.textPrimary,
-                            ),
-                          ),
-                          if (item.isLowStock)
-                            const Text(
-                              'Low Stock Alert',
-                              style: TextStyle(color: Colors.red, fontSize: 10, fontWeight: FontWeight.bold),
-                            ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-        ),
-      ],
+      ),
+    );
+    quantityController.dispose();
+    reasonController.dispose();
+  }
+}
+
+class _InventoryTable extends StatelessWidget {
+  const _InventoryTable({required this.items});
+
+  final List<InventoryItemModel> items;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final wide = MediaQuery.sizeOf(context).width >= 720;
+    return AppCard(
+      padding: EdgeInsets.zero,
+      child: Column(
+        children: [
+          if (wide)
+            Container(
+              height: 44,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              color: theme.colorScheme.surfaceContainerHighest,
+              child: const Row(
+                children: [
+                  Expanded(flex: 4, child: Text('ITEM')),
+                  Expanded(flex: 2, child: Text('SKU')),
+                  Expanded(flex: 2, child: Text('BIAYA')),
+                  Expanded(
+                    flex: 2,
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: Text('SALDO'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          Expanded(
+            child: ListView.separated(
+              itemCount: items.length,
+              separatorBuilder: (_, _) => const Divider(),
+              itemBuilder: (context, index) =>
+                  _InventoryRow(item: items[index], wide: wide),
+            ),
+          ),
+        ],
+      ),
     );
   }
+}
 
-  Widget _buildMovementsTab(BuildContext context, InventoryProvider provider) {
-    final movements = provider.movements;
+class _InventoryRow extends StatelessWidget {
+  const _InventoryRow({required this.item, required this.wide});
 
-    if (movements.isEmpty) {
-      return const Center(child: Text('No stock movements recorded yet.'));
-    }
+  final InventoryItemModel item;
+  final bool wide;
 
-    return ListView.separated(
-      padding: const EdgeInsets.all(16.0),
-      itemCount: movements.length,
-      separatorBuilder: (context, index) => const Divider(),
-      itemBuilder: (context, index) {
-        final movement = movements[index];
-        final isNegative = movement.quantity < 0;
-        final color = isNegative ? Colors.red : Colors.green;
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final stockColor = item.isLowStock
+        ? AppColors.error
+        : theme.colorScheme.onSurface;
+    final cost = _currency().format(item.weightedAverageCost);
+    final stock = '${item.currentStock.toStringAsFixed(1)} ${item.unit}';
 
-        return ListTile(
-          leading: Icon(
-            isNegative ? Icons.arrow_downward : Icons.arrow_upward,
-            color: color,
-          ),
-          title: Text(movement.itemName, style: const TextStyle(fontWeight: FontWeight.bold)),
-          subtitle: Text('${movement.type.toUpperCase()} | Reason: ${movement.reason ?? 'N/A'}'),
-          trailing: Text(
-            '${isNegative ? "" : "+"}${movement.quantity.toStringAsFixed(0)}',
-            style: TextStyle(fontWeight: FontWeight.bold, color: color, fontSize: 16),
-          ),
-        );
-      },
-    );
-  }
-
-  void _showActionDialog(BuildContext context, InventoryProvider provider) {
-    if (provider.items.isEmpty) return;
-
-    InventoryItemModel selectedItem = provider.items.first;
-    String selectedAction = 'spoilage'; // 'spoilage' or 'adjustment'
-    final qtyController = TextEditingController();
-    final reasonController = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
-              title: const Text('Log Stock Incident', style: TextStyle(fontWeight: FontWeight.bold)),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
+    if (wide) {
+      return SizedBox(
+        height: 68,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              Expanded(
+                flex: 4,
+                child: Row(
                   children: [
-                    // Item Selection
-                    DropdownButtonFormField<InventoryItemModel>(
-                      initialValue: selectedItem,
-                      decoration: const InputDecoration(labelText: 'Inventory Item'),
-                      items: provider.items.map((item) {
-                        return DropdownMenuItem(
-                          value: item,
-                          child: Text(item.name),
-                        );
-                      }).toList(),
-                      onChanged: (val) {
-                        if (val != null) {
-                          setState(() => selectedItem = val);
-                        }
-                      },
+                    Icon(
+                      item.isLowStock
+                          ? Icons.warning_amber_rounded
+                          : Icons.inventory_2_outlined,
+                      size: 20,
+                      color: item.isLowStock
+                          ? AppColors.warning
+                          : theme.colorScheme.onSurfaceVariant,
                     ),
-                    const SizedBox(height: 16),
-
-                    // Action Selection
-                    DropdownButtonFormField<String>(
-                      initialValue: selectedAction,
-                      decoration: const InputDecoration(labelText: 'Incident Type'),
-                      items: const [
-                        DropdownMenuItem(value: 'spoilage', child: Text('Waste / Spoilage (Negative)')),
-                        DropdownMenuItem(value: 'adjustment', child: Text('Manual Adjustment (Delta)')),
-                      ],
-                      onChanged: (val) {
-                        if (val != null) {
-                          setState(() => selectedAction = val);
-                        }
-                      },
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Quantity Input
-                    TextField(
-                      controller: qtyController,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: InputDecoration(
-                        labelText: 'Quantity',
-                        suffixText: selectedItem.unit,
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        item.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium,
                       ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Reason
-                    TextField(
-                      controller: reasonController,
-                      decoration: const InputDecoration(labelText: 'Reason / Description'),
                     ),
                   ],
                 ),
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Cancel'),
+              Expanded(flex: 2, child: Text(item.sku.isEmpty ? '-' : item.sku)),
+              Expanded(flex: 2, child: Text(cost)),
+              Expanded(
+                flex: 2,
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    stock,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: stockColor,
+                    ),
+                  ),
                 ),
-                ElevatedButton(
-                  onPressed: () async {
-                    final qty = double.tryParse(qtyController.text) ?? 0.0;
-                    if (qty <= 0) return;
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
-                    bool success = false;
-                    if (selectedAction == 'spoilage') {
-                      success = await provider.logWastage(
-                        itemId: selectedItem.id,
-                        warehouseId: 1, // Default warehouse ID
-                        outletId: 1, // Default outlet ID
-                        qty: qty,
-                        reason: reasonController.text,
-                      );
-                    } else {
-                      success = await provider.adjustStock(
-                        itemId: selectedItem.id,
-                        warehouseId: 1, // Default warehouse ID
-                        qty: qty,
-                        reason: reasonController.text,
-                      );
-                    }
-
-                    if (success && context.mounted) {
-                      Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Stock incident successfully recorded.')),
-                      );
-                    }
-                  },
-                  child: const Text('Submit'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+    return ListTile(
+      minTileHeight: 76,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+      leading: Icon(
+        item.isLowStock
+            ? Icons.warning_amber_rounded
+            : Icons.inventory_2_outlined,
+        color: item.isLowStock
+            ? AppColors.warning
+            : theme.colorScheme.onSurfaceVariant,
+      ),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(
+              item.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.titleMedium,
+            ),
+          ),
+          if (item.isLowStock)
+            const AppBadge(
+              text: 'Menipis',
+              color: Color(0xFFFEF3C7),
+              textColor: AppColors.warning,
+            ),
+        ],
+      ),
+      subtitle: Text(
+        '${item.sku.isEmpty ? 'Tanpa SKU' : item.sku} - $cost/${item.unit}',
+      ),
+      trailing: Text(
+        stock,
+        style: theme.textTheme.titleMedium?.copyWith(color: stockColor),
+      ),
     );
   }
 }
+
+class _MovementRow extends StatelessWidget {
+  const _MovementRow({required this.movement});
+
+  final StockMovementModel movement;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final positive = movement.quantity >= 0;
+    final color = positive ? AppColors.success : AppColors.error;
+    final date = DateTime.tryParse(movement.date);
+    final dateLabel = date == null
+        ? movement.date
+        : AppDateFormatter.shortDateTime(date.toLocal());
+
+    return ListTile(
+      minTileHeight: 76,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      leading: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(
+          positive ? Icons.south_west_rounded : Icons.north_east_rounded,
+          color: color,
+          size: 20,
+        ),
+      ),
+      title: Text(movement.itemName, style: theme.textTheme.titleMedium),
+      subtitle: Text('${_movementLabel(movement.type)} - $dateLabel'),
+      trailing: Text(
+        '${positive ? '+' : ''}${movement.quantity.toStringAsFixed(1)}',
+        style: theme.textTheme.titleMedium?.copyWith(color: color),
+      ),
+    );
+  }
+}
+
+String _movementLabel(String type) => switch (type) {
+  'purchase' => 'Penerimaan',
+  'sale' => 'Pemakaian',
+  'spoilage' || 'wastage' => 'Terbuang',
+  'transfer' => 'Transfer',
+  _ => 'Penyesuaian',
+};
+
+NumberFormat _currency() =>
+    NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);

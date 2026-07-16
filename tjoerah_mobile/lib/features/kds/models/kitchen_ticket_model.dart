@@ -80,12 +80,25 @@ class KitchenTicketModel {
       status: json['status'] as String,
       priority: json['priority'] as String? ?? 'normal',
       createdAt: DateTime.parse(json['created_at'] as String),
-      acceptedAt: json['accepted_at'] != null ? DateTime.parse(json['accepted_at'] as String) : null,
-      preparingAt: json['preparing_at'] != null ? DateTime.parse(json['preparing_at'] as String) : null,
-      readyAt: json['ready_at'] != null ? DateTime.parse(json['ready_at'] as String) : null,
-      completedAt: json['completed_at'] != null ? DateTime.parse(json['completed_at'] as String) : null,
-      items: (json['items'] as List<dynamic>?)
-              ?.map((item) => KitchenTicketItemModel.fromJson(item as Map<String, dynamic>))
+      acceptedAt: json['accepted_at'] != null
+          ? DateTime.parse(json['accepted_at'] as String)
+          : null,
+      preparingAt: json['preparing_at'] != null
+          ? DateTime.parse(json['preparing_at'] as String)
+          : null,
+      readyAt: json['ready_at'] != null
+          ? DateTime.parse(json['ready_at'] as String)
+          : null,
+      completedAt: json['completed_at'] != null
+          ? DateTime.parse(json['completed_at'] as String)
+          : null,
+      items:
+          (json['items'] as List<dynamic>?)
+              ?.map(
+                (item) => KitchenTicketItemModel.fromJson(
+                  item as Map<String, dynamic>,
+                ),
+              )
               .toList() ??
           [],
     );

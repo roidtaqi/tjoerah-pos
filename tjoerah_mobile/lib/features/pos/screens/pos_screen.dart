@@ -1,240 +1,312 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../../core/theme/app_layout.dart';
+import '../../../shared/components/app_badge.dart';
+import '../../../shared/components/app_bottom_sheet.dart';
 import '../../../shared/components/app_search_bar.dart';
 import '../providers/cart_provider.dart';
 import '../providers/catalog_provider.dart';
-import '../repositories/order_repository.dart';
 import '../widgets/category_chips.dart';
-import '../widgets/product_grid.dart';
 import '../widgets/floating_cart.dart';
-import '../../../core/theme/app_colors.dart';
+import '../widgets/order_cart.dart';
+import '../widgets/product_grid.dart';
 
-class PosScreen extends StatelessWidget {
+class PosScreen extends ConsumerWidget {
   const PosScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final isTablet = MediaQuery.of(context).size.width >= 600;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isWide = AppBreakpoints.isWide(context);
+    final cart = ref.watch(cartProvider);
 
-    return MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) => CartProvider()),
-        ChangeNotifierProvider(create: (_) => CatalogProvider()),
-      ],
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Tjoerah POS', style: TextStyle(fontWeight: FontWeight.bold)),
-          actions: [
-            Builder(
-              builder: (context) => IconButton(
-                icon: const Icon(Icons.sync),
-                tooltip: 'Sync Catalog',
-                onPressed: () async {
-                  final catalog = context.read<CatalogProvider>();
-                  await catalog.syncFromServer();
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Catalog synced!')),
-                    );
-                  }
-                },
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Tjoerah POS'),
+        actions: [
+          if (MediaQuery.sizeOf(context).width >= 760)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 18),
+              child: AppBadge(
+                text: 'Siap offline',
+                icon: Icons.cloud_done_outlined,
               ),
             ),
-            IconButton(
-              icon: const Icon(Icons.qr_code_scanner),
-              onPressed: () {},
-            ),
-            IconButton(
-              icon: const Icon(Icons.more_vert),
-              onPressed: () {},
-            ),
-          ],
+          const SizedBox(width: 4),
+          IconButton(
+            tooltip: 'Sinkronkan katalog',
+            onPressed: () => _syncCatalog(context, ref),
+            icon: const Icon(Icons.sync_rounded),
+          ),
+          PopupMenuButton<String>(
+            tooltip: 'Menu pesanan',
+            onSelected: (value) {
+              if (value == 'clear') ref.read(cartProvider.notifier).clearCart();
+              if (value == 'tables') context.push('/tables');
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'tables',
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.table_restaurant_outlined),
+                  title: Text('Pilih meja'),
+                ),
+              ),
+              if (cart.items.isNotEmpty)
+                const PopupMenuItem(
+                  value: 'clear',
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.delete_outline_rounded),
+                    title: Text('Kosongkan pesanan'),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(width: 4),
+        ],
+      ),
+      body: isWide ? _TabletPos(cart: cart) : const _PhonePos(),
+    );
+  }
+
+  Future<void> _syncCatalog(BuildContext context, WidgetRef ref) async {
+    await ref.read(catalogProvider.notifier).syncFromServer();
+    if (!context.mounted) return;
+    final result = ref.read(catalogProvider);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          result.hasError
+              ? 'Sinkronisasi gagal. Katalog lokal tetap dapat digunakan.'
+              : 'Katalog berhasil diperbarui.',
         ),
-        body: isTablet ? _buildTabletLayout() : _buildPhoneLayout(),
       ),
     );
   }
+}
 
-  Widget _buildPhoneLayout() {
-    return Stack(
+class _PhonePos extends StatelessWidget {
+  const _PhonePos();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Stack(
       children: [
-        Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: AppSearchBar(
-                hintText: 'Search products by name or SKU...',
-                onChanged: (val) {},
-              ),
-            ),
-            const CategoryChips(),
-            const Expanded(
-              child: ProductGrid(),
-            ),
-            const SizedBox(height: 80),
-          ],
-        ),
-        const Positioned(
-          bottom: 0,
-          left: 0,
-          right: 0,
-          child: FloatingCartPanel(),
-        ),
+        _CatalogPane(),
+        Positioned(left: 0, right: 0, bottom: 0, child: FloatingCartPanel()),
       ],
     );
   }
+}
 
-  Widget _buildTabletLayout() {
+class _TabletPos extends StatelessWidget {
+  const _TabletPos({required this.cart});
+
+  final CartState cart;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Row(
       children: [
-        Expanded(
-          flex: 2,
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: AppSearchBar(
-                  hintText: 'Search products...',
-                  onChanged: (val) {},
-                ),
-              ),
-              const CategoryChips(),
-              const Expanded(
-                child: ProductGrid(),
-              ),
-            ],
-          ),
-        ),
-        const VerticalDivider(width: 1, color: AppColors.border),
-        Expanded(
-          flex: 1,
-          child: Builder(
-            builder: (context) {
-              final cart = context.watch<CartProvider>();
-              return _buildTabletCartSidebar(context, cart);
-            },
+        const Expanded(child: _CatalogPane()),
+        VerticalDivider(width: 1, color: theme.colorScheme.outline),
+        SizedBox(
+          width: MediaQuery.sizeOf(context).width >= 1280 ? 400 : 360,
+          child: const ColoredBox(
+            color: Colors.transparent,
+            child: OrderCart(),
           ),
         ),
       ],
     );
   }
+}
 
-  Future<void> _handleCheckout(BuildContext context, CartProvider cart) async {
-    final repo = OrderRepository();
-    try {
-      final orderId = await repo.createOrder(
-        items: cart.items,
-        subtotal: cart.subtotal,
-        tax: cart.tax,
-        total: cart.total,
-      );
-      cart.clearCart();
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Order #${orderId.substring(0, 8)} created!')),
+class _CatalogPane extends ConsumerWidget {
+  const _CatalogPane();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Padding(
+      padding: AppSpacing.page(context),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const _OrderContextBar(),
+          const SizedBox(height: 16),
+          AppSearchBar(
+            hintText: 'Cari nama produk atau SKU',
+            onChanged: ref.read(catalogProvider.notifier).search,
+            onClear: () => ref.read(catalogProvider.notifier).search(''),
+          ),
+          const SizedBox(height: 12),
+          const CategoryChips(),
+          const Expanded(child: ProductGrid()),
+        ],
+      ),
+    );
+  }
+}
+
+class _OrderContextBar extends ConsumerWidget {
+  const _OrderContextBar();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cart = ref.watch(cartProvider);
+    final theme = Theme.of(context);
+
+    final heading = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Pesanan baru', style: theme.textTheme.titleLarge),
+        const SizedBox(height: 2),
+        Text(
+          cart.customerName ?? 'Pelanggan umum',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.bodySmall,
+        ),
+      ],
+    );
+    final typeButton = OutlinedButton.icon(
+      onPressed: () => _showOrderType(context, ref),
+      icon: Icon(_iconForType(cart.orderType), size: 19),
+      label: Text(cart.orderTypeLabel, overflow: TextOverflow.ellipsis),
+    );
+    final tableButton = OutlinedButton.icon(
+      onPressed: () => context.push('/tables'),
+      icon: const Icon(Icons.table_restaurant_outlined, size: 19),
+      label: Text(
+        cart.tableName ?? 'Pilih meja',
+        overflow: TextOverflow.ellipsis,
+      ),
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 540) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              heading,
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(child: typeButton),
+                  if (cart.orderType == 'dine_in') ...[
+                    const SizedBox(width: 8),
+                    Expanded(child: tableButton),
+                  ],
+                ],
+              ),
+            ],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: heading),
+            const SizedBox(width: 8),
+            typeButton,
+            if (cart.orderType == 'dine_in') ...[
+              const SizedBox(width: 8),
+              tableButton,
+            ],
+          ],
         );
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
-      }
-    }
+      },
+    );
   }
 
-  Widget _buildTabletCartSidebar(BuildContext context, CartProvider cart) {
-    if (cart.itemCount == 0) {
-      return const Center(
-        child: Text('Cart is empty', style: TextStyle(color: AppColors.textSecondary)),
-      );
-    }
-    return Column(
-      children: [
-        const Padding(
-          padding: EdgeInsets.all(16.0),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: Text('Current Order', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-          ),
-        ),
-        const Divider(height: 1),
-        Expanded(
-          child: ListView.separated(
-            itemCount: cart.items.length,
-            separatorBuilder: (context, index) => const Divider(height: 1),
-            itemBuilder: (context, index) {
-              final item = cart.items[index];
-              return ListTile(
-                title: Text(item.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text('Rp ${item.price.toStringAsFixed(0)}'),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.remove_circle_outline),
-                      onPressed: () => cart.updateQuantity(item.productId, item.quantity - 1),
-                    ),
-                    Text('${item.quantity}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                    IconButton(
-                      icon: const Icon(Icons.add_circle_outline),
-                      onPressed: () => cart.updateQuantity(item.productId, item.quantity + 1),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-        ),
-        const Divider(height: 1),
-        Padding(
-          padding: const EdgeInsets.all(16.0),
+  IconData _iconForType(String type) => switch (type) {
+    'dine_in' => Icons.restaurant_outlined,
+    'delivery' => Icons.delivery_dining_outlined,
+    _ => Icons.takeout_dining_outlined,
+  };
+
+  Future<void> _showOrderType(BuildContext context, WidgetRef ref) {
+    final selected = ref.read(cartProvider).orderType;
+    return AppBottomSheet.show<void>(
+      context,
+      title: 'Tipe pesanan',
+      subtitle: 'Pilih sesuai cara pesanan disajikan.',
+      child: Builder(
+        builder: (sheetContext) => Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Subtotal', style: TextStyle(color: AppColors.textSecondary)),
-                  Text('Rp ${cart.subtotal.toStringAsFixed(0)}'),
-                ],
+              _OrderTypeTile(
+                title: 'Makan di tempat',
+                subtitle: 'Gunakan meja dan kirim ke dapur.',
+                icon: Icons.restaurant_outlined,
+                selected: selected == 'dine_in',
+                onTap: () {
+                  ref.read(cartProvider.notifier).setOrderType('dine_in');
+                  Navigator.pop(sheetContext);
+                  context.push('/tables');
+                },
               ),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Tax (11%)', style: TextStyle(color: AppColors.textSecondary)),
-                  Text('Rp ${cart.tax.toStringAsFixed(0)}'),
-                ],
+              _OrderTypeTile(
+                title: 'Bawa pulang',
+                subtitle: 'Pesanan dikemas untuk dibawa.',
+                icon: Icons.takeout_dining_outlined,
+                selected: selected == 'take_away',
+                onTap: () {
+                  ref.read(cartProvider.notifier).setOrderType('take_away');
+                  Navigator.pop(sheetContext);
+                },
               ),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Total', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  Text('Rp ${cart.total.toStringAsFixed(0)}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                ],
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => _handleCheckout(context, cart),
-                  child: const Text('Charge'),
-                ),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: TextButton(
-                  onPressed: () => cart.clearCart(),
-                  style: TextButton.styleFrom(foregroundColor: AppColors.error),
-                  child: const Text('Void Order'),
-                ),
+              _OrderTypeTile(
+                title: 'Pesan antar',
+                subtitle: 'Pesanan untuk kurir atau pengantaran.',
+                icon: Icons.delivery_dining_outlined,
+                selected: selected == 'delivery',
+                onTap: () {
+                  ref.read(cartProvider.notifier).setOrderType('delivery');
+                  Navigator.pop(sheetContext);
+                },
               ),
             ],
           ),
         ),
-      ],
+      ),
+    );
+  }
+}
+
+class _OrderTypeTile extends StatelessWidget {
+  const _OrderTypeTile({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ListTile(
+      minTileHeight: 72,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      leading: Icon(icon, color: selected ? theme.colorScheme.secondary : null),
+      title: Text(title, style: theme.textTheme.titleMedium),
+      subtitle: Text(subtitle),
+      trailing: selected
+          ? Icon(Icons.check_circle_rounded, color: theme.colorScheme.secondary)
+          : const Icon(Icons.chevron_right_rounded),
+      onTap: onTap,
     );
   }
 }

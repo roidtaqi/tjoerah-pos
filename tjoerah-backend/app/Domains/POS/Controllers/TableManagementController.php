@@ -2,11 +2,12 @@
 
 namespace App\Domains\POS\Controllers;
 
-use App\Http\Controllers\Controller;
 use App\Domains\POS\Models\DiningTable;
 use App\Domains\POS\Models\Floor;
 use App\Domains\POS\Models\TableSession;
+use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class TableManagementController extends Controller
 {
@@ -28,6 +29,29 @@ class TableManagementController extends Controller
         return response()->json($floor, 201);
     }
 
+    public function updateFloor(Request $request, Floor $floor)
+    {
+        $floor->update($request->validate([
+            'name' => 'sometimes|required|string|max:255',
+            'sort_order' => 'sometimes|integer',
+        ]));
+
+        return response()->json($floor);
+    }
+
+    public function destroyFloor(Floor $floor)
+    {
+        if (DiningTable::where('floor_id', $floor->id)->exists()) {
+            return response()->json([
+                'message' => 'Area masih memiliki meja.',
+            ], 422);
+        }
+
+        $floor->delete();
+
+        return response()->noContent();
+    }
+
     public function tables(Request $request)
     {
         return DiningTable::when($request->integer('outlet_id'), fn ($query, $outletId) => $query->where('outlet_id', $outletId))
@@ -42,7 +66,7 @@ class TableManagementController extends Controller
             'floor_id' => 'nullable|integer|exists:floors,id',
             'name' => 'required|string|max:255',
             'capacity' => 'nullable|integer|min:1',
-            'status' => 'nullable|string|max:50',
+            'status' => ['nullable', Rule::in(['available', 'occupied', 'reserved', 'cleaning'])],
             'position_x' => 'nullable|integer',
             'position_y' => 'nullable|integer',
         ]));
@@ -56,12 +80,29 @@ class TableManagementController extends Controller
             'floor_id' => 'nullable|integer|exists:floors,id',
             'name' => 'sometimes|string|max:255',
             'capacity' => 'nullable|integer|min:1',
-            'status' => 'nullable|string|max:50',
+            'status' => ['nullable', Rule::in(['available', 'occupied', 'reserved', 'cleaning'])],
             'position_x' => 'nullable|integer',
             'position_y' => 'nullable|integer',
         ]));
 
         return response()->json($table);
+    }
+
+    public function destroyTable(DiningTable $table)
+    {
+        $hasOpenSession = TableSession::where('table_id', $table->id)
+            ->where('status', 'open')
+            ->exists();
+
+        if ($table->status === 'occupied' || $hasOpenSession) {
+            return response()->json([
+                'message' => 'Meja yang sedang digunakan tidak dapat dihapus.',
+            ], 422);
+        }
+
+        $table->delete();
+
+        return response()->noContent();
     }
 
     public function openSession(Request $request)

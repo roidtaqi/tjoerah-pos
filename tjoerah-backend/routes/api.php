@@ -1,31 +1,30 @@
 <?php
 
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Route;
 use App\Domains\Core\Controllers\AuthController;
+use App\Domains\Core\Controllers\OrganizationController;
 use App\Domains\Core\Controllers\OutletController;
-use App\Domains\POS\Controllers\ProductCatalogController;
-use App\Domains\Sales\Controllers\OrderController;
+use App\Domains\Core\Controllers\RbacController;
 use App\Domains\CRM\Controllers\CustomerController;
 use App\Domains\Employee\Controllers\EmployeeController;
 use App\Domains\Inventory\Controllers\InventoryController;
-use App\Domains\KDS\Controllers\KdsController;
-use App\Domains\Core\Controllers\OrganizationController;
-use App\Domains\POS\Controllers\PaymentController;
 use App\Domains\Inventory\Controllers\PurchaseController;
-use App\Domains\Core\Controllers\RbacController;
-use App\Domains\POS\Controllers\ReceiptController;
-use App\Domains\Recipe\Controllers\RecipeController;
-use App\Domains\Reporting\Controllers\ReportingController;
 use App\Domains\Inventory\Controllers\WastageController;
+use App\Domains\KDS\Controllers\KdsController;
+use App\Domains\POS\Controllers\PaymentController;
+use App\Domains\POS\Controllers\ProductCatalogController;
+use App\Domains\POS\Controllers\ReceiptController;
 use App\Domains\POS\Controllers\SyncController;
 use App\Domains\POS\Controllers\TableManagementController;
+use App\Domains\Recipe\Controllers\RecipeController;
+use App\Domains\Reporting\Controllers\ReportingController;
+use App\Domains\Sales\Controllers\OrderController;
+use Illuminate\Support\Facades\Route;
 
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/auth/login', [AuthController::class, 'login']);
 Route::post('/auth/pin/login', [AuthController::class, 'pinLogin']);
 
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware('auth:api')->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::post('/auth/logout', [AuthController::class, 'logout']);
@@ -43,7 +42,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/permissions', [RbacController::class, 'permissions']);
     Route::post('/roles/{role}/permissions', [RbacController::class, 'attachPermissions']);
     Route::post('/users/{user}/roles', [RbacController::class, 'assignRole']);
-    
+
     // Catalog API
     Route::get('/catalog/sync', [ProductCatalogController::class, 'sync']);
     Route::get('/categories', [ProductCatalogController::class, 'categories']);
@@ -65,9 +64,12 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/floors', [TableManagementController::class, 'floors']);
     Route::post('/floors', [TableManagementController::class, 'storeFloor']);
+    Route::patch('/floors/{floor}', [TableManagementController::class, 'updateFloor']);
+    Route::delete('/floors/{floor}', [TableManagementController::class, 'destroyFloor']);
     Route::get('/tables', [TableManagementController::class, 'tables']);
     Route::post('/tables', [TableManagementController::class, 'storeTable']);
     Route::patch('/tables/{table}', [TableManagementController::class, 'updateTable']);
+    Route::delete('/tables/{table}', [TableManagementController::class, 'destroyTable']);
     Route::post('/table-sessions', [TableManagementController::class, 'openSession']);
     Route::post('/table-sessions/{session}/close', [TableManagementController::class, 'closeSession']);
 

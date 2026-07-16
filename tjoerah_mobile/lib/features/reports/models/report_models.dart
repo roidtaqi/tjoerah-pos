@@ -16,7 +16,7 @@ class SalesReportModel {
   factory SalesReportModel.fromJson(Map<String, dynamic> json) {
     return SalesReportModel(
       date: json['date'] as String,
-      orders: json['orders'] as int,
+      orders: int.tryParse(json['orders'].toString()) ?? 0,
       totalSales: double.parse(json['total_sales'].toString()),
       cogs: double.parse(json['cogs'].toString()),
       grossProfit: double.parse(json['gross_profit'].toString()),
@@ -50,7 +50,7 @@ class ProductMarginModel {
     return ProductMarginModel(
       productId: json['product_id'].toString(),
       name: json['snapshot_name'] as String,
-      qty: json['qty'] as int,
+      qty: int.tryParse(json['qty'].toString()) ?? 0,
       revenue: revenue,
       cogs: cogs,
       marginPercent: margin,
@@ -80,6 +80,33 @@ class SystemAlertModel {
       message: json['message'] as String? ?? '',
       severity: json['severity'] as String? ?? 'info',
       createdAt: DateTime.parse(json['created_at'] as String),
+    );
+  }
+}
+
+class ShiftReportModel {
+  final DateTime date;
+  final int totalOrders;
+  final double totalRevenue;
+  final Map<String, double> paymentBreakdown;
+
+  ShiftReportModel({
+    required this.date,
+    required this.totalOrders,
+    required this.totalRevenue,
+    required this.paymentBreakdown,
+  });
+
+  factory ShiftReportModel.fromLocalDb(
+    DateTime date,
+    Map<String, dynamic> dbResult,
+  ) {
+    return ShiftReportModel(
+      date: date,
+      totalOrders: dbResult['total_orders'] as int? ?? 0,
+      totalRevenue: dbResult['total_revenue'] as double? ?? 0.0,
+      paymentBreakdown:
+          dbResult['payment_breakdown'] as Map<String, double>? ?? {},
     );
   }
 }

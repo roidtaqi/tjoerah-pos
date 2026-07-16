@@ -1,43 +1,69 @@
 import 'package:flutter/material.dart';
-import '../../core/theme/app_colors.dart';
 
-class AppSearchBar extends StatelessWidget {
+class AppSearchBar extends StatefulWidget {
+  const AppSearchBar({
+    super.key,
+    this.hintText = 'Cari...',
+    this.onChanged,
+    this.onClear,
+    this.controller,
+    this.autofocus = false,
+  });
+
   final String hintText;
   final ValueChanged<String>? onChanged;
   final VoidCallback? onClear;
   final TextEditingController? controller;
+  final bool autofocus;
 
-  const AppSearchBar({
-    super.key,
-    this.hintText = 'Search...',
-    this.onChanged,
-    this.onClear,
-    this.controller,
-  });
+  @override
+  State<AppSearchBar> createState() => _AppSearchBarState();
+}
+
+class _AppSearchBarState extends State<AppSearchBar> {
+  late final TextEditingController _controller;
+  late final bool _ownsController;
+
+  @override
+  void initState() {
+    super.initState();
+    _ownsController = widget.controller == null;
+    _controller = widget.controller ?? TextEditingController();
+    _controller.addListener(_refresh);
+  }
+
+  @override
+  void dispose() {
+    _controller.removeListener(_refresh);
+    if (_ownsController) _controller.dispose();
+    super.dispose();
+  }
+
+  void _refresh() => setState(() {});
+
+  void _clear() {
+    _controller.clear();
+    widget.onChanged?.call('');
+    widget.onClear?.call();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: TextField(
-        controller: controller,
-        onChanged: onChanged,
-        decoration: InputDecoration(
-          hintText: hintText,
-          prefixIcon: const Icon(Icons.search, color: AppColors.textSecondary),
-          suffixIcon: onClear != null 
-              ? IconButton(icon: const Icon(Icons.clear, color: AppColors.textSecondary), onPressed: onClear)
-              : null,
-          border: InputBorder.none,
-          enabledBorder: InputBorder.none,
-          focusedBorder: InputBorder.none,
-          filled: false,
-          contentPadding: const EdgeInsets.symmetric(vertical: 12),
-        ),
+    return TextField(
+      controller: _controller,
+      autofocus: widget.autofocus,
+      onChanged: widget.onChanged,
+      textInputAction: TextInputAction.search,
+      decoration: InputDecoration(
+        hintText: widget.hintText,
+        prefixIcon: const Icon(Icons.search_rounded),
+        suffixIcon: _controller.text.isEmpty
+            ? null
+            : IconButton(
+                tooltip: 'Hapus pencarian',
+                onPressed: _clear,
+                icon: const Icon(Icons.close_rounded),
+              ),
       ),
     );
   }

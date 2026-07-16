@@ -10,9 +10,13 @@ class SyncManager {
   SyncManager._init();
 
   /// Records an operation into the local sync queue (Write-Ahead Log)
-  Future<void> queueOperation(String operation, String entityType, Map<String, dynamic> payload) async {
+  Future<void> queueOperation(
+    String operation,
+    String entityType,
+    Map<String, dynamic> payload,
+  ) async {
     final db = await LocalDatabase.instance.database;
-    
+
     final syncItem = {
       'id': _uuid.v4(),
       'operation': operation,
@@ -24,7 +28,7 @@ class SyncManager {
     };
 
     await db.insert('sync_queue', syncItem);
-    
+
     // Optionally trigger a sync immediately in the background
     _triggerSync();
   }
@@ -32,7 +36,7 @@ class SyncManager {
   /// Attempts to flush the sync queue to the remote server
   Future<void> _triggerSync() async {
     final db = await LocalDatabase.instance.database;
-    
+
     // Get up to 50 pending items
     final pendingItems = await db.query(
       'sync_queue',
@@ -46,12 +50,16 @@ class SyncManager {
 
     try {
       // Create batch payload
-      final payload = pendingItems.map((item) => {
-        'sync_id': item['id'],
-        'operation': item['operation'],
-        'entity_type': item['entity_type'],
-        'payload': jsonDecode(item['payload'] as String),
-      }).toList();
+      final payload = pendingItems
+          .map(
+            (item) => {
+              'sync_id': item['id'],
+              'operation': item['operation'],
+              'entity_type': item['entity_type'],
+              'payload': jsonDecode(item['payload'] as String),
+            },
+          )
+          .toList();
 
       // Attempt to send to Laravel backend (static method)
       final response = await ApiClient.post('/sync', {'batch': payload});
@@ -60,7 +68,7 @@ class SyncManager {
         // Mark as synced if successful
         final ids = pendingItems.map((e) => e['id']).toList();
         final placeholders = List.filled(ids.length, '?').join(',');
-        
+
         await db.update(
           'sync_queue',
           {'status': 'COMPLETED'},
@@ -90,5 +98,15 @@ class SyncManager {
   /// Call this on app startup or via a periodic timer to sync failed items
   Future<void> runPeriodicSync() async {
     await _triggerSync();
+  }
+
+  /// Returns the count of pending items in the sync queue
+  Future<int> getPendingCount() async {
+    final db = await LocalDatabase.instance.database;
+    final result = await db.rawQuery(
+      'SELECT COUNT(*) as count FROM sync_queue WHERE status = ?',
+      ['PENDING'],
+    );
+    return (result.first['count'] as int?) ?? 0;
   }
 }

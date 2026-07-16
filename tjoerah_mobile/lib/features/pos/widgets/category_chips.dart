@@ -1,50 +1,52 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../../../core/theme/app_colors.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../providers/catalog_provider.dart';
 
-class CategoryChips extends StatelessWidget {
+class CategoryChips extends ConsumerWidget {
   const CategoryChips({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final catalog = context.watch<CatalogProvider>();
-    final categories = catalog.categories;
-    final selectedId = catalog.selectedCategoryId;
-
-    return SizedBox(
-      height: 48,
-      child: ListView.separated(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        scrollDirection: Axis.horizontal,
-        itemCount: categories.length + 1, // +1 for 'All'
-        separatorBuilder: (context, index) => const SizedBox(width: 8),
-        itemBuilder: (context, index) {
-          final isAll = index == 0;
-          final isSelected = isAll ? selectedId == null : categories[index - 1].id == selectedId;
-          final label = isAll ? 'All' : categories[index - 1].name;
-
-          return ChoiceChip(
-            label: Text(label),
-            selected: isSelected,
-            onSelected: (selected) {
-              catalog.selectCategory(isAll ? null : categories[index - 1].id);
-            },
-            selectedColor: AppColors.primary,
-            labelStyle: TextStyle(
-              color: isSelected ? AppColors.textInverse : AppColors.textPrimary,
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-            ),
-            backgroundColor: AppColors.surface,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(24),
-              side: BorderSide(
-                color: isSelected ? AppColors.primary : AppColors.border,
-              ),
-            ),
-          );
-        },
+  Widget build(BuildContext context, WidgetRef ref) {
+    final catalogState = ref.watch(catalogProvider);
+    return catalogState.when(
+      loading: () => const SizedBox(
+        height: 42,
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: SizedBox.square(
+            dimension: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
       ),
+      error: (_, _) => const SizedBox.shrink(),
+      data: (catalog) {
+        return SizedBox(
+          height: 42,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: catalog.categories.length + 1,
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            itemBuilder: (context, index) {
+              final isAll = index == 0;
+              final category = isAll ? null : catalog.categories[index - 1];
+              final selected = isAll
+                  ? catalog.selectedCategoryId == null
+                  : catalog.selectedCategoryId == category!.id;
+
+              return ChoiceChip(
+                label: Text(isAll ? 'Semua' : category!.name),
+                selected: selected,
+                showCheckmark: false,
+                onSelected: (_) => ref
+                    .read(catalogProvider.notifier)
+                    .selectCategory(category?.id),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 }

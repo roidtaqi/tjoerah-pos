@@ -28,7 +28,9 @@ class InventoryItemModel {
       sku: json['sku'] as String? ?? '',
       itemType: json['item_type'] as String? ?? 'raw_material',
       unit: json['unit'] as String? ?? 'pcs',
-      weightedAverageCost: double.parse((json['weighted_average_cost'] ?? 0).toString()),
+      weightedAverageCost: double.parse(
+        (json['weighted_average_cost'] ?? 0).toString(),
+      ),
       minimumStock: double.parse((json['minimum_stock'] ?? 0).toString()),
       currentStock: double.parse((json['current_stock'] ?? 0).toString()),
     );

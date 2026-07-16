@@ -1,14 +1,8 @@
 import 'package:flutter/material.dart';
+
 import 'app_card.dart';
-import '../../core/theme/app_colors.dart';
 
 class AppMetricCard extends StatelessWidget {
-  final String title;
-  final String value;
-  final IconData icon;
-  final String? trend;
-  final bool isPositiveTrend;
-
   const AppMetricCard({
     super.key,
     required this.title,
@@ -16,45 +10,79 @@ class AppMetricCard extends StatelessWidget {
     required this.icon,
     this.trend,
     this.isPositiveTrend = true,
+    this.iconColor,
   });
+
+  final String title;
+  final String value;
+  final IconData icon;
+  final String? trend;
+  final bool isPositiveTrend;
+  final Color? iconColor;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final trendColor = isPositiveTrend
+        ? const Color(0xFF15803D)
+        : theme.colorScheme.error;
+
     return AppCard(
-      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(title, style: Theme.of(context).textTheme.bodyMedium),
-              Icon(icon, size: 20, color: AppColors.textSecondary),
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Icon(
+                icon,
+                size: 20,
+                color: iconColor ?? theme.colorScheme.secondary,
+              ),
             ],
           ),
-          const SizedBox(height: 12),
-          Text(value, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 14),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(value, style: theme.textTheme.titleLarge),
+          ),
           if (trend != null) ...[
             const SizedBox(height: 8),
             Row(
               children: [
                 Icon(
-                  isPositiveTrend ? Icons.arrow_upward : Icons.arrow_downward,
-                  size: 16,
-                  color: isPositiveTrend ? AppColors.success : AppColors.error,
+                  isPositiveTrend
+                      ? Icons.arrow_upward_rounded
+                      : Icons.arrow_downward_rounded,
+                  size: 15,
+                  color: trendColor,
                 ),
                 const SizedBox(width: 4),
-                Text(
-                  trend!,
-                  style: TextStyle(
-                    color: isPositiveTrend ? AppColors.success : AppColors.error,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
+                Expanded(
+                  child: Text(
+                    trend!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: trendColor,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ],
-            )
-          ]
+            ),
+          ],
         ],
       ),
     );

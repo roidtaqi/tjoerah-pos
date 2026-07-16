@@ -2,12 +2,14 @@
 
 namespace App\Domains\Sales\Services;
 
-use Illuminate\Support\Facades\DB;
-use App\Domains\Sales\DTOs\OrderData;
-use App\Domains\Sales\Repositories\OrderRepository;
 use App\Domains\KDS\Models\KitchenTicket;
-
+use App\Domains\Sales\DTOs\OrderData;
 use App\Domains\Sales\Events\OrderCompleted;
+use App\Domains\Sales\Events\OrderCreated;
+use App\Domains\Sales\Repositories\OrderRepository;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class OrderService
 {
@@ -17,20 +19,44 @@ class OrderService
 
     public function placeOrder(OrderData $data)
     {
-        return DB::transaction(function () use ($data) {
+        [$order, $tickets] = DB::transaction(function () use ($data) {
             $order = $this->repository->createOrder($data);
+            $tickets = $this->createKitchenTickets($order);
 
-            $this->createKitchenTickets($order);
-
-            OrderCompleted::dispatch($order);
-
-            return $order->load(['items', 'payments', 'kitchenTickets.items']);
+            return [$order, $tickets];
         });
+
+        $this->dispatchSideEffects($order, $tickets);
+
+        return $order->load(['items', 'payments', 'kitchenTickets.items']);
     }
 
-    private function createKitchenTickets($order): void
+    private function dispatchSideEffects($order, $tickets): void
+    {
+        try {
+            OrderCompleted::dispatch($order);
+        } catch (Throwable $exception) {
+            Log::warning('Order follow-up jobs could not be dispatched.', [
+                'order_id' => $order->id,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+
+        try {
+            OrderCreated::dispatch($tickets);
+        } catch (Throwable $exception) {
+            // Realtime delivery must never roll back or reject a paid order.
+            Log::warning('KDS realtime notification could not be delivered.', [
+                'order_id' => $order->id,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    private function createKitchenTickets($order)
     {
         $itemsByStation = $order->items->groupBy(fn ($item) => $item->station ?: 'kitchen');
+        $tickets = collect();
 
         foreach ($itemsByStation as $station => $items) {
             $ticket = KitchenTicket::create([
@@ -51,6 +77,9 @@ class OrderService
                     'status' => 'pending',
                 ]);
             }
+            $tickets->push($ticket->load('items'));
         }
+
+        return $tickets;
     }
 }

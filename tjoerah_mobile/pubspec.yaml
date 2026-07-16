@@ -38,10 +38,19 @@ dependencies:
   path_provider: ^2.1.6
   http: ^1.6.0
   shared_preferences: ^2.5.5
-  provider: ^6.1.5+1
   go_router: ^17.3.0
   uuid: ^4.5.3
   path: ^1.9.1
+  flutter_riverpod: ^3.3.2
+  # Temporary pin to the upstream built-in Kotlin migration (release 2.7.0).
+  # Return to a hosted constraint after pusher-channels-flutter#210 is released.
+  pusher_channels_flutter:
+    git:
+      url: https://github.com/pusher/pusher-channels-flutter.git
+      ref: b14d3129d8b7e8d67d923169c8d2c86e9d378010
+  blue_thermal_printer: ^1.2.3
+  fl_chart: ^1.2.0
+  intl: ^0.20.3
 
 dev_dependencies:
   flutter_test:
@@ -64,6 +73,11 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Variable.ttf
 
   # To add assets to your application, add an assets section, like this:
   # assets:

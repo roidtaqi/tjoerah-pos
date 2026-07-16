@@ -1,83 +1,111 @@
-import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../models/product_model.dart';
+import '../../../core/network/sync_service.dart';
 import '../models/category_model.dart';
+import '../models/product_model.dart';
 import '../repositories/product_repository.dart';
 
-class CatalogProvider with ChangeNotifier {
-  final ProductRepository _repo = ProductRepository();
+class CatalogState {
+  const CatalogState({
+    this.products = const [],
+    this.categories = const [],
+    this.selectedCategoryId,
+    this.searchQuery = '',
+  });
 
-  List<ProductModel> _products = [];
-  List<CategoryModel> _categories = [];
-  String? _selectedCategoryId;
-  bool _isLoading = false;
-  String? _error;
+  final List<ProductModel> products;
+  final List<CategoryModel> categories;
+  final String? selectedCategoryId;
+  final String searchQuery;
 
-  CatalogProvider() {
-    loadFromLocal();
+  CatalogState copyWith({
+    List<ProductModel>? products,
+    List<CategoryModel>? categories,
+    String? selectedCategoryId,
+    bool clearCategory = false,
+    String? searchQuery,
+  }) {
+    return CatalogState(
+      products: products ?? this.products,
+      categories: categories ?? this.categories,
+      selectedCategoryId: clearCategory
+          ? null
+          : (selectedCategoryId ?? this.selectedCategoryId),
+      searchQuery: searchQuery ?? this.searchQuery,
+    );
   }
 
-  // ---------------------------------------------------------------------------
-  // Getters
-  // ---------------------------------------------------------------------------
-
-  List<ProductModel> get products => _products;
-  List<CategoryModel> get categories => _categories;
-  String? get selectedCategoryId => _selectedCategoryId;
-  bool get isLoading => _isLoading;
-  String? get error => _error;
-
-  /// Returns products filtered by the currently selected category.
-  /// If no category is selected, returns all products.
   List<ProductModel> get filteredProducts {
-    if (_selectedCategoryId == null) {
-      return _products;
-    }
-    return _products
-        .where((p) => p.categoryId == _selectedCategoryId)
-        .toList();
-  }
-
-  // ---------------------------------------------------------------------------
-  // Actions
-  // ---------------------------------------------------------------------------
-
-  /// Loads products and categories from the local SQLite database.
-  Future<void> loadFromLocal() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
-
-    try {
-      _products = await _repo.getProducts();
-      _categories = await _repo.getCategories();
-    } catch (e) {
-      _error = e.toString();
-    } finally {
-      _isLoading = false;
-      notifyListeners();
-    }
-  }
-
-  /// Syncs the catalog from the remote server, then reloads from local.
-  Future<void> syncFromServer() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
-
-    try {
-      await _repo.syncFromServer();
-      await loadFromLocal();
-    } catch (e) {
-      _error = e.toString();
-      _isLoading = false;
-      notifyListeners();
-    }
-  }
-
-  /// Sets the active category filter and notifies listeners.
-  void selectCategory(String? categoryId) {
-    _selectedCategoryId = categoryId;
-    notifyListeners();
+    final query = searchQuery.trim().toLowerCase();
+    return products.where((product) {
+      final inCategory =
+          selectedCategoryId == null ||
+          product.categoryId == selectedCategoryId;
+      final matchesQuery =
+          query.isEmpty ||
+          product.name.toLowerCase().contains(query) ||
+          (product.sku?.toLowerCase().contains(query) ?? false);
+      return inCategory && matchesQuery;
+    }).toList();
   }
 }
+
+class CatalogNotifier extends AsyncNotifier<CatalogState> {
+  final ProductRepository _repository = ProductRepository();
+
+  @override
+  Future<CatalogState> build() => _loadFromLocal();
+
+  Future<CatalogState> _loadFromLocal() async {
+    final products = await _repository.getProducts();
+    final categories = await _repository.getCategories();
+    final current = state.value;
+    return CatalogState(
+      products: products,
+      categories: categories,
+      selectedCategoryId: current?.selectedCategoryId,
+      searchQuery: current?.searchQuery ?? '',
+    );
+  }
+
+  Future<void> reload() async {
+    state = const AsyncValue.loading();
+    state = await AsyncValue.guard(_loadFromLocal);
+  }
+
+  Future<void> syncFromServer() async {
+    final previous = state.value;
+    state = const AsyncValue.loading();
+    state = await AsyncValue.guard(() async {
+      final success = await SyncService.syncCatalog();
+      if (!success) throw Exception('Sinkronisasi katalog gagal.');
+      final result = await _loadFromLocal();
+      return result.copyWith(
+        selectedCategoryId: previous?.selectedCategoryId,
+        clearCategory: previous?.selectedCategoryId == null,
+        searchQuery: previous?.searchQuery,
+      );
+    });
+  }
+
+  void selectCategory(String? categoryId) {
+    final current = state.value;
+    if (current == null) return;
+    state = AsyncValue.data(
+      current.copyWith(
+        selectedCategoryId: categoryId,
+        clearCategory: categoryId == null,
+      ),
+    );
+  }
+
+  void search(String query) {
+    final current = state.value;
+    if (current == null) return;
+    state = AsyncValue.data(current.copyWith(searchQuery: query));
+  }
+}
+
+final catalogProvider = AsyncNotifierProvider<CatalogNotifier, CatalogState>(
+  CatalogNotifier.new,
+);

@@ -40,6 +40,8 @@ class KdsController extends Controller
 
         $ticket->update($updates);
 
+        event(new \App\Domains\KDS\Events\TicketStatusUpdated($ticket));
+
         return response()->json($ticket->load('items'));
     }
 }

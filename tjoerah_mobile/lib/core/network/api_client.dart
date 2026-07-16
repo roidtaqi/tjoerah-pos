@@ -1,15 +1,19 @@
 import 'dart:convert';
+
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiClient {
-  // Use 10.0.2.2 for Android Emulator, localhost for iOS simulator/desktop
-  static const String baseUrl = 'http://127.0.0.1:8000/api';
+  static const String baseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'http://127.0.0.1:8000/api',
+  );
+  static const Duration requestTimeout = Duration(seconds: 12);
 
   static Future<Map<String, String>> _getHeaders() async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
-    
+
     return {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
@@ -17,20 +21,59 @@ class ApiClient {
     };
   }
 
-  static Future<http.Response> post(String endpoint, Map<String, dynamic> data) async {
+  static Future<http.Response> post(
+    String endpoint,
+    Map<String, dynamic> data,
+  ) async {
     final headers = await _getHeaders();
-    return await http.post(
-      Uri.parse('$baseUrl$endpoint'),
-      headers: headers,
-      body: jsonEncode(data),
-    );
+    return http
+        .post(
+          Uri.parse('$baseUrl$endpoint'),
+          headers: headers,
+          body: jsonEncode(data),
+        )
+        .timeout(requestTimeout);
   }
 
   static Future<http.Response> get(String endpoint) async {
     final headers = await _getHeaders();
-    return await http.get(
-      Uri.parse('$baseUrl$endpoint'),
-      headers: headers,
-    );
+    return http
+        .get(Uri.parse('$baseUrl$endpoint'), headers: headers)
+        .timeout(requestTimeout);
+  }
+
+  static Future<http.Response> put(
+    String endpoint,
+    Map<String, dynamic> data,
+  ) async {
+    final headers = await _getHeaders();
+    return http
+        .put(
+          Uri.parse('$baseUrl$endpoint'),
+          headers: headers,
+          body: jsonEncode(data),
+        )
+        .timeout(requestTimeout);
+  }
+
+  static Future<http.Response> patch(
+    String endpoint,
+    Map<String, dynamic> data,
+  ) async {
+    final headers = await _getHeaders();
+    return http
+        .patch(
+          Uri.parse('$baseUrl$endpoint'),
+          headers: headers,
+          body: jsonEncode(data),
+        )
+        .timeout(requestTimeout);
+  }
+
+  static Future<http.Response> delete(String endpoint) async {
+    final headers = await _getHeaders();
+    return http
+        .delete(Uri.parse('$baseUrl$endpoint'), headers: headers)
+        .timeout(requestTimeout);
   }
 }

@@ -1,187 +1,417 @@
 import 'dart:async';
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../../../core/theme/app_colors.dart';
-import '../providers/kds_provider.dart';
-import '../models/kitchen_ticket_model.dart';
 
-class KdsScreen extends StatefulWidget {
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_layout.dart';
+import '../../../shared/components/app_badge.dart';
+import '../../../shared/components/app_bottom_sheet.dart';
+import '../../../shared/components/app_empty_state.dart';
+import '../../../shared/components/app_error_state.dart';
+import '../../../shared/components/app_loading_state.dart';
+import '../models/kitchen_ticket_model.dart';
+import '../providers/kds_provider.dart';
+
+class KdsScreen extends ConsumerStatefulWidget {
   const KdsScreen({super.key});
 
   @override
-  State<KdsScreen> createState() => _KdsScreenState();
+  ConsumerState<KdsScreen> createState() => _KdsScreenState();
 }
 
-class _KdsScreenState extends State<KdsScreen> {
-  late Timer _tickerTimer;
+class _KdsScreenState extends ConsumerState<KdsScreen> {
+  late final Timer _ticker;
+  String _mobileStatus = 'pending';
 
   @override
   void initState() {
     super.initState();
-    // Refresh SLA timers every second
-    _tickerTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (mounted) {
-        setState(() {});
-      }
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
     });
   }
 
   @override
   void dispose() {
-    _tickerTimer.cancel();
+    _ticker.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => KdsProvider(),
-      child: Consumer<KdsProvider>(
-        builder: (context, provider, child) {
-          return Scaffold(
-            backgroundColor: AppColors.background,
-            appBar: AppBar(
-              title: Row(
-                children: [
-                  const Icon(Icons.soup_kitchen, color: AppColors.primary),
-                  const SizedBox(width: 12),
-                  const Text('Kitchen Display System', style: TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(width: 24),
-                  // Station toggle
-                  DropdownButton<String>(
-                    value: provider.selectedStation,
-                    items: const [
-                      DropdownMenuItem(value: 'kitchen', child: Text('Kitchen Station')),
-                      DropdownMenuItem(value: 'bar', child: Text('Bar Station')),
-                    ],
-                    onChanged: (val) {
-                      if (val != null) {
-                        provider.setStation(val);
-                      }
-                    },
-                    style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.textPrimary),
-                    underline: const SizedBox(),
-                  ),
-                ],
-              ),
-              actions: [
-                IconButton(
-                  icon: const Icon(Icons.refresh),
-                  onPressed: () => provider.fetchTickets(),
-                  tooltip: 'Manual Refresh',
-                ),
-              ],
-            ),
-            body: provider.isLoading && provider.tickets.isEmpty
-                ? const Center(child: CircularProgressIndicator())
-                : _buildKanbanBoard(context, provider),
-          );
-        },
+    final tickets = ref.watch(kdsNotifierProvider);
+    final station = ref.watch(kdsStationProvider);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Dapur'),
+        actions: [
+          IconButton(
+            tooltip: 'Muat ulang tiket',
+            onPressed: () => ref.invalidate(kdsNotifierProvider),
+            icon: const Icon(Icons.refresh_rounded),
+          ),
+          const SizedBox(width: 4),
+        ],
       ),
-    );
-  }
-
-  Widget _buildKanbanBoard(BuildContext context, KdsProvider provider) {
-    final tickets = provider.tickets;
-    
-    // Group tickets by status columns
-    final pending = tickets.where((t) => t.status == 'pending' || t.status == 'accepted').toList();
-    final preparing = tickets.where((t) => t.status == 'preparing').toList();
-    final ready = tickets.where((t) => t.status == 'ready').toList();
-    final completed = tickets.where((t) => t.status == 'completed').toList();
-
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Row(
+      body: Column(
         children: [
-          Expanded(child: _buildColumn(context, 'Pending', pending, 'pending', provider)),
-          const SizedBox(width: 16),
-          Expanded(child: _buildColumn(context, 'Preparing', preparing, 'preparing', provider)),
-          const SizedBox(width: 16),
-          Expanded(child: _buildColumn(context, 'Ready / Pickup', ready, 'ready', provider)),
-          const SizedBox(width: 16),
-          Expanded(child: _buildColumn(context, 'Completed', completed, 'completed', provider)),
+          _StationBar(
+            station: station,
+            onChanged: (value) {
+              ref.read(kdsStationProvider.notifier).setStation(value);
+            },
+          ),
+          Expanded(
+            child: tickets.when(
+              loading: () =>
+                  const AppLoadingState(message: 'Mengambil tiket dapur...'),
+              error: (error, _) => AppErrorState(
+                message:
+                    'Tiket belum dapat diambil dari server. Periksa koneksi dapur.',
+                onRetry: () => ref.invalidate(kdsNotifierProvider),
+              ),
+              data: (data) => _buildBoard(data),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildColumn(
-    BuildContext context,
-    String title,
-    List<KitchenTicketModel> list,
-    String statusKey,
-    KdsProvider provider,
-  ) {
+  Widget _buildBoard(List<KitchenTicketModel> tickets) {
+    final pending = tickets
+        .where(
+          (ticket) => ticket.status == 'pending' || ticket.status == 'accepted',
+        )
+        .toList();
+    final preparing = tickets
+        .where((ticket) => ticket.status == 'preparing')
+        .toList();
+    final ready = tickets.where((ticket) => ticket.status == 'ready').toList();
+    final completed = tickets
+        .where((ticket) => ticket.status == 'completed')
+        .toList();
+
+    if (AppBreakpoints.isWide(context)) {
+      return Padding(
+        padding: AppSpacing.page(context),
+        child: Column(
+          children: [
+            _BoardSummary(
+              activeCount: pending.length + preparing.length + ready.length,
+              completedCount: completed.length,
+              onCompletedTap: completed.isEmpty
+                  ? null
+                  : () => _showCompletedTickets(completed),
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _TicketLane(
+                      title: 'Menunggu',
+                      status: 'pending',
+                      color: AppColors.kdsWaiting,
+                      tickets: pending,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _TicketLane(
+                      title: 'Dimasak',
+                      status: 'preparing',
+                      color: AppColors.kdsCooking,
+                      tickets: preparing,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _TicketLane(
+                      title: 'Siap diambil',
+                      status: 'ready',
+                      color: AppColors.kdsReady,
+                      tickets: ready,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final statusTickets = switch (_mobileStatus) {
+      'preparing' => preparing,
+      'ready' => ready,
+      _ => pending,
+    };
+
+    return Padding(
+      padding: AppSpacing.page(context),
+      child: Column(
+        children: [
+          SegmentedButton<String>(
+            expandedInsets: EdgeInsets.zero,
+            segments: [
+              ButtonSegment(
+                value: 'pending',
+                label: Text('Tunggu ${pending.length}'),
+              ),
+              ButtonSegment(
+                value: 'preparing',
+                label: Text('Masak ${preparing.length}'),
+              ),
+              ButtonSegment(
+                value: 'ready',
+                label: Text('Siap ${ready.length}'),
+              ),
+            ],
+            selected: {_mobileStatus},
+            showSelectedIcon: false,
+            onSelectionChanged: (selection) {
+              setState(() => _mobileStatus = selection.first);
+            },
+          ),
+          const SizedBox(height: 14),
+          Expanded(
+            child: statusTickets.isEmpty
+                ? const AppEmptyState(
+                    title: 'Antrean bersih',
+                    message: 'Belum ada tiket pada tahap ini.',
+                    icon: Icons.task_alt_rounded,
+                  )
+                : ListView.separated(
+                    itemCount: statusTickets.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 12),
+                    itemBuilder: (context, index) =>
+                        _TicketCard(ticket: statusTickets[index]),
+                  ),
+          ),
+          if (completed.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: () => _showCompletedTickets(completed),
+              icon: const Icon(Icons.history_rounded),
+              label: Text('${completed.length} tiket selesai'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showCompletedTickets(List<KitchenTicketModel> tickets) {
+    return AppBottomSheet.show<void>(
+      context,
+      title: 'Tiket selesai',
+      subtitle: '${tickets.length} tiket pada sesi ini',
+      child: SizedBox(
+        height: MediaQuery.sizeOf(context).height * 0.62,
+        child: ListView.separated(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+          itemCount: tickets.length,
+          separatorBuilder: (_, _) => const Divider(),
+          itemBuilder: (context, index) {
+            final ticket = tickets[index];
+            return ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.check_circle_outline_rounded),
+              title: Text('#${_shortId(ticket.id)}'),
+              subtitle: Text('${ticket.items.length} baris item'),
+              trailing: Text(_elapsedLabel(ticket.createdAt)),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _StationBar extends StatelessWidget {
+  const _StationBar({required this.station, required this.onChanged});
+
+  final String station;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        border: Border(bottom: BorderSide(color: theme.colorScheme.outline)),
+      ),
+      child: Padding(
+        padding: EdgeInsets.symmetric(
+          horizontal: AppBreakpoints.isPhone(context) ? 16 : 24,
+          vertical: 10,
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Stasiun produksi', style: theme.textTheme.labelLarge),
+                  Text(
+                    'Tiket diperbarui secara langsung',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+            SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(
+                  value: 'kitchen',
+                  icon: Icon(Icons.restaurant_outlined),
+                  label: Text('Dapur'),
+                ),
+                ButtonSegment(
+                  value: 'bar',
+                  icon: Icon(Icons.local_cafe_outlined),
+                  label: Text('Bar'),
+                ),
+              ],
+              selected: {station},
+              showSelectedIcon: false,
+              onSelectionChanged: (selection) => onChanged(selection.first),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BoardSummary extends StatelessWidget {
+  const _BoardSummary({
+    required this.activeCount,
+    required this.completedCount,
+    this.onCompletedTap,
+  });
+
+  final int activeCount;
+  final int completedCount;
+  final VoidCallback? onCompletedTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            '$activeCount tiket aktif',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+        ),
+        TextButton.icon(
+          onPressed: onCompletedTap,
+          icon: const Icon(Icons.history_rounded),
+          label: Text('$completedCount selesai'),
+        ),
+      ],
+    );
+  }
+}
+
+class _TicketLane extends ConsumerWidget {
+  const _TicketLane({
+    required this.title,
+    required this.status,
+    required this.color,
+    required this.tickets,
+  });
+
+  final String title;
+  final String status;
+  final Color color;
+  final List<KitchenTicketModel> tickets;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
     return DragTarget<KitchenTicketModel>(
       onAcceptWithDetails: (details) {
-        provider.updateTicketStatus(details.data.id, statusKey);
+        ref
+            .read(kdsNotifierProvider.notifier)
+            .updateTicketStatus(details.data.id, status);
       },
-      builder: (context, candidateData, rejectedData) {
-        final isOver = candidateData.isNotEmpty;
-        return Container(
+      builder: (context, candidates, _) {
+        final highlighted = candidates.isNotEmpty;
+        return DecoratedBox(
           decoration: BoxDecoration(
-            color: isOver ? Colors.grey[200] : AppColors.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: isOver ? AppColors.accent : AppColors.border, width: 2),
-            boxShadow: const [
-              BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 2))
-            ],
+            color: highlighted
+                ? color.withValues(alpha: 0.08)
+                : theme.colorScheme.surfaceContainerHighest.withValues(
+                    alpha: 0.45,
+                  ),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: highlighted ? color : theme.colorScheme.outline,
+              width: highlighted ? 2 : 1,
+            ),
           ),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Header
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                padding: const EdgeInsets.all(14),
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      title,
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppColors.textPrimary),
-                    ),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      width: 8,
+                      height: 8,
                       decoration: BoxDecoration(
-                        color: AppColors.primary,
-                        borderRadius: BorderRadius.circular(12),
+                        color: color,
+                        shape: BoxShape.circle,
                       ),
-                      child: Text(
-                        '${list.length}',
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(title, style: theme.textTheme.titleMedium),
+                    ),
+                    AppBadge(
+                      text: '${tickets.length}',
+                      color: color.withValues(alpha: 0.12),
+                      textColor: color,
                     ),
                   ],
                 ),
               ),
-              const Divider(height: 1, thickness: 1, color: AppColors.border),
-              
-              // Tickets List
+              Divider(color: theme.colorScheme.outline),
               Expanded(
-                child: list.isEmpty
+                child: tickets.isEmpty
                     ? Center(
                         child: Text(
-                          'No tickets',
-                          style: TextStyle(color: Colors.grey[400], fontSize: 14),
+                          'Tidak ada tiket',
+                          style: theme.textTheme.bodySmall,
                         ),
                       )
-                    : ListView.builder(
-                        padding: const EdgeInsets.all(8.0),
-                        itemCount: list.length,
+                    : ListView.separated(
+                        padding: const EdgeInsets.all(10),
+                        itemCount: tickets.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 10),
                         itemBuilder: (context, index) {
-                          final ticket = list[index];
+                          final ticket = tickets[index];
                           return Draggable<KitchenTicketModel>(
                             data: ticket,
                             feedback: SizedBox(
-                              width: MediaQuery.of(context).size.width / 4 - 32,
-                              child: _buildTicketCard(context, ticket, provider, isFeedback: true),
+                              width: 320,
+                              child: Material(
+                                elevation: 8,
+                                borderRadius: BorderRadius.circular(8),
+                                child: _TicketCard(ticket: ticket),
+                              ),
                             ),
                             childWhenDragging: Opacity(
-                              opacity: 0.4,
-                              child: _buildTicketCard(context, ticket, provider),
+                              opacity: 0.35,
+                              child: _TicketCard(ticket: ticket),
                             ),
-                            child: _buildTicketCard(context, ticket, provider),
+                            child: _TicketCard(ticket: ticket),
                           );
                         },
                       ),
@@ -192,144 +422,165 @@ class _KdsScreenState extends State<KdsScreen> {
       },
     );
   }
+}
 
-  Widget _buildTicketCard(
-    BuildContext context,
-    KitchenTicketModel ticket,
-    KdsProvider provider, {
-    bool isFeedback = false,
-  }) {
-    // 10 minutes default SLA
-    const slaSeconds = 600; 
-    final elapsedSeconds = DateTime.now().difference(ticket.createdAt).inSeconds;
-    
-    Color cardBorderColor = AppColors.border;
-    Color timerColor = Colors.green;
-    bool isUrgent = false;
+class _TicketCard extends ConsumerWidget {
+  const _TicketCard({required this.ticket});
 
-    // SLA Warning thresholds
-    if (elapsedSeconds < slaSeconds * 0.75) {
-      timerColor = Colors.green;
-    } else if (elapsedSeconds < slaSeconds) {
-      timerColor = Colors.orange;
-      cardBorderColor = Colors.orange;
-    } else {
-      timerColor = Colors.red;
-      cardBorderColor = Colors.red;
-      isUrgent = true;
-    }
+  final KitchenTicketModel ticket;
 
-    if (ticket.priority == 'rush') {
-      cardBorderColor = Colors.redAccent;
-      isUrgent = true;
-    }
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final elapsed = DateTime.now().difference(ticket.createdAt);
+    final timerColor = elapsed.inMinutes >= 10
+        ? AppColors.error
+        : elapsed.inSeconds >= 450
+        ? AppColors.warning
+        : AppColors.success;
+    final urgent = elapsed.inMinutes >= 10 || ticket.priority == 'rush';
+    final action = _nextAction(ticket.status);
 
-    // Format SLA minutes/seconds
-    final minutes = elapsedSeconds ~/ 60;
-    final seconds = elapsedSeconds % 60;
-    final timeStr = '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
-
-    return Card(
-      elevation: isFeedback ? 8 : 2,
-      margin: const EdgeInsets.symmetric(vertical: 6.0),
+    return Material(
+      color: theme.colorScheme.surface,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: cardBorderColor, width: isUrgent ? 2 : 1),
+        borderRadius: BorderRadius.circular(8),
+        side: BorderSide(
+          color: urgent ? timerColor : theme.colorScheme.outline,
+          width: urgent ? 2 : 1,
+        ),
       ),
-      child: InkWell(
-        onTap: () {
-          // Tap to advance state
-          final nextStatus = _getNextStatus(ticket.status);
-          if (nextStatus != null) {
-            provider.updateTicketStatus(ticket.id, nextStatus);
-          }
-        },
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(12.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Ticket Metadata Header
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Ticket #${ticket.id.substring(0, 4).toUpperCase()}',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                  ),
-                  Row(
-                    children: [
-                      if (ticket.priority == 'rush' || ticket.priority == 'vip')
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          margin: const EdgeInsets.only(right: 6),
-                          decoration: BoxDecoration(
-                            color: ticket.priority == 'rush' ? Colors.red : Colors.purple,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            ticket.priority.toUpperCase(),
-                            style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                      Text(
-                        timeStr,
-                        style: TextStyle(color: timerColor, fontWeight: FontWeight.bold, fontSize: 13),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              
-              // Items List
-              ...ticket.items.map((item) => Padding(
-                    padding: const EdgeInsets.only(bottom: 4.0),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '${item.qty}x ',
-                          style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.accent),
-                        ),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                item.name,
-                                style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
-                              ),
-                              if (item.notes != null && item.notes!.isNotEmpty)
-                                Text(
-                                  'Note: ${item.notes}',
-                                  style: const TextStyle(color: Colors.red, fontSize: 11, fontStyle: FontStyle.italic),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ],
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '#${_shortId(ticket.id)}',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontFeatures: const [FontFeature.tabularFigures()],
                     ),
-                  )),
+                  ),
+                ),
+                if (ticket.priority == 'rush') ...[
+                  const AppBadge(
+                    text: 'SEGERA',
+                    color: Color(0xFFFEE2E2),
+                    textColor: AppColors.error,
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                AppBadge(
+                  text: _elapsedLabel(ticket.createdAt),
+                  icon: Icons.timer_outlined,
+                  color: timerColor.withValues(alpha: 0.12),
+                  textColor: timerColor,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Divider(color: theme.colorScheme.outline),
+            const SizedBox(height: 12),
+            ...ticket.items.map(
+              (item) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: 34,
+                      child: Text(
+                        '${item.qty}x',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: theme.colorScheme.secondary,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(item.name, style: theme.textTheme.titleMedium),
+                          if (item.notes?.isNotEmpty ?? false) ...[
+                            const SizedBox(height: 3),
+                            Text(
+                              item.notes!,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.error,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (action != null) ...[
+              const SizedBox(height: 2),
+              SizedBox(
+                height: 46,
+                child: FilledButton.icon(
+                  onPressed: () => ref
+                      .read(kdsNotifierProvider.notifier)
+                      .updateTicketStatus(ticket.id, action.status),
+                  icon: Icon(action.icon, size: 19),
+                  label: Text(action.label),
+                ),
+              ),
             ],
-          ),
+          ],
         ),
       ),
     );
   }
+}
 
-  String? _getNextStatus(String currentStatus) {
-    switch (currentStatus) {
-      case 'pending':
-      case 'accepted':
-        return 'preparing';
-      case 'preparing':
-        return 'ready';
-      case 'ready':
-        return 'completed';
-      default:
-        return null;
-    }
-  }
+_TicketAction? _nextAction(String status) => switch (status) {
+  'pending' || 'accepted' => const _TicketAction(
+    status: 'preparing',
+    label: 'Mulai masak',
+    icon: Icons.play_arrow_rounded,
+  ),
+  'preparing' => const _TicketAction(
+    status: 'ready',
+    label: 'Tandai siap',
+    icon: Icons.notifications_active_outlined,
+  ),
+  'ready' => const _TicketAction(
+    status: 'completed',
+    label: 'Selesaikan',
+    icon: Icons.check_rounded,
+  ),
+  _ => null,
+};
+
+class _TicketAction {
+  const _TicketAction({
+    required this.status,
+    required this.label,
+    required this.icon,
+  });
+
+  final String status;
+  final String label;
+  final IconData icon;
+}
+
+String _shortId(String id) {
+  if (id.length <= 6) return id.toUpperCase();
+  return id.substring(0, 6).toUpperCase();
+}
+
+String _elapsedLabel(DateTime createdAt) {
+  final elapsed = DateTime.now().difference(createdAt);
+  final minutes = elapsed.inMinutes.toString().padLeft(2, '0');
+  final seconds = (elapsed.inSeconds % 60).toString().padLeft(2, '0');
+  return '$minutes:$seconds';
 }

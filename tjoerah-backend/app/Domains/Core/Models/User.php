@@ -7,14 +7,15 @@ use App\Domains\Core\Models\Concerns\HasUuid;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
-use Illuminate\Database\Eloquent\SoftDeletes;
-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use PHPOpenSourceSaver\JWTAuth\Contracts\JWTSubject;
 
-#[Hidden(['password', 'remember_token'])]
-class User extends Authenticatable
+#[Hidden(['password', 'pin', 'remember_token'])]
+class User extends Authenticatable implements JWTSubject
 {
     /** @use HasFactory<UserFactory> */
     use HasApiTokens, HasFactory, HasUuid, Notifiable, SoftDeletes;
@@ -36,13 +37,36 @@ class User extends Authenticatable
 
     public function outlets(): BelongsToMany
     {
-        return $this->belongsToMany(\App\Domains\Core\Models\Outlet::class);
+        return $this->belongsToMany(Outlet::class);
     }
 
     public function roles(): BelongsToMany
     {
-        return $this->belongsToMany(\App\Domains\Core\Models\Role::class, 'user_roles')
+        return $this->belongsToMany(Role::class, 'user_roles')
             ->withPivot(['company_id', 'brand_id', 'outlet_id'])
             ->withTimestamps();
+    }
+
+    /**
+     * Get the identifier that will be stored in the subject claim of the JWT.
+     *
+     * @return mixed
+     */
+    public function getJWTIdentifier()
+    {
+        return $this->getKey();
+    }
+
+    /**
+     * Return a key value array, containing any custom claims to be added to the JWT.
+     *
+     * @return array
+     */
+    public function getJWTCustomClaims()
+    {
+        return [
+            'uuid' => $this->uuid,
+            'company_id' => $this->company_id,
+        ];
     }
 }

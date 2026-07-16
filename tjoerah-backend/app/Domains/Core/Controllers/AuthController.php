@@ -2,12 +2,10 @@
 
 namespace App\Domains\Core\Controllers;
 
-use Illuminate\Http\Request;
 use App\Domains\Core\Models\User;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\ValidationException;
-
 use App\Http\Controllers\Controller;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class AuthController extends Controller
 {
@@ -22,43 +20,54 @@ class AuthController extends Controller
         if ($request->has('pin') && $request->pin) {
             $user = User::where('pin', $request->pin)->first();
             if (! $user) {
-                throw ValidationException::withMessages(['pin' => 'Invalid PIN.']);
+                return response()->json([
+                    'message' => 'Invalid PIN.',
+                    'errors' => ['pin' => ['Invalid PIN.']],
+                ], 401);
             }
+            $token = Auth::guard('api')->login($user);
         } else {
-            $user = User::where('email', $request->email)->first();
-            if (! $user || ! Hash::check($request->password, $user->password)) {
-                throw ValidationException::withMessages(['email' => 'Invalid credentials.']);
+            $credentials = $request->only('email', 'password');
+            if (! $token = Auth::guard('api')->attempt($credentials)) {
+                return response()->json([
+                    'message' => 'Invalid credentials.',
+                    'errors' => ['email' => ['Invalid credentials.']],
+                ], 401);
             }
+            $user = Auth::guard('api')->user();
         }
 
-        $token = $user->createToken('pos-token')->plainTextToken;
         $user->forceFill(['last_login_at' => now()])->save();
 
+        return $this->respondWithToken($token);
+    }
+
+    public function me()
+    {
         return response()->json([
-            'user' => $user->load('outlets'),
-            'token' => $token,
+            'user' => Auth::guard('api')->user()->load('outlets'),
         ]);
     }
 
-    public function me(Request $request)
+    public function logout()
     {
-        return response()->json([
-            'user' => $request->user()->load('outlets')
-        ]);
-    }
+        Auth::guard('api')->logout();
 
-    public function logout(Request $request)
-    {
-        $request->user()->currentAccessToken()->delete();
         return response()->json(['message' => 'Logged out.']);
     }
 
-    public function refresh(Request $request)
+    public function refresh()
     {
-        $request->user()->currentAccessToken()->delete();
+        return $this->respondWithToken(Auth::guard('api')->refresh());
+    }
 
+    protected function respondWithToken($token)
+    {
         return response()->json([
-            'token' => $request->user()->createToken('pos-token')->plainTextToken,
+            'user' => Auth::guard('api')->user()->load('outlets'),
+            'token' => $token,
+            'token_type' => 'bearer',
+            'expires_in' => Auth::guard('api')->factory()->getTTL() * 60,
         ]);
     }
 

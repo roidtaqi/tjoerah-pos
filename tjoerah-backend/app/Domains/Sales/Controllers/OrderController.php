@@ -2,13 +2,13 @@
 
 namespace App\Domains\Sales\Controllers;
 
-use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
 use App\Domains\POS\Models\Order;
 use App\Domains\POS\Models\Refund;
 use App\Domains\POS\Models\VoidTransaction;
-use App\Domains\Sales\Services\OrderService;
 use App\Domains\Sales\DTOs\OrderData;
+use App\Domains\Sales\Services\OrderService;
+use App\Http\Controllers\Controller;
+use Illuminate\Http\Request;
 
 class OrderController extends Controller
 {
@@ -18,6 +18,14 @@ class OrderController extends Controller
 
     public function store(Request $request)
     {
+        $existingOrder = $this->findExistingOrder($request);
+        if ($existingOrder) {
+            return response()->json([
+                'message' => 'Order already received',
+                'data' => $existingOrder->load(['items', 'payments', 'kitchenTickets.items']),
+            ]);
+        }
+
         $validated = $request->validate([
             'outlet_id' => 'required|integer|exists:outlets,id',
             'customer_id' => 'nullable|integer|exists:customers,id',
@@ -64,8 +72,37 @@ class OrderController extends Controller
 
         return response()->json([
             'message' => 'Order placed successfully',
-            'data' => $order
+            'data' => $order,
         ], 201);
+    }
+
+    private function findExistingOrder(Request $request): ?Order
+    {
+        $outletId = $request->integer('outlet_id');
+        if (! $outletId) {
+            return null;
+        }
+
+        $clientOrderId = $request->input('meta.client_order_id');
+        if (is_string($clientOrderId) && $clientOrderId !== '') {
+            $order = Order::where('outlet_id', $outletId)
+                ->where('meta->client_order_id', $clientOrderId)
+                ->first();
+            if ($order) {
+                return $order;
+            }
+
+            return null;
+        }
+
+        $receiptNumber = $request->string('receipt_number')->toString();
+        if ($receiptNumber === '') {
+            return null;
+        }
+
+        return Order::where('outlet_id', $outletId)
+            ->where('receipt_number', $receiptNumber)
+            ->first();
     }
 
     public function show(Order $order)

@@ -1,67 +1,209 @@
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
-import '../../../core/database/local_db.dart';
-import '../../../core/sync/sync_manager.dart';
+import '../../../core/database/database_helper.dart';
+import '../../../core/network/api_client.dart';
 import '../providers/cart_provider.dart';
+
+class OrderSyncResult {
+  const OrderSyncResult({
+    required this.syncedCount,
+    required this.pendingCount,
+    this.error,
+  });
+
+  final int syncedCount;
+  final int pendingCount;
+  final String? error;
+
+  bool get isComplete => pendingCount == 0;
+}
 
 class OrderRepository {
   static const _uuid = Uuid();
 
-  /// Creates an order from the given cart items, stores it locally (unsynced),
-  /// and queues it in the sync pipeline.
-  ///
-  /// Returns the generated order UUID.
   Future<String> createOrder({
     required List<CartItem> items,
     required double subtotal,
+    required double discount,
     required double tax,
     required double total,
+    required String orderType,
+    required String paymentMethod,
+    required Map<String, double> paymentBreakdown,
+    String? tableId,
+    String? note,
+    String? customerName,
   }) async {
-    final db = await LocalDatabase.instance.database;
     final orderId = _uuid.v4();
-    final now = DateTime.now().toIso8601String();
+    final now = DateTime.now();
+    final timestamp = now.toIso8601String();
+    final receiptNumber =
+        'TJ-${now.year.toString().substring(2)}${_two(now.month)}${_two(now.day)}-'
+        '${_two(now.hour)}${_two(now.minute)}${_two(now.second)}'
+        '${now.millisecond.toString().padLeft(3, '0')}';
 
-    // Insert the order header
-    await db.insert('orders', {
-      'id': orderId,
+    final itemPayloads = items
+        .map(
+          (item) => {
+            'product_id': int.tryParse(item.productId) ?? item.productId,
+            'snapshot_name': item.name,
+            'snapshot_price': item.price,
+            'qty': item.quantity,
+            'total': item.total,
+            if (item.station != null && item.station!.isNotEmpty)
+              'station': item.station,
+          },
+        )
+        .toList();
+
+    final payload = <String, dynamic>{
+      'outlet_id': await _resolveOutletId(),
+      'order_type': orderType,
+      if (tableId != null) 'table_id': int.tryParse(tableId),
+      'subtotal': subtotal,
+      'discount_total': discount,
+      'tax': tax,
+      'service_charge': 0,
       'total': total,
-      'status': 'paid',
-      'created_at': now,
-      'is_synced': 0,
-    });
+      'payment_method': paymentMethod,
+      'paymentMethod': paymentMethod,
+      'receipt_number': receiptNumber,
+      'items': itemPayloads,
+      'meta': {
+        'client_order_id': orderId,
+        'payment_breakdown': paymentBreakdown,
+        if (note != null && note.isNotEmpty) 'note': note,
+        if (customerName != null && customerName.isNotEmpty)
+          'customer_name': customerName,
+      },
+      'created_at': timestamp,
+    };
 
-    // Insert each order item
-    final itemPayloads = <Map<String, dynamic>>[];
-    for (final item in items) {
-      final itemId = _uuid.v4();
-
-      await db.insert('order_items', {
-        'id': itemId,
-        'order_id': orderId,
-        'product_id': item.productId,
-        'quantity': item.quantity,
-        'price': item.price,
-      });
-
-      itemPayloads.add({
-        'id': itemId,
-        'product_id': item.productId,
-        'quantity': item.quantity,
-        'price': item.price,
-      });
+    try {
+      final response = await ApiClient.post('/orders', payload);
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        await _saveLocal(orderId, payload, timestamp, 'synced');
+        return orderId;
+      }
+      debugPrint(
+        'Order API rejected request: ${response.statusCode} '
+        '${_responseMessage(response.statusCode, response.body)}',
+      );
+    } catch (error) {
+      debugPrint('Order saved offline: $error');
     }
 
-    // Queue the full order for background sync
-    await SyncManager.instance.queueOperation('CREATE', 'ORDER', {
-      'id': orderId,
-      'subtotal': subtotal,
-      'tax': tax,
-      'total': total,
-      'status': 'paid',
-      'created_at': now,
-      'items': itemPayloads,
-    });
-
+    await _saveLocal(orderId, payload, timestamp, 'pending');
     return orderId;
   }
+
+  Future<void> _saveLocal(
+    String orderId,
+    Map<String, dynamic> payload,
+    String timestamp,
+    String status,
+  ) async {
+    final database = await DatabaseHelper.instance.database;
+    await database.insert('offline_orders', {
+      'id': orderId,
+      'payload': jsonEncode(payload),
+      'created_at': timestamp,
+      'status': status,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<OrderSyncResult> syncOfflineOrders() async {
+    final database = await DatabaseHelper.instance.database;
+    final rows = await database.query(
+      'offline_orders',
+      where: 'status = ?',
+      whereArgs: ['pending'],
+      orderBy: 'created_at ASC',
+    );
+
+    var syncedCount = 0;
+    String? lastError;
+    for (final row in rows) {
+      final orderId = row['id'] as String;
+      final payload = jsonDecode(row['payload'] as String);
+      try {
+        final response = await ApiClient.post('/orders', payload);
+        if (response.statusCode == 200 || response.statusCode == 201) {
+          await database.update(
+            'offline_orders',
+            {'status': 'synced'},
+            where: 'id = ?',
+            whereArgs: [orderId],
+          );
+          syncedCount++;
+        } else {
+          lastError = _responseMessage(response.statusCode, response.body);
+          debugPrint(
+            'Pending order $orderId was rejected: ${response.statusCode} '
+            '$lastError',
+          );
+        }
+      } catch (error) {
+        lastError = 'Koneksi ke server transaksi belum tersedia.';
+        debugPrint('Pending order $orderId sync failed: $error');
+      }
+    }
+
+    final countRows = await database.rawQuery(
+      "SELECT COUNT(*) AS total FROM offline_orders WHERE status = 'pending'",
+    );
+    final pendingCount = (countRows.first['total'] as num?)?.toInt() ?? 0;
+    return OrderSyncResult(
+      syncedCount: syncedCount,
+      pendingCount: pendingCount,
+      error: pendingCount == 0 ? null : lastError,
+    );
+  }
+
+  Future<int> _resolveOutletId() async {
+    final prefs = await SharedPreferences.getInstance();
+    final rawUser = prefs.getString('auth_user');
+    if (rawUser != null && rawUser.isNotEmpty) {
+      try {
+        final user = Map<String, dynamic>.from(jsonDecode(rawUser) as Map);
+        final direct = int.tryParse(user['outlet_id']?.toString() ?? '');
+        if (direct != null) return direct;
+
+        final outlets = user['outlets'];
+        if (outlets is List && outlets.isNotEmpty && outlets.first is Map) {
+          final id = int.tryParse(
+            (outlets.first as Map)['id']?.toString() ?? '',
+          );
+          if (id != null) return id;
+        }
+      } catch (error) {
+        debugPrint('Cached outlet could not be read: $error');
+      }
+    }
+    throw StateError('Outlet aktif belum tersedia untuk transaksi.');
+  }
+
+  String _responseMessage(int statusCode, String body) {
+    if (statusCode == 401) {
+      return 'Sesi masuk sudah berakhir. Silakan masuk kembali.';
+    }
+    if (statusCode >= 500) {
+      return 'Server transaksi sedang bermasalah.';
+    }
+
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map && decoded['message'] != null) {
+        return decoded['message'].toString();
+      }
+    } catch (_) {}
+    return 'Data transaksi ditolak oleh server.';
+  }
+
+  static String _two(int value) => value.toString().padLeft(2, '0');
 }
