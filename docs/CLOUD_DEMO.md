@@ -1,116 +1,128 @@
 # Tjoerah POS Cloud Demo
 
-Arsitektur demo gratis:
+Arsitektur demo gratis yang dipakai:
 
 ```text
 Flutter pada ponsel atau Chrome
         |
         v
-Laravel API di Back4App Containers Free
+Laravel API pada situs PHP alwaysdata Free
         |
         v
-PostgreSQL di Neon Free
+PostgreSQL terkelola pada akun alwaysdata yang sama
 ```
 
 Komputer lokal tidak perlu menjalankan Laravel atau PostgreSQL. Setelah domain
-Back4App menjadi URL API bawaan Flutter, demonstrasi di perangkat cukup dimulai
-dengan:
+alwaysdata menjadi URL API bawaan Flutter, demonstrasi di perangkat cukup
+dimulai dengan:
 
 ```bash
 cd tjoerah_mobile
 flutter run
 ```
 
-## Karakteristik Paket Gratis
+## Batas Penggunaan
 
-Back4App Containers Free tidak meminta kartu kredit. Paketnya menyediakan satu
-container dengan 0,25 shared CPU, RAM 256 MB, transfer 100 GB, deployment dari
-GitHub, dan domain `b4a.run`. Container backend Tjoerah memakai sekitar 64 MB
-RAM pada pengujian lokal.
+Paket alwaysdata Free tidak meminta kartu kredit dan tidak memiliki batas
+waktu. Paket ini menyediakan domain `alwaysdata.net`, PHP, Composer, SSH,
+PostgreSQL, penyimpanan 1 GB, dan RAM 256 MB.
 
-Database transaksi tetap berada di Neon sehingga redeploy container tidak
-menghapus data.
+Paket Free ditujukan untuk penggunaan personal. Deployment ini hanya digunakan
+sebagai prototipe dan presentasi, bukan operasional bisnis atau penyimpanan data
+klien. Sebelum aplikasi dipakai dalam bisnis, pindahkan ke paket atau penyedia
+produksi dengan kapasitas, ketentuan penggunaan, dan SLA yang sesuai.
 
-## 1. Database Neon
+## 1. Buat Akun Free
 
-Project berikut sudah dibuat:
+1. Buka <https://www.alwaysdata.com/en/register/>.
+2. Pilih paket **Free** dan selesaikan verifikasi e-mail.
+3. Catat nama akun. Domain permanennya berbentuk
+   `https://NAMA_AKUN.alwaysdata.net`.
 
-```text
-Project: tjoerah-pos
-Region: AWS Europe (Frankfurt)
-Database: tjoerah_pos
-```
+Akun Free biasanya sudah memiliki pengguna SSH serta database dan pengguna
+PostgreSQL awal. Detail yang tepat selalu tersedia pada panel administrasi.
 
-Ambil pooled connection string dari menu **Connect** di Neon Console. Pastikan
-URL berisi `sslmode=require` dan jangan menyimpannya di Git.
+## 2. Siapkan PostgreSQL
 
-## 2. Deploy Backend ke Back4App
-
-1. Masuk ke <https://www.back4app.com/> menggunakan GitHub.
-2. Pilih **Build new app**, lalu **Containers as a Service**.
-3. Hubungkan GitHub dan pilih repository `roidtaqi/tjoerah-pos`.
-4. Gunakan konfigurasi berikut:
+Buka **Databases > PostgreSQL**. Gunakan database dan pengguna awal atau buat
+keduanya khusus untuk Tjoerah POS. Catat nilai berikut tanpa menyimpannya di
+Git:
 
 ```text
-App name: tjoerah-pos-api
-Branch: agent/northflank-cloud-demo
-Root directory: tjoerah-backend
-Plan: Free
-Port: 8080
-Health check: /up
-Auto deploy: disabled (deploy pembaruan secara manual)
+Host: postgresql-NAMA_AKUN.alwaysdata.net
+Port: 5432
+Database: NAMA_DATABASE
+Username: NAMA_PENGGUNA_DATABASE
+Password: PASSWORD_DATABASE
 ```
 
-Dockerfile produksi sudah tersedia di root directory tersebut. Tambahkan tiga
-environment variable rahasia berikut sebelum membuat app:
+Database berada di cloud dan tidak bergantung pada komputer pengembangan.
 
-```text
-APP_KEY_BASE64=<base64 key 32 byte>
-DB_URL=<pooled connection string Neon>
-JWT_SECRET=<random secret>
-```
+## 3. Pasang Backend melalui SSH
 
-Buat dua nilai rahasia dari folder `tjoerah-backend`:
+Atur **Environment > PHP** ke PHP 8.4. Aktifkan SSH pada **Remote access >
+SSH/SFTP**, lalu hubungkan terminal ke:
 
 ```bash
-php -r 'echo base64_encode(random_bytes(32)), PHP_EOL;'
-openssl rand -hex 48
+ssh NAMA_AKUN@ssh-NAMA_AKUN.alwaysdata.net
 ```
 
-Nilai pertama digunakan untuk `APP_KEY_BASE64` dan nilai kedua untuk
-`JWT_SECRET`. Konfigurasi nonrahasia seperti PostgreSQL, SSL, logging, satu PHP
-worker, dan seeder demo sudah menjadi default image.
+Pada server alwaysdata, jalankan:
 
-Klik **Create App**. Container otomatis menjalankan migrasi, seeder akun demo,
-cache Laravel, dan server HTTP. Seeder aman dijalankan berulang kali.
+```bash
+git clone --branch agent/northflank-cloud-demo \
+  https://github.com/roidtaqi/tjoerah-pos.git
+cd tjoerah-pos/tjoerah-backend
+cp .env.alwaysdata.example .env
+```
 
-## 3. Hubungkan Flutter
+Edit `.env` hanya di server. Ganti `YOUR_ACCOUNT`, URL aplikasi, dan seluruh
+nilai database. Jangan mengirim atau melakukan commit terhadap file `.env`.
 
-Deployment aktif saat ini:
+Setelah konfigurasi terisi, jalankan:
+
+```bash
+sh cloud/deploy-shared-hosting.sh
+```
+
+Skrip tersebut memasang dependency produksi, membuat `APP_KEY` dan
+`JWT_SECRET` bila masih kosong, menjalankan migrasi, menanam data demo secara
+idempoten, dan membuat cache produksi Laravel.
+
+## 4. Arahkan Situs ke Laravel
+
+Buka **Web > Sites** dan ubah situs domain akun dengan konfigurasi:
 
 ```text
-https://tjoerahpos-4fsvco9z.b4a.run
+Type: PHP
+Address: NAMA_AKUN.alwaysdata.net
+Root directory: /home/NAMA_AKUN/tjoerah-pos/tjoerah-backend/public
+PHP version: 8.4
+HTTPS redirect: enabled
 ```
 
-Health check dapat diperiksa melalui:
+Laravel sudah memiliki `public/.htaccess` untuk meneruskan route API ke front
+controller. Uji deployment melalui:
 
 ```text
-https://tjoerahpos-4fsvco9z.b4a.run/up
+https://NAMA_AKUN.alwaysdata.net/up
 ```
 
-Tambahkan `APP_URL=https://tjoerahpos-4fsvco9z.b4a.run` pada environment
-variables Back4App jika aplikasi kelak membuat URL absolut untuk notifikasi atau
-file.
+## 5. Hubungkan Flutter
 
-URL cloud sudah menjadi nilai bawaan Flutter. Untuk menggantinya sementara,
-gunakan:
+Setelah health check dan login cloud berhasil, jadikan URL berikut sebagai nilai
+bawaan `API_BASE_URL` di Flutter:
+
+```text
+https://NAMA_AKUN.alwaysdata.net/api
+```
+
+URL lain tetap dapat diuji tanpa mengubah kode:
 
 ```bash
 flutter run \
   --dart-define=API_BASE_URL=https://api-lain.example/api
 ```
-
-Untuk penggunaan normal, perintahnya cukup `flutter run`.
 
 ## Akun Demo
 
@@ -126,21 +138,20 @@ Password: password
 PIN: 5678
 ```
 
-`1234` dan `5678` adalah PIN untuk login PIN, bukan password login email.
+`1234` dan `5678` adalah PIN untuk login PIN, bukan password login e-mail.
 
 ## Sebelum Presentasi
 
-1. Buka `https://tjoerahpos-4fsvco9z.b4a.run/up` dan pastikan respons berhasil.
-2. Jalankan `flutter run` dan lakukan satu login percobaan.
-3. Gunakan akun Owner untuk mendemonstrasikan seluruh menu.
-
-Paket gratis sesuai untuk demo dan pengembangan, bukan operasional produksi
-dengan SLA. Matikan `SEED_DEMO_DATA` dan ganti seluruh kredensial sebelum
-menggunakan deployment untuk data bisnis nyata.
+1. Buka endpoint `/up` dan pastikan respons berhasil.
+2. Uji login e-mail Owner dan login PIN Kasir.
+3. Buat satu transaksi tunai, lalu pastikan pesanan tidak berstatus menunggu
+   sinkron.
+4. Jalankan `flutter run` pada perangkat presentasi.
 
 Referensi resmi:
 
-- <https://www.back4app.com/pricing/container-as-a-service>
-- <https://www.back4app.com/docs-containers>
-- <https://www.back4app.com/docs-containers/prepare-your-deployment>
-- <https://neon.com/pricing>
+- <https://www.alwaysdata.com/en/offers/>
+- <https://help.alwaysdata.com/en/docs/web-hosting/languages/php/packages/>
+- <https://help.alwaysdata.com/en/docs/web-hosting/databases/postgresql/>
+- <https://help.alwaysdata.com/en/docs/web-hosting/remote-access/ssh/>
+- <https://help.alwaysdata.com/en/docs/web-hosting/sites/add-a-site/>
