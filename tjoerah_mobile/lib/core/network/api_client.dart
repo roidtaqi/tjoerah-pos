@@ -6,9 +6,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 class ApiClient {
   static const String baseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://127.0.0.1:8000/api',
+    defaultValue: 'https://tjoerahpos-4fsvco9z.b4a.run/api',
   );
-  static const Duration requestTimeout = Duration(seconds: 12);
+  static const Duration requestTimeout = Duration(seconds: 30);
 
   static Future<Map<String, String>> _getHeaders() async {
     final prefs = await SharedPreferences.getInstance();

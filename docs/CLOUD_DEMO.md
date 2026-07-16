@@ -56,7 +56,9 @@ App name: tjoerah-pos-api
 Branch: agent/northflank-cloud-demo
 Root directory: tjoerah-backend
 Plan: Free
-Auto deploy: enabled
+Port: 8080
+Health check: /up
+Auto deploy: disabled (deploy pembaruan secara manual)
 ```
 
 Dockerfile produksi sudah tersedia di root directory tersebut. Tambahkan tiga
@@ -84,26 +86,31 @@ cache Laravel, dan server HTTP. Seeder aman dijalankan berulang kali.
 
 ## 3. Hubungkan Flutter
 
-Setelah deployment berstatus **Available**, buka domain dari **App Overview**
-dan periksa:
+Deployment aktif saat ini:
 
 ```text
-https://<service>.b4a.run/up
+https://tjoerahpos-4fsvco9z.b4a.run
 ```
 
-Tambahkan `APP_URL=https://<service>.b4a.run` pada environment variables setelah
-domain diketahui, lalu deploy ulang.
+Health check dapat diperiksa melalui:
 
-Sebelum URL cloud dijadikan nilai bawaan aplikasi, pengujian dapat dilakukan
-dengan:
+```text
+https://tjoerahpos-4fsvco9z.b4a.run/up
+```
+
+Tambahkan `APP_URL=https://tjoerahpos-4fsvco9z.b4a.run` pada environment
+variables Back4App jika aplikasi kelak membuat URL absolut untuk notifikasi atau
+file.
+
+URL cloud sudah menjadi nilai bawaan Flutter. Untuk menggantinya sementara,
+gunakan:
 
 ```bash
 flutter run \
-  --dart-define=API_BASE_URL=https://<service>.b4a.run/api
+  --dart-define=API_BASE_URL=https://api-lain.example/api
 ```
 
-Setelah nilai bawaan `ApiClient` diperbarui dan aplikasi dibangun ulang,
-perintahnya cukup `flutter run`.
+Untuk penggunaan normal, perintahnya cukup `flutter run`.
 
 ## Akun Demo
 
@@ -123,7 +130,7 @@ PIN: 5678
 
 ## Sebelum Presentasi
 
-1. Buka `https://<service>.b4a.run/up` dan pastikan respons berhasil.
+1. Buka `https://tjoerahpos-4fsvco9z.b4a.run/up` dan pastikan respons berhasil.
 2. Jalankan `flutter run` dan lakukan satu login percobaan.
 3. Gunakan akun Owner untuk mendemonstrasikan seluruh menu.
 
