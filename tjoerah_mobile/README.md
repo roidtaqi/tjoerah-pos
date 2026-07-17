@@ -1,17 +1,29 @@
-# tjoerah_mobile
+# Tjoerah POS Mobile
 
-A new Flutter project.
+Klien Flutter untuk operasional Tjoerah POS.
 
-## Getting Started
+## Menjalankan
 
-This project is a starting point for a Flutter application.
+```bash
+flutter pub get
+flutter run
+```
 
-A few resources to get you started if this is your first Flutter project:
+Secara default aplikasi memakai API lokal di `http://127.0.0.1:8000/api`.
+Gunakan `adb reverse tcp:8000 tcp:8000` sebelum `flutter run` pada perangkat
+Android melalui USB.
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+URL API lain dapat diberikan tanpa mengubah source code:
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```bash
+flutter run --dart-define=API_BASE_URL=http://HOST:8000/api
+```
+
+## Pemeriksaan
+
+```bash
+flutter analyze
+flutter test
+```
+
+Panduan lengkap aplikasi tersedia di [`README.md`](../README.md).
