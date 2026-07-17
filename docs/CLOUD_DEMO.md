@@ -1,120 +1,100 @@
 # Tjoerah POS Cloud Demo
 
-Arsitektur demo gratis yang dipakai:
+Arsitektur demo berbiaya rendah:
 
 ```text
 Flutter pada ponsel atau Chrome
         |
         v
-Laravel API pada situs PHP alwaysdata Free
+Laravel API pada Helipod
         |
         v
-PostgreSQL terkelola pada akun alwaysdata yang sama
+PostgreSQL pada Neon Free
 ```
 
 Komputer lokal tidak perlu menjalankan Laravel atau PostgreSQL. Setelah domain
-alwaysdata menjadi URL API bawaan Flutter, demonstrasi di perangkat cukup
-dimulai dengan:
+Helipod menjadi URL API bawaan Flutter, demonstrasi di perangkat cukup dimulai
+dengan:
 
 ```bash
 cd tjoerah_mobile
 flutter run
 ```
 
-## Batas Penggunaan
+## Biaya dan Batas Penggunaan
 
-Paket alwaysdata Free tidak meminta kartu kredit dan tidak memiliki batas
-waktu. Paket ini menyediakan domain `alwaysdata.net`, PHP, Composer, SSH,
-PostgreSQL, penyimpanan 1 GB, dan RAM 256 MB.
+Gunakan preset **Chopper** dengan 0,25 vCPU, RAM 256 MB, satu replica, dan tanpa
+custom domain. Biayanya Rp700 per hari atau sekitar Rp21.000 untuk 30 hari.
+Domain `*.helipod.app`, HTTPS, internal networking, dan 1 GB storage sudah
+tersedia tanpa membeli domain sendiri.
 
-Paket Free ditujukan untuk penggunaan personal. Deployment ini hanya digunakan
-sebagai prototipe dan presentasi, bukan operasional bisnis atau penyimpanan data
-klien. Sebelum aplikasi dipakai dalam bisnis, pindahkan ke paket atau penyedia
-produksi dengan kapasitas, ketentuan penggunaan, dan SLA yang sesuai.
+Database tetap menggunakan project Neon Free yang sudah dibuat sehingga tidak
+ada biaya pod database tambahan dan redeploy aplikasi tidak menghapus data.
 
-## 1. Buat Akun Free
+Helipod adalah platform milik penyedia Indonesia dan menerima QRIS, transfer
+bank, serta virtual account. Infrastruktur komputasinya saat ini berada di luar
+Indonesia; deployment ini ditujukan untuk demo dan validasi awal, bukan sebagai
+keputusan final data residency atau produksi klien.
 
-1. Buka <https://www.alwaysdata.com/en/register/>.
-2. Pilih paket **Free** dan selesaikan verifikasi e-mail.
-3. Catat nama akun. Domain permanennya berbentuk
-   `https://NAMA_AKUN.alwaysdata.net`.
+## 1. Buat Akun Helipod
 
-Akun Free biasanya sudah memiliki pengguna SSH serta database dan pengguna
-PostgreSQL awal. Detail yang tepat selalu tersedia pada panel administrasi.
+1. Buka <https://helipod.io/> dan pilih **Mulai Gratis**.
+2. Masuk menggunakan GitHub agar repository dapat dihubungkan langsung.
+3. Jangan melakukan top-up sebelum deployment percobaan berhasil.
 
-## 2. Siapkan PostgreSQL
+## 2. Buat Project dari GitHub
 
-Buka **Databases > PostgreSQL**. Gunakan database dan pengguna awal atau buat
-keduanya khusus untuk Tjoerah POS. Catat nilai berikut tanpa menyimpannya di
-Git:
+Pilih **New Project > GitHub**, kemudian gunakan konfigurasi:
 
 ```text
-Host: postgresql-NAMA_AKUN.alwaysdata.net
-Port: 5432
-Database: NAMA_DATABASE
-Username: NAMA_PENGGUNA_DATABASE
-Password: PASSWORD_DATABASE
+Repository: roidtaqi/tjoerah-pos
+Branch: agent/northflank-cloud-demo
+Working directory: tjoerah-backend
+Build method: Dockerfile
+Preset: Chopper (0.25 vCPU, 256 MB RAM)
+Replicas: 1
+Custom domain: disabled
 ```
 
-Database berada di cloud dan tidak bergantung pada komputer pengembangan.
+Helipod mendukung working directory per service untuk repository monorepo dan
+akan menggunakan `tjoerah-backend/Dockerfile` sebagai proses build.
 
-## 3. Pasang Backend melalui SSH
+## 3. Tambahkan Rahasia
 
-Atur **Environment > PHP** ke PHP 8.4. Aktifkan SSH pada **Remote access >
-SSH/SFTP**, lalu hubungkan terminal ke:
-
-```bash
-ssh NAMA_AKUN@ssh-NAMA_AKUN.alwaysdata.net
-```
-
-Pada server alwaysdata, jalankan:
-
-```bash
-git clone --branch agent/northflank-cloud-demo \
-  https://github.com/roidtaqi/tjoerah-pos.git
-cd tjoerah-pos/tjoerah-backend
-cp .env.alwaysdata.example .env
-```
-
-Edit `.env` hanya di server. Ganti `YOUR_ACCOUNT`, URL aplikasi, dan seluruh
-nilai database. Jangan mengirim atau melakukan commit terhadap file `.env`.
-
-Setelah konfigurasi terisi, jalankan:
-
-```bash
-sh cloud/deploy-shared-hosting.sh
-```
-
-Skrip tersebut memasang dependency produksi, membuat `APP_KEY` dan
-`JWT_SECRET` bila masih kosong, menjalankan migrasi, menanam data demo secara
-idempoten, dan membuat cache produksi Laravel.
-
-## 4. Arahkan Situs ke Laravel
-
-Buka **Web > Sites** dan ubah situs domain akun dengan konfigurasi:
+Sebelum deploy, buka **Variables** dan tambahkan:
 
 ```text
-Type: PHP
-Address: NAMA_AKUN.alwaysdata.net
-Root directory: /home/NAMA_AKUN/tjoerah-pos/tjoerah-backend/public
-PHP version: 8.4
-HTTPS redirect: enabled
+APP_KEY_BASE64=<base64 key 32 byte>
+DB_URL=<pooled connection string Neon>
+JWT_SECRET=<random secret>
 ```
 
-Laravel sudah memiliki `public/.htaccess` untuk meneruskan route API ke front
-controller. Uji deployment melalui:
+Jangan menyimpan ketiga nilai tersebut di Git atau mengirimkannya melalui
+tangkapan layar. Nilai lain seperti PostgreSQL, SSL database, logging, queue
+sinkron, seeder demo, dan port 8080 sudah menjadi default image.
+
+## 4. Deploy dan Verifikasi
+
+Klik **Deploy**. Saat container dimulai, backend otomatis:
+
+1. Menjalankan migrasi database dengan retry.
+2. Menanam akun dan katalog demo secara idempoten.
+3. Membuat cache konfigurasi produksi.
+4. Menjalankan server HTTP pada port yang disediakan platform.
+
+Setelah status menjadi **Running**, salin magic domain yang diberikan dan uji:
 
 ```text
-https://NAMA_AKUN.alwaysdata.net/up
+https://NAMA-SERVICE.helipod.app/up
 ```
 
 ## 5. Hubungkan Flutter
 
-Setelah health check dan login cloud berhasil, jadikan URL berikut sebagai nilai
-bawaan `API_BASE_URL` di Flutter:
+Setelah health check, login, dan transaksi cloud berhasil, jadikan URL berikut
+sebagai nilai bawaan Flutter:
 
 ```text
-https://NAMA_AKUN.alwaysdata.net/api
+https://NAMA-SERVICE.helipod.app/api
 ```
 
 URL lain tetap dapat diuji tanpa mengubah kode:
@@ -144,14 +124,13 @@ PIN: 5678
 
 1. Buka endpoint `/up` dan pastikan respons berhasil.
 2. Uji login e-mail Owner dan login PIN Kasir.
-3. Buat satu transaksi tunai, lalu pastikan pesanan tidak berstatus menunggu
-   sinkron.
+3. Buat satu transaksi tunai dan pastikan pesanan berhasil disinkronkan.
 4. Jalankan `flutter run` pada perangkat presentasi.
 
 Referensi resmi:
 
-- <https://www.alwaysdata.com/en/offers/>
-- <https://help.alwaysdata.com/en/docs/web-hosting/languages/php/packages/>
-- <https://help.alwaysdata.com/en/docs/web-hosting/databases/postgresql/>
-- <https://help.alwaysdata.com/en/docs/web-hosting/remote-access/ssh/>
-- <https://help.alwaysdata.com/en/docs/web-hosting/sites/add-a-site/>
+- <https://helipod.io/pricing>
+- <https://helipod.io/feature/dockerfile-support>
+- <https://helipod.io/feature/environment-variables>
+- <https://docs.helipod.io/quick-start>
+- <https://neon.com/pricing>
