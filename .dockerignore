@@ -1,0 +1,13 @@
+*
+!tjoerah-backend/
+!tjoerah-backend/**
+
+tjoerah-backend/.env
+tjoerah-backend/.env.*
+tjoerah-backend/node_modules
+tjoerah-backend/vendor
+tjoerah-backend/tests
+tjoerah-backend/storage/logs/*
+tjoerah-backend/storage/framework/cache/*
+tjoerah-backend/storage/framework/sessions/*
+tjoerah-backend/storage/framework/views/*

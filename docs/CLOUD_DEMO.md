@@ -1,125 +1,110 @@
 # Tjoerah POS Cloud Demo
 
-Arsitektur demo gratis:
-
-- Flutter Web: GitHub Pages
-- Laravel API: Koyeb Free Web Service
-- PostgreSQL: Neon Free
-
-Frontend dan database tetap tersedia tanpa komputer lokal. Koyeb Free tidur
-setelah satu jam tanpa trafik dan bangun otomatis saat menerima request baru.
-Biasanya cold start memerlukan 1-5 detik. Buka endpoint `/up` sebelum presentasi
-untuk memastikan API sudah hangat.
-
-## 0. Publikasikan Source Code
-
-Koyeb dan GitHub Actions membaca repository GitHub, bukan perubahan yang masih
-berada di komputer lokal. Periksa, commit, lalu push seluruh perubahan yang akan
-dipresentasikan:
-
-```bash
-git status
-git add .github docs tjoerah-backend tjoerah_mobile
-git commit -m "Prepare Tjoerah POS cloud demo"
-git push origin main
-```
-
-## 1. Buat Database Neon
-
-1. Buat akun di <https://console.neon.tech>.
-2. Buat project `tjoerah-pos` di region AWS Europe (Frankfurt).
-3. Salin connection string PostgreSQL yang menggunakan SSL.
-4. Simpan connection string tersebut. Jangan masukkan ke Git.
-
-Paket Neon Free tidak memiliki batas waktu, menyediakan 0,5 GB storage, dan
-compute akan tidur ketika tidak digunakan.
-
-## 2. Buat Secret
-
-Jalankan perintah berikut dari folder `tjoerah-backend`:
-
-```bash
-php artisan key:generate --show
-openssl rand -hex 48
-```
-
-Nilai pertama digunakan sebagai `APP_KEY`. Nilai kedua digunakan sebagai
-`JWT_SECRET`.
-
-Di Koyeb, buka **Secrets** dan buat:
+Arsitektur demo berbiaya rendah:
 
 ```text
-TJOERAH_APP_KEY=<hasil php artisan key:generate --show>
-TJOERAH_JWT_SECRET=<hasil openssl rand -hex 48>
-NEON_DATABASE_URL=<connection string Neon>
+Flutter pada ponsel atau Chrome
+        |
+        v
+Laravel API pada Helipod
+        |
+        v
+PostgreSQL pada Neon Free
 ```
 
-## 3. Deploy Laravel ke Koyeb
-
-1. Masuk ke <https://app.koyeb.com> menggunakan GitHub.
-2. Pilih **Create Web Service**, lalu repository `roidtaqi/tjoerah-pos`.
-3. Pilih branch `main` dan builder **Buildpack**.
-4. Set work directory menjadi `tjoerah-backend`.
-5. Pilih instance **Free** dan region **Frankfurt**.
-6. Expose port `8000` menggunakan HTTP pada path `/`.
-7. Set health check HTTP ke path `/up` pada port `8000`.
-8. Masukkan environment berikut melalui **Bulk Edit**:
-
-```text
-APP_NAME=Tjoerah POS
-APP_ENV=production
-APP_KEY={{ secret.TJOERAH_APP_KEY }}
-APP_DEBUG=false
-APP_URL=https://{{ KOYEB_PUBLIC_DOMAIN }}
-APP_LOCALE=id
-APP_FALLBACK_LOCALE=id
-LOG_CHANNEL=stderr
-LOG_LEVEL=info
-DB_CONNECTION=pgsql
-DB_URL={{ secret.NEON_DATABASE_URL }}
-DB_SSLMODE=require
-SESSION_DRIVER=cookie
-CACHE_STORE=database
-QUEUE_CONNECTION=sync
-BROADCAST_CONNECTION=log
-FILESYSTEM_DISK=local
-JWT_SECRET={{ secret.TJOERAH_JWT_SECRET }}
-JWT_TTL=480
-CORS_ALLOWED_ORIGINS=https://roidtaqi.github.io,http://localhost:3000,http://127.0.0.1:3000
-SEED_DEMO_DATA=true
-```
-
-Deployment menjalankan migrasi dan seeder secara otomatis. Seeder aman untuk
-dijalankan ulang dan tidak mengubah password akun yang sudah ada.
-
-Setelah status service menjadi **Healthy**, buka:
-
-```text
-https://<domain-koyeb>/up
-```
-
-## 4. Hubungkan Flutter Web
-
-Set repository variable GitHub menggunakan URL Koyeb:
+Komputer lokal tidak perlu menjalankan Laravel atau PostgreSQL. Setelah domain
+Helipod menjadi URL API bawaan Flutter, demonstrasi di perangkat cukup dimulai
+dengan:
 
 ```bash
-gh variable set API_BASE_URL --body "https://<domain-koyeb>/api"
+cd tjoerah_mobile
+flutter run
 ```
 
-Di GitHub, buka **Settings > Pages** dan pilih **GitHub Actions** sebagai source.
-Kemudian jalankan workflow:
+## Biaya dan Batas Penggunaan
 
-```bash
-gh workflow run deploy-web.yml
-```
+Gunakan preset **Chopper** dengan 0,25 vCPU, RAM 256 MB, satu replica, dan tanpa
+custom domain. Biayanya Rp700 per hari atau sekitar Rp21.000 untuk 30 hari.
+Domain `*.helipod.app`, HTTPS, internal networking, dan 1 GB storage sudah
+tersedia tanpa membeli domain sendiri.
 
-Frontend akan tersedia di:
+Database tetap menggunakan project Neon Free yang sudah dibuat sehingga tidak
+ada biaya pod database tambahan dan redeploy aplikasi tidak menghapus data.
+
+Helipod adalah platform milik penyedia Indonesia dan menerima QRIS, transfer
+bank, serta virtual account. Infrastruktur komputasinya saat ini berada di luar
+Indonesia; deployment ini ditujukan untuk demo dan validasi awal, bukan sebagai
+keputusan final data residency atau produksi klien.
+
+## 1. Buat Akun Helipod
+
+1. Buka <https://helipod.io/> dan pilih **Mulai Gratis**.
+2. Masuk menggunakan GitHub agar repository dapat dihubungkan langsung.
+3. Jangan melakukan top-up sebelum deployment percobaan berhasil.
+
+## 2. Buat Project dari GitHub
+
+Pilih **New Project > GitHub**, kemudian gunakan konfigurasi:
 
 ```text
-https://roidtaqi.github.io/tjoerah-pos/
+Repository: roidtaqi/tjoerah-pos
+Branch: agent/northflank-cloud-demo
+Build method: root Dockerfile (auto-detected)
+Preset: Chopper (0.25 vCPU, 256 MB RAM)
+Replicas: 1
+Custom domain: disabled
 ```
 
-## 5. Akun Demo
+Dockerfile pada root repository secara eksplisit membangun folder
+`tjoerah-backend`, sehingga deployment tidak bergantung pada tersedianya
+pengaturan working directory di dashboard Helipod.
+
+## 3. Tambahkan Rahasia
+
+Sebelum deploy, buka **Variables** dan tambahkan:
+
+```text
+APP_KEY_BASE64=<base64 key 32 byte>
+DB_URL=<pooled connection string Neon>
+JWT_SECRET=<random secret>
+```
+
+Jangan menyimpan ketiga nilai tersebut di Git atau mengirimkannya melalui
+tangkapan layar. Nilai lain seperti PostgreSQL, SSL database, logging, queue
+sinkron, seeder demo, dan port 8080 sudah menjadi default image.
+
+## 4. Deploy dan Verifikasi
+
+Klik **Deploy**. Saat container dimulai, backend otomatis:
+
+1. Menjalankan migrasi database dengan retry.
+2. Menanam akun dan katalog demo secara idempoten.
+3. Membuat cache konfigurasi produksi.
+4. Menjalankan server HTTP pada port yang disediakan platform.
+
+Setelah status menjadi **Running**, salin magic domain yang diberikan dan uji:
+
+```text
+https://NAMA-SERVICE.helipod.app/up
+```
+
+## 5. Hubungkan Flutter
+
+Setelah health check, login, dan transaksi cloud berhasil, jadikan URL berikut
+sebagai nilai bawaan Flutter:
+
+```text
+https://NAMA-SERVICE.helipod.app/api
+```
+
+URL lain tetap dapat diuji tanpa mengubah kode:
+
+```bash
+flutter run \
+  --dart-define=API_BASE_URL=https://api-lain.example/api
+```
+
+## Akun Demo
 
 ```text
 Owner
@@ -133,27 +118,19 @@ Password: password
 PIN: 5678
 ```
 
-## Menjalankan Web Lokal dengan API Cloud
+`1234` dan `5678` adalah PIN untuk login PIN, bukan password login e-mail.
 
-Server Laravel lokal tidak diperlukan. Gunakan URL Koyeb saat menjalankan
-Flutter di Chrome:
+## Sebelum Presentasi
 
-```bash
-flutter run -d chrome \
-  --web-port 3000 \
-  --dart-define=API_BASE_URL=https://<domain-koyeb>/api
-```
-
-## Batas Paket Gratis
-
-Koyeb Free menyediakan 512 MB RAM dan akan tidur setelah satu jam tanpa trafik.
-Data tidak hilang karena PostgreSQL berada di Neon. Untuk server yang benar-benar
-tidak pernah tidur, gunakan Oracle Cloud Always Free atau Google Cloud Free Tier
-`e2-micro`; keduanya memerlukan pengelolaan VM dan biasanya verifikasi billing.
+1. Buka endpoint `/up` dan pastikan respons berhasil.
+2. Uji login e-mail Owner dan login PIN Kasir.
+3. Buat satu transaksi tunai dan pastikan pesanan berhasil disinkronkan.
+4. Jalankan `flutter run` pada perangkat presentasi.
 
 Referensi resmi:
 
-- <https://www.koyeb.com/docs/reference/instances>
-- <https://www.koyeb.com/docs/run-and-scale/scale-to-zero>
+- <https://helipod.io/pricing>
+- <https://helipod.io/feature/dockerfile-support>
+- <https://helipod.io/feature/environment-variables>
+- <https://docs.helipod.io/quick-start>
 - <https://neon.com/pricing>
-- <https://docs.github.com/pages>

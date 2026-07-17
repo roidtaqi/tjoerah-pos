@@ -49,4 +49,23 @@ class CloudDeploymentTest extends TestCase
             ->assertHeader('Access-Control-Allow-Origin', 'https://roidtaqi.github.io')
             ->assertHeader('Access-Control-Allow-Methods');
     }
+
+    public function test_flutter_web_localhost_origin_can_use_a_random_port(): void
+    {
+        config()->set('cors.allowed_origins', ['https://roidtaqi.github.io']);
+        config()->set('cors.allowed_origins_patterns', [
+            '#^https?://(localhost|127\.0\.0\.1)(:\d+)?$#',
+        ]);
+
+        $response = $this->call('OPTIONS', '/api/auth/pin/login', server: [
+            'HTTP_ORIGIN' => 'http://localhost:54321',
+            'HTTP_ACCESS_CONTROL_REQUEST_METHOD' => 'POST',
+            'HTTP_ACCESS_CONTROL_REQUEST_HEADERS' => 'content-type',
+        ]);
+
+        $response
+            ->assertNoContent()
+            ->assertHeader('Access-Control-Allow-Origin', 'http://localhost:54321')
+            ->assertHeader('Access-Control-Allow-Methods');
+    }
 }
