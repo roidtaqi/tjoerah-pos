@@ -6,11 +6,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/printer/print_job.dart';
 import '../../../core/theme/app_layout.dart';
 import '../../../shared/components/app_bottom_sheet.dart';
 import '../../../shared/components/app_button.dart';
 import '../../../shared/components/app_card.dart';
 import '../../orders/providers/order_history_provider.dart';
+import '../../settings/providers/printer_provider.dart';
 import '../providers/cart_provider.dart';
 import '../repositories/order_repository.dart';
 
@@ -31,9 +33,9 @@ Future<void> showPaymentFlow(BuildContext context) async {
         height: math.min(720, MediaQuery.sizeOf(context).height * 0.82),
         child: _PaymentPanel(
           compact: true,
-          onCompleted: (orderId) {
+          onCompleted: (order) async {
             Navigator.pop(sheetContext);
-            _showPaymentSuccess(context, orderId);
+            await showPaymentSuccessDialog(context, order);
           },
         ),
       ),
@@ -49,8 +51,8 @@ class PaymentScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Pembayaran')),
       body: _PaymentPanel(
-        onCompleted: (orderId) async {
-          await _showPaymentSuccess(context, orderId);
+        onCompleted: (order) async {
+          await showPaymentSuccessDialog(context, order);
           if (context.mounted) context.go('/pos');
         },
       ),
@@ -61,7 +63,7 @@ class PaymentScreen extends StatelessWidget {
 class _PaymentPanel extends ConsumerStatefulWidget {
   const _PaymentPanel({required this.onCompleted, this.compact = false});
 
-  final ValueChanged<String> onCompleted;
+  final Future<void> Function(TransactionPrintData order) onCompleted;
   final bool compact;
 
   @override
@@ -343,7 +345,7 @@ class _PaymentPanelState extends ConsumerState<_PaymentPanel> {
         : {_method: cart.total};
 
     try {
-      final orderId = await OrderRepository().createOrder(
+      final createdOrder = await OrderRepository().createOrder(
         items: cart.items,
         subtotal: cart.subtotal,
         discount: cart.discount,
@@ -356,9 +358,39 @@ class _PaymentPanelState extends ConsumerState<_PaymentPanel> {
         paymentMethod: method,
         paymentBreakdown: breakdown,
       );
+      final printData = TransactionPrintData(
+        orderId: createdOrder.id,
+        receiptNumber: createdOrder.receiptNumber,
+        createdAt: createdOrder.createdAt,
+        orderTypeLabel: cart.orderTypeLabel,
+        tableName: cart.tableName,
+        customerName: cart.customerName,
+        note: cart.note,
+        paymentMethod: method,
+        paymentBreakdown: breakdown,
+        items: cart.items
+            .map(
+              (item) => PrintOrderItem(
+                name: item.name,
+                quantity: item.quantity,
+                unitPrice: item.price,
+                station: item.station,
+              ),
+            )
+            .toList(),
+        subtotal: cart.subtotal,
+        discount: cart.discount,
+        tax: cart.tax,
+        total: cart.total,
+        amountReceived: !_splitPayment && _method == 'cash' ? cash : null,
+        change: !_splitPayment && _method == 'cash'
+            ? math.max(0, cash - cart.total)
+            : 0,
+        isSynced: createdOrder.isSynced,
+      );
       ref.invalidate(orderHistoryProvider);
       ref.read(cartProvider.notifier).clearCart();
-      if (mounted) widget.onCompleted(orderId);
+      if (mounted) await widget.onCompleted(printData);
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -470,11 +502,53 @@ class _PaymentRow extends StatelessWidget {
 NumberFormat _currency() =>
     NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
 
-Future<void> _showPaymentSuccess(BuildContext context, String orderId) async {
+Future<void> showPaymentSuccessDialog(
+  BuildContext context,
+  TransactionPrintData order,
+) async {
   if (!context.mounted) return;
   await showDialog<void>(
     context: context,
-    builder: (dialogContext) => AlertDialog(
+    builder: (_) => _PaymentSuccessDialog(order: order),
+  );
+}
+
+enum _PrintTarget { all, receipt, kitchen }
+
+class _PaymentSuccessDialog extends ConsumerStatefulWidget {
+  const _PaymentSuccessDialog({required this.order});
+
+  final TransactionPrintData order;
+
+  @override
+  ConsumerState<_PaymentSuccessDialog> createState() =>
+      _PaymentSuccessDialogState();
+}
+
+class _PaymentSuccessDialogState extends ConsumerState<_PaymentSuccessDialog> {
+  bool _automaticPrintScheduled = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final printer = ref.watch(printerProvider);
+    _scheduleAutomaticPrint(printer);
+
+    final theme = Theme.of(context);
+    final statusColor = printer.error != null
+        ? theme.colorScheme.error
+        : printer.notice != null
+        ? const Color(0xFF15803D)
+        : theme.colorScheme.onSurfaceVariant;
+    final printerStatus =
+        printer.error ??
+        printer.notice ??
+        (printer.isReady
+            ? '${printer.connectedDevice!.name ?? 'Printer'} siap digunakan.'
+            : printer.isScanning
+            ? 'Mencari printer yang sudah dipasangkan...'
+            : 'Hubungkan printer dari Pengaturan untuk mencetak.');
+
+    return AlertDialog(
       icon: Container(
         width: 52,
         height: 52,
@@ -489,17 +563,130 @@ Future<void> _showPaymentSuccess(BuildContext context, String orderId) async {
         ),
       ),
       title: const Text('Pembayaran tersimpan'),
-      content: Text(
-        'Pesanan #${orderId.substring(0, 8).toUpperCase()} siap diproses. Data akan disinkronkan otomatis.',
-        textAlign: TextAlign.center,
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 440),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Pesanan #${widget.order.shortOrderId} siap diproses.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                widget.order.isSynced
+                    ? 'Transaksi sudah tersinkron.'
+                    : 'Transaksi tersimpan di perangkat dan menunggu sinkronisasi.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall,
+              ),
+              const SizedBox(height: 18),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      printer.isReady
+                          ? Icons.print_outlined
+                          : Icons.print_disabled_outlined,
+                      size: 20,
+                      color: statusColor,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        printerStatus,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: statusColor,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              FilledButton.icon(
+                onPressed: printer.isReady && !printer.isPrinting
+                    ? () => _print(_PrintTarget.all)
+                    : null,
+                icon: printer.isPrinting
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.print_rounded),
+                label: Text(
+                  printer.isPrinting ? 'Mencetak...' : 'Cetak struk & dapur',
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: printer.isReady && !printer.isPrinting
+                          ? () => _print(_PrintTarget.receipt)
+                          : null,
+                      icon: const Icon(Icons.receipt_long_outlined),
+                      label: const Text('Struk'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: printer.isReady && !printer.isPrinting
+                          ? () => _print(_PrintTarget.kitchen)
+                          : null,
+                      icon: const Icon(Icons.restaurant_outlined),
+                      label: const Text('Dapur'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
       actionsAlignment: MainAxisAlignment.center,
       actions: [
-        FilledButton(
-          onPressed: () => Navigator.pop(dialogContext),
+        FilledButton.tonal(
+          onPressed: printer.isPrinting ? null : () => Navigator.pop(context),
           child: const Text('Pesanan baru'),
         ),
       ],
-    ),
-  );
+    );
+  }
+
+  void _scheduleAutomaticPrint(PrinterState printer) {
+    if (_automaticPrintScheduled || !printer.isReady || printer.isPrinting) {
+      return;
+    }
+    _automaticPrintScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _print(_PrintTarget.all);
+    });
+  }
+
+  Future<void> _print(_PrintTarget target) async {
+    final notifier = ref.read(printerProvider.notifier);
+    try {
+      switch (target) {
+        case _PrintTarget.all:
+          await notifier.printTransaction(widget.order);
+        case _PrintTarget.receipt:
+          await notifier.printReceipt(widget.order);
+        case _PrintTarget.kitchen:
+          await notifier.printKitchenTickets(widget.order);
+      }
+    } catch (_) {
+      // PrinterNotifier exposes the actionable error in PrinterState.
+    }
+  }
 }

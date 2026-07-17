@@ -1,3 +1,4 @@
+import 'package:blue_thermal_printer/blue_thermal_printer.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -162,8 +163,8 @@ class SettingsScreen extends ConsumerWidget {
                 ),
                 const SizedBox(height: 24),
                 const _SectionLabel(
-                  title: 'Printer struk',
-                  subtitle: 'Perangkat Bluetooth yang sudah dipasangkan',
+                  title: 'Printer transaksi',
+                  subtitle: 'Struk pelanggan dan tiket pesanan dapur',
                 ),
                 const SizedBox(height: 10),
                 _PrinterCard(
@@ -175,6 +176,9 @@ class SettingsScreen extends ConsumerWidget {
                   onDisconnect: () =>
                       ref.read(printerProvider.notifier).disconnect(),
                   onTest: () => ref.read(printerProvider.notifier).testPrint(),
+                  onOpenBluetooth: () => ref
+                      .read(printerProvider.notifier)
+                      .openBluetoothSettings(),
                 ),
                 const SizedBox(height: 24),
                 AppButton(
@@ -391,13 +395,15 @@ class _PrinterCard extends StatelessWidget {
     required this.onConnect,
     required this.onDisconnect,
     required this.onTest,
+    required this.onOpenBluetooth,
   });
 
   final PrinterState state;
   final VoidCallback onRefresh;
-  final ValueChanged<dynamic> onConnect;
+  final ValueChanged<BluetoothDevice> onConnect;
   final VoidCallback onDisconnect;
   final VoidCallback onTest;
+  final VoidCallback onOpenBluetooth;
 
   @override
   Widget build(BuildContext context) {
@@ -442,32 +448,61 @@ class _PrinterCard extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
               child: Text(
-                'Bluetooth belum tersedia di perangkat ini.',
+                state.error!,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.error,
+                ),
+              ),
+            ),
+          if (state.notice != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: Text(
+                state.notice!,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: AppColors.success,
                 ),
               ),
             ),
           Divider(color: theme.colorScheme.outline),
           if (state.connectedDevice != null)
             Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: onTest,
-                      icon: const Icon(Icons.print_outlined, size: 19),
-                      label: const Text('Cetak tes'),
-                    ),
+                  Text(
+                    'Printer ini menerima struk dan tiket dapur setelah pembayaran.',
+                    style: theme.textTheme.bodySmall,
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextButton.icon(
-                      onPressed: onDisconnect,
-                      icon: const Icon(Icons.link_off_rounded, size: 19),
-                      label: const Text('Putuskan'),
-                    ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: state.isPrinting ? null : onTest,
+                          icon: state.isPrinting
+                              ? const SizedBox.square(
+                                  dimension: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.print_outlined, size: 19),
+                          label: Text(
+                            state.isPrinting ? 'Mencetak...' : 'Cetak tes',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextButton.icon(
+                          onPressed: state.isPrinting ? null : onDisconnect,
+                          icon: const Icon(Icons.link_off_rounded, size: 19),
+                          label: const Text('Putuskan'),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -475,10 +510,20 @@ class _PrinterCard extends StatelessWidget {
           else if (!state.isScanning && state.devices.isEmpty)
             Padding(
               padding: const EdgeInsets.all(20),
-              child: Text(
-                'Tidak ada printer yang sudah dipasangkan. Pasangkan printer dari pengaturan perangkat, lalu cari ulang.',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall,
+              child: Column(
+                children: [
+                  Text(
+                    'Pasangkan printer thermal dari Bluetooth Android, lalu cari ulang.',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: onOpenBluetooth,
+                    icon: const Icon(Icons.bluetooth_rounded),
+                    label: const Text('Buka Bluetooth'),
+                  ),
+                ],
               ),
             )
           else
@@ -493,7 +538,12 @@ class _PrinterCard extends StatelessWidget {
                   onPressed: state.isConnecting
                       ? null
                       : () => onConnect(device),
-                  child: const Text('Hubungkan'),
+                  child: state.isConnecting
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Hubungkan'),
                 ),
               ),
             ),

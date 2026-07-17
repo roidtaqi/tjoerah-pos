@@ -23,10 +23,24 @@ class OrderSyncResult {
   bool get isComplete => pendingCount == 0;
 }
 
+class CreatedOrder {
+  const CreatedOrder({
+    required this.id,
+    required this.receiptNumber,
+    required this.createdAt,
+    required this.isSynced,
+  });
+
+  final String id;
+  final String receiptNumber;
+  final DateTime createdAt;
+  final bool isSynced;
+}
+
 class OrderRepository {
   static const _uuid = Uuid();
 
-  Future<String> createOrder({
+  Future<CreatedOrder> createOrder({
     required List<CartItem> items,
     required double subtotal,
     required double discount,
@@ -88,7 +102,12 @@ class OrderRepository {
       final response = await ApiClient.post('/orders', payload);
       if (response.statusCode == 200 || response.statusCode == 201) {
         await _saveLocal(orderId, payload, timestamp, 'synced');
-        return orderId;
+        return CreatedOrder(
+          id: orderId,
+          receiptNumber: receiptNumber,
+          createdAt: now,
+          isSynced: true,
+        );
       }
       debugPrint(
         'Order API rejected request: ${response.statusCode} '
@@ -99,7 +118,12 @@ class OrderRepository {
     }
 
     await _saveLocal(orderId, payload, timestamp, 'pending');
-    return orderId;
+    return CreatedOrder(
+      id: orderId,
+      receiptNumber: receiptNumber,
+      createdAt: now,
+      isSynced: false,
+    );
   }
 
   Future<void> _saveLocal(
