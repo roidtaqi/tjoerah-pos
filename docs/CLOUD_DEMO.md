@@ -49,15 +49,15 @@ Pilih **New Project > GitHub**, kemudian gunakan konfigurasi:
 ```text
 Repository: roidtaqi/tjoerah-pos
 Branch: agent/northflank-cloud-demo
-Working directory: tjoerah-backend
-Build method: Dockerfile
+Build method: root Dockerfile (auto-detected)
 Preset: Chopper (0.25 vCPU, 256 MB RAM)
 Replicas: 1
 Custom domain: disabled
 ```
 
-Helipod mendukung working directory per service untuk repository monorepo dan
-akan menggunakan `tjoerah-backend/Dockerfile` sebagai proses build.
+Dockerfile pada root repository secara eksplisit membangun folder
+`tjoerah-backend`, sehingga deployment tidak bergantung pada tersedianya
+pengaturan working directory di dashboard Helipod.
 
 ## 3. Tambahkan Rahasia
 
