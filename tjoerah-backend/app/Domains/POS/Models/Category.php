@@ -12,18 +12,25 @@ class Category extends Model
 
     protected $guarded = [];
 
+    protected $casts = [
+        'is_active' => 'boolean',
+        'sort_order' => 'integer',
+    ];
+
     public function parent()
     {
-        return $this->belongsTo(\App\Domains\POS\Models\Category::class, 'parent_id');
+        return $this->belongsTo(Category::class, 'parent_id');
     }
 
     public function children()
     {
-        return $this->hasMany(\App\Domains\POS\Models\Category::class, 'parent_id');
+        return $this->hasMany(self::class, 'parent_id')
+            ->with('children')
+            ->orderBy('sort_order');
     }
 
     public function products()
     {
-        return $this->hasMany(\App\Domains\POS\Models\Product::class);
+        return $this->hasMany(Product::class);
     }
 }

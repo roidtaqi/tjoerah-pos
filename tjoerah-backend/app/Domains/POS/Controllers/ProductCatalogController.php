@@ -9,6 +9,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class ProductCatalogController extends Controller
 {
@@ -190,22 +191,117 @@ class ProductCatalogController extends Controller
             ->paginate(100);
     }
 
+    public function showCategory(Request $request, Category $category)
+    {
+        $this->ensureCategoryIsAccessible($request, $category);
+
+        return response()->json($category->load(['parent', 'children']));
+    }
+
     public function storeCategory(Request $request)
     {
-        $validated = $request->validate([
-            'company_id' => 'nullable|exists:companies,id',
-            'brand_id' => 'nullable|exists:brands,id',
-            'parent_id' => 'nullable|exists:categories,id',
-            'name' => 'required|string|max:255',
-            'sort_order' => 'nullable|integer',
-            'is_active' => 'boolean',
-        ]);
+        $this->normalizeNullableCategoryFields($request);
+        $validated = $request->validate($this->categoryRules());
         if ($request->user()?->company_id) {
             $validated['company_id'] = $request->user()->company_id;
         }
+        $this->validateCategoryParent($request, $validated);
         $category = Category::create($validated);
 
-        return response()->json($category, 201);
+        return response()->json($category->load(['parent', 'children']), 201);
+    }
+
+    public function updateCategory(Request $request, Category $category)
+    {
+        $this->ensureCategoryIsAccessible($request, $category);
+        $this->normalizeNullableCategoryFields($request);
+
+        $validated = $request->validate($this->categoryRules($category));
+        if ($request->user()?->company_id) {
+            $validated['company_id'] = $request->user()->company_id;
+        }
+        $this->validateCategoryParent($request, $validated, $category);
+        $category->update($validated);
+
+        return response()->json($category->fresh()->load(['parent', 'children']));
+    }
+
+    public function destroyCategory(Request $request, Category $category)
+    {
+        $this->ensureCategoryIsAccessible($request, $category);
+
+        if ($category->children()->exists()) {
+            throw ValidationException::withMessages([
+                'category' => 'Kategori masih memiliki subkategori. Pindahkan atau hapus subkategori terlebih dahulu.',
+            ]);
+        }
+        if ($category->products()->exists()) {
+            throw ValidationException::withMessages([
+                'category' => 'Kategori masih digunakan oleh produk. Pindahkan produk terlebih dahulu.',
+            ]);
+        }
+
+        $category->delete();
+
+        return response()->noContent();
+    }
+
+    private function categoryRules(?Category $category = null): array
+    {
+        $presence = $category ? 'sometimes' : 'required';
+
+        return [
+            'company_id' => 'nullable|exists:companies,id',
+            'brand_id' => 'nullable|exists:brands,id',
+            'parent_id' => 'nullable|exists:categories,id',
+            'name' => [$presence, 'string', 'max:255'],
+            'sort_order' => 'nullable|integer|min:0',
+            'is_active' => 'boolean',
+        ];
+    }
+
+    private function validateCategoryParent(
+        Request $request,
+        array $validated,
+        ?Category $category = null,
+    ): void {
+        if (! array_key_exists('parent_id', $validated) || $validated['parent_id'] === null) {
+            return;
+        }
+
+        $parent = Category::findOrFail($validated['parent_id']);
+        $this->ensureCategoryIsAccessible($request, $parent);
+
+        $companyId = $request->user()?->company_id
+            ?? ($validated['company_id'] ?? $category?->company_id);
+        if ((string) ($parent->company_id ?? '') !== (string) ($companyId ?? '')) {
+            throw ValidationException::withMessages([
+                'parent_id' => 'Kategori induk harus berada di perusahaan yang sama.',
+            ]);
+        }
+
+        for ($ancestor = $parent; $ancestor !== null; $ancestor = $ancestor->parent) {
+            if ($category && (int) $ancestor->id === (int) $category->id) {
+                throw ValidationException::withMessages([
+                    'parent_id' => 'Kategori tidak dapat dijadikan anak dari dirinya sendiri atau turunannya.',
+                ]);
+            }
+        }
+    }
+
+    private function ensureCategoryIsAccessible(Request $request, Category $category): void
+    {
+        $companyId = $request->user()?->company_id;
+        abort_if($companyId && (int) $category->company_id !== (int) $companyId, 404);
+    }
+
+    private function normalizeNullableCategoryFields(Request $request): void
+    {
+        foreach (['company_id', 'brand_id', 'parent_id', 'sort_order'] as $field) {
+            if ($request->exists($field) && trim((string) $request->input($field)) === '') {
+                $request->merge([$field => null]);
+            }
+        }
     }
 
     public function modifierGroups(Request $request)

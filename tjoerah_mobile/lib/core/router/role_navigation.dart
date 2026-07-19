@@ -209,7 +209,10 @@ List<RoleDestination> destinationsForRole(AppRole role) => switch (role) {
   ],
 };
 
-bool canManageProductsForUser(Map<String, dynamic>? user) {
+bool canManageCatalogForUser(Map<String, dynamic>? user) {
   final role = appRoleForUser(user);
   return role == AppRole.owner || role == AppRole.admin;
 }
+
+bool canManageProductsForUser(Map<String, dynamic>? user) =>
+    canManageCatalogForUser(user);

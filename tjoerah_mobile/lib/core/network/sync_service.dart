@@ -27,7 +27,11 @@ class SyncService {
               await txn.insert('categories', {
                 'id': cat['id'].toString(),
                 'name': cat['name'],
+                'parent_id': cat['parent_id']?.toString(),
                 'sort_order': cat['sort_order'] ?? 0,
+                'is_active': (cat['is_active'] == 1 || cat['is_active'] == true)
+                    ? 1
+                    : 0,
               });
             }
           }

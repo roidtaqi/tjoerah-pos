@@ -14,6 +14,109 @@ class ProductCatalogManagementTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_owner_can_create_read_update_and_delete_categories(): void
+    {
+        $company = Company::create(['name' => 'Tjoerah']);
+        $owner = User::factory()->create([
+            'company_id' => $company->id,
+            'role' => 'owner',
+        ]);
+        $this->actingAs($owner, 'api');
+
+        $category = $this->postJson('/api/categories', [
+            'name' => 'Minuman',
+            'sort_order' => 2,
+            'is_active' => true,
+        ])->assertCreated()
+            ->assertJsonPath('company_id', $company->id)
+            ->assertJsonPath('name', 'Minuman')
+            ->json();
+
+        $this->getJson("/api/categories/{$category['id']}")
+            ->assertOk()
+            ->assertJsonPath('sort_order', 2);
+
+        $this->patchJson("/api/categories/{$category['id']}", [
+            'name' => 'Minuman Dingin',
+            'sort_order' => 4,
+            'is_active' => false,
+        ])->assertOk()
+            ->assertJsonPath('name', 'Minuman Dingin')
+            ->assertJsonPath('sort_order', 4)
+            ->assertJsonPath('is_active', false);
+
+        $this->deleteJson("/api/categories/{$category['id']}")->assertNoContent();
+        $this->assertSoftDeleted('categories', ['id' => $category['id']]);
+    }
+
+    public function test_category_hierarchy_and_product_usage_are_protected(): void
+    {
+        $company = Company::create(['name' => 'Tjoerah']);
+        $owner = User::factory()->create([
+            'company_id' => $company->id,
+            'role' => 'owner',
+        ]);
+        $parent = Category::create([
+            'company_id' => $company->id,
+            'name' => 'Minuman',
+        ]);
+        $child = Category::create([
+            'company_id' => $company->id,
+            'parent_id' => $parent->id,
+            'name' => 'Kopi',
+        ]);
+        Product::create([
+            'company_id' => $company->id,
+            'category_id' => $child->id,
+            'name' => 'Americano',
+            'base_price' => 22000,
+        ]);
+        $this->actingAs($owner, 'api');
+
+        $this->deleteJson("/api/categories/{$parent->id}")
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('category');
+        $this->deleteJson("/api/categories/{$child->id}")
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('category');
+        $this->patchJson("/api/categories/{$parent->id}", [
+            'parent_id' => $child->id,
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors('parent_id');
+    }
+
+    public function test_cashier_cannot_mutate_categories(): void
+    {
+        $cashier = User::factory()->create(['role' => 'cashier']);
+        $category = Category::create(['name' => 'Kopi']);
+        $this->actingAs($cashier, 'api');
+
+        $this->postJson('/api/categories', ['name' => 'Forbidden Category'])
+            ->assertForbidden();
+        $this->patchJson("/api/categories/{$category->id}", ['name' => 'Changed'])
+            ->assertForbidden();
+        $this->deleteJson("/api/categories/{$category->id}")
+            ->assertForbidden();
+    }
+
+    public function test_owner_cannot_manage_another_company_category(): void
+    {
+        $ownerCompany = Company::create(['name' => 'Owner Company']);
+        $otherCompany = Company::create(['name' => 'Other Company']);
+        $owner = User::factory()->create([
+            'company_id' => $ownerCompany->id,
+            'role' => 'owner',
+        ]);
+        $category = Category::create([
+            'company_id' => $otherCompany->id,
+            'name' => 'Private Category',
+        ]);
+
+        $this->actingAs($owner, 'api')
+            ->patchJson("/api/categories/{$category->id}", ['name' => 'Changed'])
+            ->assertNotFound();
+    }
+
     public function test_owner_can_create_read_update_and_delete_products(): void
     {
         $company = Company::create(['name' => 'Tjoerah']);
@@ -73,9 +176,12 @@ class ProductCatalogManagementTest extends TestCase
         $this->assertSoftDeleted('products', ['id' => $product['id']]);
     }
 
-    public function test_admin_direct_or_assigned_role_can_manage_products(): void
+    public function test_admin_direct_or_assigned_role_can_manage_catalog(): void
     {
         $admin = User::factory()->create(['role' => 'admin']);
+        $this->actingAs($admin, 'api')
+            ->postJson('/api/categories', ['name' => 'Admin Category'])
+            ->assertCreated();
         $this->actingAs($admin, 'api')
             ->postJson('/api/products', [
                 'name' => 'Admin Product',

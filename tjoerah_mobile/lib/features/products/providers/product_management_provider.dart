@@ -119,6 +119,72 @@ class ProductManagementNotifier extends AsyncNotifier<ProductManagementState> {
     }
   }
 
+  Future<ProductMutationResult> createCategory(CategoryDraft draft) async {
+    try {
+      final response = await ApiClient.post('/categories', draft.toJson());
+      if (response.statusCode != 201) {
+        return ProductMutationResult.failure(_responseMessage(response.body));
+      }
+
+      final catalogSynced = await _syncAfterMutation();
+      return ProductMutationResult.success(
+        catalogSynced
+            ? '${draft.name} berhasil ditambahkan.'
+            : '${draft.name} tersimpan. Sinkronkan katalog POS saat koneksi stabil.',
+      );
+    } catch (_) {
+      return const ProductMutationResult.failure(
+        'Kategori belum dapat ditambahkan. Periksa koneksi lalu coba lagi.',
+      );
+    }
+  }
+
+  Future<ProductMutationResult> updateCategory(
+    CategoryModel category,
+    CategoryDraft draft,
+  ) async {
+    try {
+      final response = await ApiClient.patch(
+        '/categories/${category.id}',
+        draft.toJson(),
+      );
+      if (response.statusCode != 200) {
+        return ProductMutationResult.failure(_responseMessage(response.body));
+      }
+
+      final catalogSynced = await _syncAfterMutation();
+      return ProductMutationResult.success(
+        catalogSynced
+            ? '${draft.name} berhasil diperbarui.'
+            : '${draft.name} diperbarui. Sinkronkan katalog POS saat koneksi stabil.',
+      );
+    } catch (_) {
+      return const ProductMutationResult.failure(
+        'Perubahan kategori belum dapat disimpan. Periksa koneksi lalu coba lagi.',
+      );
+    }
+  }
+
+  Future<ProductMutationResult> deleteCategory(CategoryModel category) async {
+    try {
+      final response = await ApiClient.delete('/categories/${category.id}');
+      if (response.statusCode != 204) {
+        return ProductMutationResult.failure(_responseMessage(response.body));
+      }
+
+      final catalogSynced = await _syncAfterMutation();
+      return ProductMutationResult.success(
+        catalogSynced
+            ? '${category.name} berhasil dihapus.'
+            : '${category.name} dihapus. Sinkronkan katalog POS saat koneksi stabil.',
+      );
+    } catch (_) {
+      return const ProductMutationResult.failure(
+        'Kategori belum dapat dihapus. Periksa koneksi lalu coba lagi.',
+      );
+    }
+  }
+
   Future<ProductManagementState> _loadRemote() async {
     final results = await Future.wait([_fetchProducts(), _fetchCategories()]);
     return ProductManagementState(
@@ -182,7 +248,10 @@ class ProductManagementNotifier extends AsyncNotifier<ProductManagementState> {
       for (final category in categories) category.id: category,
     };
     final result = unique.values.toList();
-    result.sort((left, right) => left.name.compareTo(right.name));
+    result.sort((left, right) {
+      final byOrder = left.sortOrder.compareTo(right.sortOrder);
+      return byOrder != 0 ? byOrder : left.name.compareTo(right.name);
+    });
     return result;
   }
 

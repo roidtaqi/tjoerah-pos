@@ -123,6 +123,13 @@ class OperationsScreen extends ConsumerWidget {
                           onTap: () => context.push('/products/manage'),
                         ),
                         const Divider(),
+                        AppListTile(
+                          title: 'Kelola kategori',
+                          subtitle: 'Kelompok dan urutan katalog POS',
+                          icon: Icons.category_outlined,
+                          onTap: () => context.push('/categories/manage'),
+                        ),
+                        const Divider(),
                       ],
                       AppListTile(
                         title: 'Meja & area',

@@ -46,6 +46,7 @@ Route::middleware('auth:api')->group(function () {
     // Catalog API
     Route::get('/catalog/sync', [ProductCatalogController::class, 'sync']);
     Route::get('/categories', [ProductCatalogController::class, 'categories']);
+    Route::get('/categories/{category}', [ProductCatalogController::class, 'showCategory']);
     Route::get('/products', [ProductCatalogController::class, 'getProducts']);
     Route::get('/products/search', [ProductCatalogController::class, 'search']);
     Route::get('/products/{product}', [ProductCatalogController::class, 'showProduct']);
@@ -53,6 +54,8 @@ Route::middleware('auth:api')->group(function () {
 
     Route::middleware('role:owner,admin')->group(function () {
         Route::post('/categories', [ProductCatalogController::class, 'storeCategory']);
+        Route::match(['put', 'patch'], '/categories/{category}', [ProductCatalogController::class, 'updateCategory']);
+        Route::delete('/categories/{category}', [ProductCatalogController::class, 'destroyCategory']);
         Route::post('/products', [ProductCatalogController::class, 'storeProduct']);
         Route::match(['put', 'patch'], '/products/{product}', [ProductCatalogController::class, 'updateProduct']);
         Route::delete('/products/{product}', [ProductCatalogController::class, 'destroyProduct']);

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/router/role_navigation.dart';
@@ -58,6 +59,13 @@ class _ProductManagementScreenState
       appBar: AppBar(
         title: const Text('Kelola produk'),
         actions: [
+          IconButton(
+            tooltip: 'Kelola kategori',
+            onPressed: _isMutating
+                ? null
+                : () => context.push('/categories/manage'),
+            icon: const Icon(Icons.category_outlined),
+          ),
           IconButton(
             tooltip: 'Muat ulang produk',
             onPressed: _isMutating

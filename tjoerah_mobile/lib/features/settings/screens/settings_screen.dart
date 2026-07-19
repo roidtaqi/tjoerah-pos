@@ -79,6 +79,13 @@ class SettingsScreen extends ConsumerWidget {
                               onTap: () => context.push('/products/manage'),
                             ),
                             const Divider(),
+                            AppListTile(
+                              title: 'Kelola kategori',
+                              subtitle: 'Susun kelompok dan urutan menu di POS',
+                              icon: Icons.category_outlined,
+                              onTap: () => context.push('/categories/manage'),
+                            ),
+                            const Divider(),
                           ],
                           AppListTile(
                             title: 'Resep & HPP',

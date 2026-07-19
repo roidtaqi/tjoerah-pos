@@ -19,7 +19,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 5,
+      version: 6,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -47,6 +47,7 @@ class DatabaseHelper {
       await db.execute('ALTER TABLE products ADD COLUMN station TEXT');
     }
     if (oldVersion < 5) await _upgradeProductsTable(db);
+    if (oldVersion < 6) await _upgradeCategoriesTable(db);
   }
 
   Future<void> _createDB(Database db, int version) async {
@@ -55,7 +56,9 @@ class DatabaseHelper {
       CREATE TABLE categories (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
-        sort_order INTEGER DEFAULT 0
+        parent_id TEXT,
+        sort_order INTEGER DEFAULT 0,
+        is_active INTEGER DEFAULT 1
       )
     ''');
 
@@ -226,6 +229,13 @@ class DatabaseHelper {
     ''');
     await db.execute('DROP TABLE products');
     await db.execute('ALTER TABLE products_v5 RENAME TO products');
+  }
+
+  Future<void> _upgradeCategoriesTable(Database db) async {
+    await db.execute('ALTER TABLE categories ADD COLUMN parent_id TEXT');
+    await db.execute(
+      'ALTER TABLE categories ADD COLUMN is_active INTEGER DEFAULT 1',
+    );
   }
 
   Future<void> clearCatalog() async {
