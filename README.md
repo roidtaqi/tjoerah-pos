@@ -51,6 +51,10 @@ Android Emulator dapat memakai URL host emulator:
 flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8000/api
 ```
 
+Backend juga dapat dijalankan sebagai Docker Web Service di Render. Gunakan
+konfigurasi dan environment variable pada
+[`tjoerah-backend/README.md`](tjoerah-backend/README.md#deploy-ke-render).
+
 ## Akun Demo
 
 | Role | Email | Password | PIN |
