@@ -45,9 +45,8 @@ void main() {
 
 class _UnavailablePrinterNotifier extends PrinterNotifier {
   @override
-  PrinterState build() => const PrinterState(
-    error: 'Hubungkan printer dari Pengaturan untuk mencetak.',
-  );
+  PrinterState build() =>
+      PrinterState(error: 'Hubungkan printer dari Pengaturan untuk mencetak.');
 }
 
 final _order = TransactionPrintData(

@@ -175,10 +175,19 @@ void main() {
       screen: const OrdersScreen(),
       overrides: [
         orderHistoryProvider.overrideWith(_PreviewOrderHistoryNotifier.new),
+        printerProvider.overrideWith(_PreviewPrinterNotifier.new),
       ],
     );
     expect(find.text('Pesanan hari ini'), findsOneWidget);
     expect(find.text('TJ-260715-090001'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.text('TJ-260715-090001'));
+    await tester.pumpAndSettle();
+    expect(find.text('Cetak ulang'), findsOneWidget);
+    expect(find.text('Struk pelanggan'), findsOneWidget);
+    expect(find.text('Tiket dapur'), findsOneWidget);
+    expect(find.text('Cetak semua dokumen'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await _render(

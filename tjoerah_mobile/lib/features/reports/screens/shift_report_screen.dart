@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
-import '../../../core/printer/printer_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_layout.dart';
 import '../../../core/utils/app_date_formatter.dart';
@@ -12,6 +11,7 @@ import '../../../shared/components/app_card.dart';
 import '../../../shared/components/app_empty_state.dart';
 import '../../../shared/components/app_loading_state.dart';
 import '../../../shared/components/app_metric_card.dart';
+import '../../settings/providers/printer_provider.dart';
 import '../models/report_models.dart';
 import '../providers/reports_provider.dart';
 
@@ -205,16 +205,16 @@ class _ShiftReportScreenState extends ConsumerState<ShiftReportScreen> {
   Future<void> _printReport(ShiftReportModel report) async {
     setState(() => _printing = true);
     try {
-      await PrinterService.instance.printShiftReport({
+      final result = await ref.read(printerProvider.notifier).printShiftReport({
         'date': AppDateFormatter.shortDate(report.date),
         'total_orders': report.totalOrders,
         'total_revenue': report.totalRevenue,
         'payment_breakdown': report.paymentBreakdown,
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Laporan dikirim ke printer.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(result.message)));
       }
     } catch (error) {
       if (mounted) {

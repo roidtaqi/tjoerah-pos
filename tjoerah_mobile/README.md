@@ -21,15 +21,23 @@ flutter run --dart-define=API_BASE_URL=http://HOST:8000/api
 
 ## Printer Bluetooth
 
-1. Pasangkan printer thermal dari pengaturan Bluetooth Android.
+1. Pasangkan semua printer thermal dari pengaturan Bluetooth Android.
 2. Buka **Lainnya > Printer transaksi** di aplikasi.
 3. Izinkan akses perangkat sekitar dan lokasi ketika diminta.
-4. Pilih printer, tekan **Hubungkan**, lalu jalankan **Cetak tes**.
+4. Tekan **Pindai**, lalu pilih perangkat untuk profil **Printer kasir**,
+   **Printer dapur**, dan **Printer bar**.
+5. Atur lebar kertas, jumlah salinan, cetak otomatis, dan pemotong kertas pada
+   setiap profil, lalu jalankan **Cetak tes**.
 
-Printer terakhir akan disambungkan kembali secara otomatis. Setelah pembayaran
-berhasil, aplikasi mencetak struk pelanggan dan tiket produksi per stasiun.
-Dialog transaksi juga menyediakan tombol cetak ulang untuk **Struk** atau
-**Dapur** secara terpisah.
+Aplikasi menyambungkan printer tujuan secara berurutan ketika pekerjaan cetak
+dijalankan, sehingga satu perangkat Android dapat memakai beberapa printer.
+Tiket stasiun bar memakai printer bar; jika profil itu belum diatur, tiket akan
+dialihkan ke printer dapur. Laporan shift selalu memakai printer kasir.
+
+Setelah pembayaran berhasil, aplikasi dapat mencetak struk pelanggan dan tiket
+produksi secara otomatis. Buka detail transaksi dari **Pesanan** untuk mencetak
+ulang **Struk pelanggan**, **Tiket dapur**, atau semua dokumen. Hasil cetak ulang
+diberi penanda salinan agar tidak tertukar dengan cetakan pertama.
 
 ## Pemeriksaan
 

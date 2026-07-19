@@ -50,8 +50,11 @@ class OrderRepository {
     required String paymentMethod,
     required Map<String, double> paymentBreakdown,
     String? tableId,
+    String? tableName,
     String? note,
     String? customerName,
+    double? amountReceived,
+    double change = 0,
   }) async {
     final orderId = _uuid.v4();
     final now = DateTime.now();
@@ -94,6 +97,9 @@ class OrderRepository {
         if (note != null && note.isNotEmpty) 'note': note,
         if (customerName != null && customerName.isNotEmpty)
           'customer_name': customerName,
+        if (tableName != null && tableName.isNotEmpty) 'table_name': tableName,
+        'amount_received': ?amountReceived,
+        if (change > 0) 'change': change,
       },
       'created_at': timestamp,
     };

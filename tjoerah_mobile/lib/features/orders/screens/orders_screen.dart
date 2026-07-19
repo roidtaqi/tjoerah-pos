@@ -13,6 +13,7 @@ import '../../../shared/components/app_error_state.dart';
 import '../../../shared/components/app_loading_state.dart';
 import '../../../shared/components/app_metric_card.dart';
 import '../../../shared/components/app_search_bar.dart';
+import '../../settings/providers/printer_provider.dart';
 import '../models/order_history_model.dart';
 import '../providers/order_history_provider.dart';
 
@@ -233,9 +234,133 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
               const SizedBox(height: 6),
               Text(order.note!),
             ],
+            const Divider(height: 28),
+            Consumer(
+              builder: (context, ref, _) {
+                final printer = ref.watch(printerProvider);
+                return _OrderPrintActions(
+                  state: printer,
+                  onReceipt: () => _reprint(order, receiptOnly: true),
+                  onKitchen: () => _reprint(order, kitchenOnly: true),
+                  onAll: () => _reprint(order),
+                );
+              },
+            ),
           ],
         ),
       ),
+    );
+  }
+
+  Future<void> _reprint(
+    OrderHistoryItem order, {
+    bool receiptOnly = false,
+    bool kitchenOnly = false,
+  }) async {
+    final notifier = ref.read(printerProvider.notifier);
+    final printData = order.toPrintData();
+    final result = receiptOnly
+        ? await notifier.printReceipt(printData)
+        : kitchenOnly
+        ? await notifier.printKitchenTickets(printData)
+        : await notifier.printTransaction(printData);
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(result.message)));
+  }
+}
+
+class _OrderPrintActions extends StatelessWidget {
+  const _OrderPrintActions({
+    required this.state,
+    required this.onReceipt,
+    required this.onKitchen,
+    required this.onAll,
+  });
+
+  final PrinterState state;
+  final VoidCallback onReceipt;
+  final VoidCallback onKitchen;
+  final VoidCallback onAll;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text('Cetak ulang', style: theme.textTheme.titleMedium),
+            ),
+            if (state.isPrinting)
+              const SizedBox.square(
+                dimension: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          state.hasAnyPrinter
+              ? 'Dokumen cetak ulang diberi penanda salinan.'
+              : 'Atur printer kasir dan dapur dari menu Lainnya.',
+          style: theme.textTheme.bodySmall,
+        ),
+        if (state.error != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            state.error!,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.error,
+            ),
+          ),
+        ],
+        const SizedBox(height: 12),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final receiptButton = OutlinedButton.icon(
+              onPressed: state.hasCashierPrinter && !state.isPrinting
+                  ? onReceipt
+                  : null,
+              icon: const Icon(Icons.receipt_long_outlined),
+              label: const Text('Struk pelanggan'),
+            );
+            final kitchenButton = OutlinedButton.icon(
+              onPressed: state.hasProductionPrinter && !state.isPrinting
+                  ? onKitchen
+                  : null,
+              icon: const Icon(Icons.restaurant_outlined),
+              label: const Text('Tiket dapur'),
+            );
+            if (constraints.maxWidth < 400) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  receiptButton,
+                  const SizedBox(height: 8),
+                  kitchenButton,
+                ],
+              );
+            }
+            return Row(
+              children: [
+                Expanded(child: receiptButton),
+                const SizedBox(width: 8),
+                Expanded(child: kitchenButton),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 8),
+        FilledButton.icon(
+          onPressed: state.hasAnyPrinter && !state.isPrinting ? onAll : null,
+          icon: const Icon(Icons.print_rounded),
+          label: const Text('Cetak semua dokumen'),
+        ),
+      ],
     );
   }
 }

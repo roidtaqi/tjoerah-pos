@@ -28,6 +28,7 @@ class TransactionPrintData {
     required this.tax,
     required this.total,
     required this.isSynced,
+    this.isReprint = false,
     this.tableName,
     this.customerName,
     this.note,
@@ -48,6 +49,7 @@ class TransactionPrintData {
   final double tax;
   final double total;
   final bool isSynced;
+  final bool isReprint;
   final String? tableName;
   final String? customerName;
   final String? note;

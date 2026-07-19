@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/printer/printer_profile.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_layout.dart';
 import '../../../core/theme/theme_provider.dart';
@@ -167,15 +168,30 @@ class SettingsScreen extends ConsumerWidget {
                   subtitle: 'Struk pelanggan dan tiket pesanan dapur',
                 ),
                 const SizedBox(height: 10),
-                _PrinterCard(
+                _PrinterSettings(
                   state: printer,
                   onRefresh: () =>
                       ref.read(printerProvider.notifier).scanDevices(),
-                  onConnect: (device) =>
-                      ref.read(printerProvider.notifier).connect(device),
-                  onDisconnect: () =>
-                      ref.read(printerProvider.notifier).disconnect(),
-                  onTest: () => ref.read(printerProvider.notifier).testPrint(),
+                  onAssign: (destination, device) => ref
+                      .read(printerProvider.notifier)
+                      .assignDevice(destination, device),
+                  onClear: (destination) => ref
+                      .read(printerProvider.notifier)
+                      .clearDevice(destination),
+                  onWidthChanged: (destination, width) => ref
+                      .read(printerProvider.notifier)
+                      .setPaperWidth(destination, width),
+                  onCopiesChanged: (destination, copies) => ref
+                      .read(printerProvider.notifier)
+                      .setCopies(destination, copies),
+                  onAutoPrintChanged: (destination, value) => ref
+                      .read(printerProvider.notifier)
+                      .setAutoPrint(destination, value),
+                  onCutPaperChanged: (destination, value) => ref
+                      .read(printerProvider.notifier)
+                      .setCutPaper(destination, value),
+                  onTest: (destination) =>
+                      ref.read(printerProvider.notifier).testPrint(destination),
                   onOpenBluetooth: () => ref
                       .read(printerProvider.notifier)
                       .openBluetoothSettings(),
@@ -388,167 +404,341 @@ class _SyncCard extends StatelessWidget {
   }
 }
 
-class _PrinterCard extends StatelessWidget {
-  const _PrinterCard({
+class _PrinterSettings extends StatelessWidget {
+  const _PrinterSettings({
     required this.state,
     required this.onRefresh,
-    required this.onConnect,
-    required this.onDisconnect,
+    required this.onAssign,
+    required this.onClear,
+    required this.onWidthChanged,
+    required this.onCopiesChanged,
+    required this.onAutoPrintChanged,
+    required this.onCutPaperChanged,
     required this.onTest,
     required this.onOpenBluetooth,
   });
 
   final PrinterState state;
   final VoidCallback onRefresh;
-  final ValueChanged<BluetoothDevice> onConnect;
-  final VoidCallback onDisconnect;
-  final VoidCallback onTest;
+  final void Function(PrinterDestination, BluetoothDevice) onAssign;
+  final ValueChanged<PrinterDestination> onClear;
+  final void Function(PrinterDestination, PrinterPaperWidth) onWidthChanged;
+  final void Function(PrinterDestination, int) onCopiesChanged;
+  final void Function(PrinterDestination, bool) onAutoPrintChanged;
+  final void Function(PrinterDestination, bool) onCutPaperChanged;
+  final ValueChanged<PrinterDestination> onTest;
   final VoidCallback onOpenBluetooth;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        AppCard(
+          padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.bluetooth_searching_rounded),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${state.devices.length} perangkat ditemukan',
+                          style: theme.textTheme.titleMedium,
+                        ),
+                        Text(
+                          '${state.profiles.values.where((profile) => profile.isConfigured).length} profil printer aktif',
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Buka Bluetooth Android',
+                    onPressed: state.isPrinting ? null : onOpenBluetooth,
+                    icon: const Icon(Icons.settings_bluetooth_rounded),
+                  ),
+                  IconButton(
+                    tooltip: 'Cari printer berpasangan',
+                    onPressed: state.isScanning || state.isPrinting
+                        ? null
+                        : onRefresh,
+                    icon: state.isScanning
+                        ? const SizedBox.square(
+                            dimension: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.refresh_rounded),
+                  ),
+                ],
+              ),
+              if (state.error != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  state.error!,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.error,
+                  ),
+                ),
+              ] else if (state.notice != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  state.notice!,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: AppColors.success,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        for (final destination in PrinterDestination.values) ...[
+          _PrinterProfileCard(
+            state: state,
+            profile: state.profile(destination),
+            onAssign: (device) => onAssign(destination, device),
+            onClear: () => onClear(destination),
+            onWidthChanged: (width) => onWidthChanged(destination, width),
+            onCopiesChanged: (copies) => onCopiesChanged(destination, copies),
+            onAutoPrintChanged: (value) =>
+                onAutoPrintChanged(destination, value),
+            onCutPaperChanged: (value) => onCutPaperChanged(destination, value),
+            onTest: () => onTest(destination),
+          ),
+          if (destination != PrinterDestination.values.last)
+            const SizedBox(height: 10),
+        ],
+      ],
+    );
+  }
+}
+
+class _PrinterProfileCard extends StatelessWidget {
+  const _PrinterProfileCard({
+    required this.state,
+    required this.profile,
+    required this.onAssign,
+    required this.onClear,
+    required this.onWidthChanged,
+    required this.onCopiesChanged,
+    required this.onAutoPrintChanged,
+    required this.onCutPaperChanged,
+    required this.onTest,
+  });
+
+  final PrinterState state;
+  final PrinterProfile profile;
+  final ValueChanged<BluetoothDevice> onAssign;
+  final VoidCallback onClear;
+  final ValueChanged<PrinterPaperWidth> onWidthChanged;
+  final ValueChanged<int> onCopiesChanged;
+  final ValueChanged<bool> onAutoPrintChanged;
+  final ValueChanged<bool> onCutPaperChanged;
+  final VoidCallback onTest;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final devices = <String, BluetoothDevice>{
+      for (final device in state.devices)
+        if (device.address != null) device.address!: device,
+    };
+    if (profile.isConfigured && !devices.containsKey(profile.deviceAddress)) {
+      devices[profile.deviceAddress!] = BluetoothDevice(
+        profile.deviceName,
+        profile.deviceAddress,
+      );
+    }
+    final busy = state.isPrinting || state.isScanning;
+    final active = state.activeDestination == profile.destination;
+
     return AppCard(
-      padding: EdgeInsets.zero,
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    state.connectedDevice == null
-                        ? 'Belum ada printer terhubung'
-                        : state.connectedDevice!.name ?? 'Printer Bluetooth',
-                    style: theme.textTheme.titleMedium,
-                  ),
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                if (state.connectedDevice != null)
-                  const AppBadge(
-                    text: 'Terhubung',
-                    color: Color(0xFFDCFCE7),
-                    textColor: AppColors.success,
-                  ),
-                IconButton(
-                  tooltip: 'Cari ulang perangkat',
-                  onPressed: state.isScanning ? null : onRefresh,
-                  icon: state.isScanning
-                      ? const SizedBox.square(
-                          dimension: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.refresh_rounded),
+                child: Icon(_destinationIcon(profile.destination), size: 21),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      profile.destination.title,
+                      style: theme.textTheme.titleMedium,
+                    ),
+                    Text(
+                      profile.destination.description,
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+              AppBadge(
+                text: active
+                    ? 'Mencetak'
+                    : profile.isConfigured
+                    ? 'Siap'
+                    : 'Belum diatur',
+                color: active || profile.isConfigured
+                    ? AppColors.successSoft
+                    : theme.colorScheme.surfaceContainerHighest,
+                textColor: active || profile.isConfigured
+                    ? AppColors.success
+                    : theme.colorScheme.onSurfaceVariant,
+              ),
+            ],
           ),
-          if (state.error != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: Text(
-                state.error!,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.error,
+          const SizedBox(height: 16),
+          DropdownButtonFormField<String>(
+            key: ValueKey(
+              '${profile.destination.name}-${profile.deviceAddress}-${devices.length}',
+            ),
+            initialValue: profile.deviceAddress,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Perangkat Bluetooth',
+              prefixIcon: Icon(Icons.print_outlined),
+            ),
+            items: devices.values
+                .map(
+                  (device) => DropdownMenuItem(
+                    value: device.address,
+                    child: Text(
+                      device.name ?? device.address ?? 'Printer Bluetooth',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged: busy
+                ? null
+                : (address) {
+                    final device = devices[address];
+                    if (device != null) onAssign(device);
+                  },
+          ),
+          if (devices.isEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Tekan cari printer setelah perangkat dipasangkan di Android.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ],
+          const SizedBox(height: 16),
+          Text('Lebar kertas', style: theme.textTheme.labelLarge),
+          const SizedBox(height: 8),
+          SegmentedButton<PrinterPaperWidth>(
+            expandedInsets: EdgeInsets.zero,
+            segments: PrinterPaperWidth.values
+                .map(
+                  (width) =>
+                      ButtonSegment(value: width, label: Text(width.label)),
+                )
+                .toList(),
+            selected: {profile.paperWidth},
+            showSelectedIcon: false,
+            onSelectionChanged: busy
+                ? null
+                : (selection) => onWidthChanged(selection.first),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Jumlah salinan',
+                  style: theme.textTheme.labelLarge,
                 ),
               ),
-            ),
-          if (state.notice != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: Text(
-                state.notice!,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: AppColors.success,
+              IconButton.outlined(
+                tooltip: 'Kurangi salinan',
+                onPressed: busy || profile.copies <= 1
+                    ? null
+                    : () => onCopiesChanged(profile.copies - 1),
+                icon: const Icon(Icons.remove_rounded),
+              ),
+              SizedBox(
+                width: 40,
+                child: Text(
+                  '${profile.copies}',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.titleMedium,
                 ),
               ),
-            ),
-          Divider(color: theme.colorScheme.outline),
-          if (state.connectedDevice != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    'Printer ini menerima struk dan tiket dapur setelah pembayaran.',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: state.isPrinting ? null : onTest,
-                          icon: state.isPrinting
-                              ? const SizedBox.square(
-                                  dimension: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Icon(Icons.print_outlined, size: 19),
-                          label: Text(
-                            state.isPrinting ? 'Mencetak...' : 'Cetak tes',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextButton.icon(
-                          onPressed: state.isPrinting ? null : onDisconnect,
-                          icon: const Icon(Icons.link_off_rounded, size: 19),
-                          label: const Text('Putuskan'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+              IconButton.outlined(
+                tooltip: 'Tambah salinan',
+                onPressed: busy || profile.copies >= 3
+                    ? null
+                    : () => onCopiesChanged(profile.copies + 1),
+                icon: const Icon(Icons.add_rounded),
               ),
-            )
-          else if (!state.isScanning && state.devices.isEmpty)
-            Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                children: [
-                  Text(
-                    'Pasangkan printer thermal dari Bluetooth Android, lalu cari ulang.',
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 12),
-                  OutlinedButton.icon(
-                    onPressed: onOpenBluetooth,
-                    icon: const Icon(Icons.bluetooth_rounded),
-                    label: const Text('Buka Bluetooth'),
-                  ),
-                ],
-              ),
-            )
-          else
-            ...state.devices.map(
-              (device) => ListTile(
-                minTileHeight: 64,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-                leading: const Icon(Icons.bluetooth_rounded),
-                title: Text(device.name ?? 'Printer tanpa nama'),
-                subtitle: Text(device.address ?? ''),
-                trailing: FilledButton.tonal(
-                  onPressed: state.isConnecting
-                      ? null
-                      : () => onConnect(device),
-                  child: state.isConnecting
+            ],
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Cetak otomatis'),
+            subtitle: const Text('Jalankan setelah pembayaran berhasil'),
+            value: profile.autoPrint,
+            onChanged: busy ? null : onAutoPrintChanged,
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Potong kertas'),
+            subtitle: const Text('Aktifkan untuk printer dengan auto-cutter'),
+            value: profile.cutPaper,
+            onChanged: busy ? null : onCutPaperChanged,
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: !profile.isConfigured || busy ? null : onTest,
+                  icon: active
                       ? const SizedBox.square(
                           dimension: 18,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Text('Hubungkan'),
+                      : const Icon(Icons.print_outlined),
+                  label: const Text('Cetak tes'),
                 ),
               ),
-            ),
+              const SizedBox(width: 8),
+              IconButton(
+                tooltip: 'Hapus perangkat dari profil',
+                onPressed: !profile.isConfigured || busy ? null : onClear,
+                icon: const Icon(Icons.delete_outline_rounded),
+              ),
+            ],
+          ),
         ],
       ),
     );
   }
+
+  static IconData _destinationIcon(PrinterDestination destination) =>
+      switch (destination) {
+        PrinterDestination.cashier => Icons.point_of_sale_outlined,
+        PrinterDestination.kitchen => Icons.restaurant_outlined,
+        PrinterDestination.bar => Icons.local_cafe_outlined,
+      };
 }

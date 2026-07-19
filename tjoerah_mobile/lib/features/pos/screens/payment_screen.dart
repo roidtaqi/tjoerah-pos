@@ -343,6 +343,10 @@ class _PaymentPanelState extends ConsumerState<_PaymentPanel> {
             _secondaryMethod: math.max(0.0, cart.total - cash).toDouble(),
           }
         : {_method: cart.total};
+    final amountReceived = !_splitPayment && _method == 'cash' ? cash : null;
+    final change = amountReceived == null
+        ? 0.0
+        : math.max(0, cash - cart.total).toDouble();
 
     try {
       final createdOrder = await OrderRepository().createOrder(
@@ -353,8 +357,11 @@ class _PaymentPanelState extends ConsumerState<_PaymentPanel> {
         total: cart.total,
         orderType: cart.orderType,
         tableId: cart.tableId,
+        tableName: cart.tableName,
         note: cart.note,
         customerName: cart.customerName,
+        amountReceived: amountReceived,
+        change: change,
         paymentMethod: method,
         paymentBreakdown: breakdown,
       );
@@ -382,10 +389,8 @@ class _PaymentPanelState extends ConsumerState<_PaymentPanel> {
         discount: cart.discount,
         tax: cart.tax,
         total: cart.total,
-        amountReceived: !_splitPayment && _method == 'cash' ? cash : null,
-        change: !_splitPayment && _method == 'cash'
-            ? math.max(0, cash - cart.total)
-            : 0,
+        amountReceived: amountReceived,
+        change: change,
         isSynced: createdOrder.isSynced,
       );
       ref.invalidate(orderHistoryProvider);
@@ -542,11 +547,11 @@ class _PaymentSuccessDialogState extends ConsumerState<_PaymentSuccessDialog> {
     final printerStatus =
         printer.error ??
         printer.notice ??
-        (printer.isReady
-            ? '${printer.connectedDevice!.name ?? 'Printer'} siap digunakan.'
-            : printer.isScanning
-            ? 'Mencari printer yang sudah dipasangkan...'
-            : 'Hubungkan printer dari Pengaturan untuk mencetak.');
+        (!printer.isInitialized
+            ? 'Memuat profil printer...'
+            : printer.hasAnyPrinter
+            ? '${printer.profiles.values.where((profile) => profile.isConfigured).length} profil printer siap digunakan.'
+            : 'Atur printer kasir dan dapur dari menu Lainnya.');
 
     return AlertDialog(
       icon: Container(
@@ -593,7 +598,7 @@ class _PaymentSuccessDialogState extends ConsumerState<_PaymentSuccessDialog> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Icon(
-                      printer.isReady
+                      printer.hasAnyPrinter
                           ? Icons.print_outlined
                           : Icons.print_disabled_outlined,
                       size: 20,
@@ -613,7 +618,7 @@ class _PaymentSuccessDialogState extends ConsumerState<_PaymentSuccessDialog> {
               ),
               const SizedBox(height: 14),
               FilledButton.icon(
-                onPressed: printer.isReady && !printer.isPrinting
+                onPressed: printer.hasAnyPrinter && !printer.isPrinting
                     ? () => _print(_PrintTarget.all)
                     : null,
                 icon: printer.isPrinting
@@ -631,7 +636,8 @@ class _PaymentSuccessDialogState extends ConsumerState<_PaymentSuccessDialog> {
                 children: [
                   Expanded(
                     child: OutlinedButton.icon(
-                      onPressed: printer.isReady && !printer.isPrinting
+                      onPressed:
+                          printer.hasCashierPrinter && !printer.isPrinting
                           ? () => _print(_PrintTarget.receipt)
                           : null,
                       icon: const Icon(Icons.receipt_long_outlined),
@@ -641,7 +647,8 @@ class _PaymentSuccessDialogState extends ConsumerState<_PaymentSuccessDialog> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: OutlinedButton.icon(
-                      onPressed: printer.isReady && !printer.isPrinting
+                      onPressed:
+                          printer.hasProductionPrinter && !printer.isPrinting
                           ? () => _print(_PrintTarget.kitchen)
                           : null,
                       icon: const Icon(Icons.restaurant_outlined),
@@ -665,12 +672,15 @@ class _PaymentSuccessDialogState extends ConsumerState<_PaymentSuccessDialog> {
   }
 
   void _scheduleAutomaticPrint(PrinterState printer) {
-    if (_automaticPrintScheduled || !printer.isReady || printer.isPrinting) {
+    if (_automaticPrintScheduled ||
+        !printer.isInitialized ||
+        !printer.hasAutomaticPrinter ||
+        printer.isPrinting) {
       return;
     }
     _automaticPrintScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _print(_PrintTarget.all);
+      if (mounted) _autoPrint();
     });
   }
 
@@ -688,5 +698,9 @@ class _PaymentSuccessDialogState extends ConsumerState<_PaymentSuccessDialog> {
     } catch (_) {
       // PrinterNotifier exposes the actionable error in PrinterState.
     }
+  }
+
+  Future<void> _autoPrint() async {
+    await ref.read(printerProvider.notifier).autoPrintTransaction(widget.order);
   }
 }

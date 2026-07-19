@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import '../../../core/printer/print_job.dart';
+
 class OrderHistoryItem {
   const OrderHistoryItem({
     required this.id,
@@ -11,8 +13,14 @@ class OrderHistoryItem {
     required this.syncStatus,
     required this.items,
     required this.paymentBreakdown,
+    this.subtotal = 0,
+    this.discount = 0,
+    this.tax = 0,
+    this.amountReceived,
+    this.change = 0,
     this.customerName,
     this.tableId,
+    this.tableName,
     this.note,
   });
 
@@ -25,12 +33,57 @@ class OrderHistoryItem {
   final String syncStatus;
   final List<OrderHistoryLine> items;
   final Map<String, double> paymentBreakdown;
+  final double subtotal;
+  final double discount;
+  final double tax;
+  final double? amountReceived;
+  final double change;
   final String? customerName;
   final String? tableId;
+  final String? tableName;
   final String? note;
 
   bool get isPending => syncStatus == 'pending';
   int get itemCount => items.fold(0, (sum, item) => sum + item.quantity);
+
+  TransactionPrintData toPrintData() {
+    final calculatedSubtotal = subtotal > 0
+        ? subtotal
+        : items.fold<double>(0, (sum, item) => sum + item.total);
+    return TransactionPrintData(
+      orderId: id,
+      receiptNumber: receiptNumber,
+      createdAt: createdAt,
+      orderTypeLabel: switch (orderType) {
+        'dine_in' => 'Makan di tempat',
+        'delivery' => 'Pesan antar',
+        _ => 'Bawa pulang',
+      },
+      paymentMethod: paymentMethod,
+      paymentBreakdown: paymentBreakdown,
+      items: items
+          .map(
+            (item) => PrintOrderItem(
+              name: item.name,
+              quantity: item.quantity,
+              unitPrice: item.price,
+              station: item.station,
+            ),
+          )
+          .toList(),
+      subtotal: calculatedSubtotal,
+      discount: discount,
+      tax: tax,
+      total: total,
+      isSynced: !isPending,
+      isReprint: true,
+      tableName: tableName ?? (tableId == null ? null : 'Meja $tableId'),
+      customerName: customerName,
+      note: note,
+      amountReceived: amountReceived,
+      change: change,
+    );
+  }
 
   factory OrderHistoryItem.fromRow(Map<String, Object?> row) {
     final payload = Map<String, dynamic>.from(
@@ -45,6 +98,18 @@ class OrderHistoryItem {
         : <String, dynamic>{};
     final id = row['id']?.toString() ?? '';
     final fallbackReceipt = id.length <= 8 ? id : id.substring(0, 8);
+    final items = rawItems
+        .whereType<Map>()
+        .map(
+          (item) => OrderHistoryLine(
+            name: item['snapshot_name']?.toString() ?? 'Produk',
+            quantity: _integer(item['qty']),
+            price: _number(item['snapshot_price']),
+            total: _number(item['total']),
+            station: item['station']?.toString(),
+          ),
+        )
+        .toList();
 
     return OrderHistoryItem(
       id: id,
@@ -57,24 +122,22 @@ class OrderHistoryItem {
           payload['paymentMethod']?.toString() ??
           'unknown',
       total: _number(payload['total']),
+      subtotal: _number(payload['subtotal']),
+      discount: _number(payload['discount_total']),
+      tax: _number(payload['tax']),
+      amountReceived: meta['amount_received'] == null
+          ? null
+          : _number(meta['amount_received']),
+      change: _number(meta['change']),
       createdAt:
           DateTime.tryParse(row['created_at']?.toString() ?? '') ??
           DateTime.now(),
       syncStatus: row['status']?.toString() ?? 'pending',
       customerName: meta['customer_name']?.toString(),
       tableId: payload['table_id']?.toString(),
+      tableName: meta['table_name']?.toString(),
       note: meta['note']?.toString(),
-      items: rawItems
-          .whereType<Map>()
-          .map(
-            (item) => OrderHistoryLine(
-              name: item['snapshot_name']?.toString() ?? 'Produk',
-              quantity: _integer(item['qty']),
-              price: _number(item['snapshot_price']),
-              total: _number(item['total']),
-            ),
-          )
-          .toList(),
+      items: items,
       paymentBreakdown: rawPayments.map(
         (key, value) => MapEntry(key, _number(value)),
       ),
@@ -94,10 +157,12 @@ class OrderHistoryLine {
     required this.quantity,
     required this.price,
     required this.total,
+    this.station,
   });
 
   final String name;
   final int quantity;
   final double price;
   final double total;
+  final String? station;
 }
