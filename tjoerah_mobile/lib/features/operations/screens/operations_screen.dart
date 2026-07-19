@@ -7,9 +7,11 @@ import '../../../core/theme/app_layout.dart';
 import '../../../shared/components/app_card.dart';
 import '../../../shared/components/app_list_tile.dart';
 import '../../../shared/components/app_metric_card.dart';
+import '../../auth/providers/auth_provider.dart';
 import '../../inventory/providers/inventory_provider.dart';
 import '../../kds/providers/kds_provider.dart';
 import '../../pos/providers/table_provider.dart';
+import '../../../core/router/role_navigation.dart';
 
 class OperationsScreen extends ConsumerWidget {
   const OperationsScreen({super.key});
@@ -19,6 +21,7 @@ class OperationsScreen extends ConsumerWidget {
     final tickets = ref.watch(kdsNotifierProvider).value ?? [];
     final tableState = ref.watch(tableProvider).value;
     final inventory = ref.watch(inventoryProvider).value;
+    final user = ref.watch(authProvider).user;
     final activeTickets = tickets
         .where((ticket) => ticket.status != 'completed')
         .length;
@@ -112,6 +115,15 @@ class OperationsScreen extends ConsumerWidget {
                   padding: EdgeInsets.zero,
                   child: Column(
                     children: [
+                      if (canManageProductsForUser(user)) ...[
+                        AppListTile(
+                          title: 'Kelola produk',
+                          subtitle: 'Katalog, harga, dan stasiun produksi',
+                          icon: Icons.restaurant_menu_rounded,
+                          onTap: () => context.push('/products/manage'),
+                        ),
+                        const Divider(),
+                      ],
                       AppListTile(
                         title: 'Meja & area',
                         subtitle: '$occupiedTables meja sedang digunakan',

@@ -46,11 +46,17 @@ Route::middleware('auth:api')->group(function () {
     // Catalog API
     Route::get('/catalog/sync', [ProductCatalogController::class, 'sync']);
     Route::get('/categories', [ProductCatalogController::class, 'categories']);
-    Route::post('/categories', [ProductCatalogController::class, 'storeCategory']);
     Route::get('/products', [ProductCatalogController::class, 'getProducts']);
     Route::get('/products/search', [ProductCatalogController::class, 'search']);
-    Route::post('/products', [ProductCatalogController::class, 'storeProduct']);
+    Route::get('/products/{product}', [ProductCatalogController::class, 'showProduct']);
     Route::get('/modifier-groups', [ProductCatalogController::class, 'modifierGroups']);
+
+    Route::middleware('role:owner,admin')->group(function () {
+        Route::post('/categories', [ProductCatalogController::class, 'storeCategory']);
+        Route::post('/products', [ProductCatalogController::class, 'storeProduct']);
+        Route::match(['put', 'patch'], '/products/{product}', [ProductCatalogController::class, 'updateProduct']);
+        Route::delete('/products/{product}', [ProductCatalogController::class, 'destroyProduct']);
+    });
 
     Route::post('/orders', [OrderController::class, 'store']);
     Route::get('/orders/{order}', [OrderController::class, 'show']);

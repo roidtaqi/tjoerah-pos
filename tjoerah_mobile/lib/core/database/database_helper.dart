@@ -19,7 +19,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 4,
+      version: 5,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -46,6 +46,7 @@ class DatabaseHelper {
     if (oldVersion < 4) {
       await db.execute('ALTER TABLE products ADD COLUMN station TEXT');
     }
+    if (oldVersion < 5) await _upgradeProductsTable(db);
   }
 
   Future<void> _createDB(Database db, int version) async {
@@ -62,12 +63,18 @@ class DatabaseHelper {
     await db.execute('''
       CREATE TABLE products (
         id TEXT PRIMARY KEY,
-        category_id TEXT NOT NULL,
+        category_id TEXT,
         name TEXT NOT NULL,
+        description TEXT,
         sku TEXT,
+        barcode TEXT,
         price REAL NOT NULL,
+        image_url TEXT,
+        product_type TEXT DEFAULT 'simple',
         is_active INTEGER DEFAULT 1,
         station TEXT,
+        sla_minutes INTEGER,
+        track_inventory INTEGER DEFAULT 1,
         FOREIGN KEY (category_id) REFERENCES categories (id) ON DELETE CASCADE
       )
     ''');
@@ -189,6 +196,36 @@ class DatabaseHelper {
         updated_at TEXT NOT NULL
       )
     ''');
+  }
+
+  Future<void> _upgradeProductsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE products_v5 (
+        id TEXT PRIMARY KEY,
+        category_id TEXT,
+        name TEXT NOT NULL,
+        description TEXT,
+        sku TEXT,
+        barcode TEXT,
+        price REAL NOT NULL,
+        image_url TEXT,
+        product_type TEXT DEFAULT 'simple',
+        is_active INTEGER DEFAULT 1,
+        station TEXT,
+        sla_minutes INTEGER,
+        track_inventory INTEGER DEFAULT 1,
+        FOREIGN KEY (category_id) REFERENCES categories (id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('''
+      INSERT INTO products_v5 (
+        id, category_id, name, sku, price, is_active, station
+      )
+      SELECT id, category_id, name, sku, price, is_active, station
+      FROM products
+    ''');
+    await db.execute('DROP TABLE products');
+    await db.execute('ALTER TABLE products_v5 RENAME TO products');
   }
 
   Future<void> clearCatalog() async {

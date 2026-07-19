@@ -12,18 +12,28 @@ class Product extends Model
 
     protected $guarded = [];
 
+    protected function casts(): array
+    {
+        return [
+            'base_price' => 'decimal:2',
+            'is_active' => 'boolean',
+            'track_inventory' => 'boolean',
+            'sla_minutes' => 'integer',
+        ];
+    }
+
     public function category()
     {
-        return $this->belongsTo(\App\Domains\POS\Models\Category::class);
+        return $this->belongsTo(Category::class);
     }
 
     public function variants()
     {
-        return $this->hasMany(\App\Domains\POS\Models\ProductVariant::class);
+        return $this->hasMany(ProductVariant::class);
     }
 
     public function modifierGroups()
     {
-        return $this->belongsToMany(\App\Domains\POS\Models\ModifierGroup::class);
+        return $this->belongsToMany(ModifierGroup::class);
     }
 }

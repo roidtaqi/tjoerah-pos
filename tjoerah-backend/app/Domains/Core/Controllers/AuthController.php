@@ -45,7 +45,7 @@ class AuthController extends Controller
     public function me()
     {
         return response()->json([
-            'user' => Auth::guard('api')->user()->load('outlets'),
+            'user' => Auth::guard('api')->user()->load(['outlets', 'roles']),
         ]);
     }
 
@@ -64,7 +64,7 @@ class AuthController extends Controller
     protected function respondWithToken($token)
     {
         return response()->json([
-            'user' => Auth::guard('api')->user()->load('outlets'),
+            'user' => Auth::guard('api')->user()->load(['outlets', 'roles']),
             'token' => $token,
             'token_type' => 'bearer',
             'expires_in' => Auth::guard('api')->factory()->getTTL() * 60,

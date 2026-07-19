@@ -70,6 +70,16 @@ class SettingsScreen extends ConsumerWidget {
                         ),
                         if (role != AppRole.cashier) ...[
                           const Divider(),
+                          if (canManageProductsForUser(auth.user)) ...[
+                            AppListTile(
+                              title: 'Kelola produk',
+                              subtitle:
+                                  'Tambah, ubah, nonaktifkan, dan hapus produk',
+                              icon: Icons.restaurant_menu_rounded,
+                              onTap: () => context.push('/products/manage'),
+                            ),
+                            const Divider(),
+                          ],
                           AppListTile(
                             title: 'Resep & HPP',
                             subtitle: 'Komposisi, susut, dan biaya produk',

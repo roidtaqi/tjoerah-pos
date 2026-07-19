@@ -18,7 +18,7 @@ return new class extends Migration
             $table->timestamp('email_verified_at')->nullable();
             $table->string('password');
             $table->string('pin')->nullable();
-            $table->enum('role', ['owner', 'area_manager', 'outlet_manager', 'cashier', 'barista', 'kitchen_staff'])->default('cashier');
+            $table->enum('role', ['owner', 'admin', 'area_manager', 'outlet_manager', 'cashier', 'barista', 'kitchen_staff'])->default('cashier');
             $table->rememberToken();
             $table->timestamps();
             $table->softDeletes();

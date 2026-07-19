@@ -22,23 +22,35 @@ class SyncService {
           await txn.delete('categories');
 
           // Insert categories
-          for (var cat in categories) {
-            await txn.insert('categories', {
-              'id': cat['id'],
-              'name': cat['name'],
-              'sort_order': cat['sort_order'] ?? 0,
-            });
+          for (final root in categories.whereType<Map>()) {
+            for (final cat in _flattenCategories(root)) {
+              await txn.insert('categories', {
+                'id': cat['id'].toString(),
+                'name': cat['name'],
+                'sort_order': cat['sort_order'] ?? 0,
+              });
+            }
           }
 
           // Insert products
           for (var prod in products) {
             await txn.insert('products', {
-              'id': prod['id'],
-              'category_id': prod['category_id'],
+              'id': prod['id'].toString(),
+              'category_id': prod['category_id']?.toString(),
               'name': prod['name'],
+              'description': prod['description'],
               'sku': prod['sku'],
+              'barcode': prod['barcode'],
               'price': prod['base_price'] ?? 0.0,
+              'image_url': prod['image_url'],
+              'product_type': prod['product_type'] ?? 'simple',
               'station': prod['station'],
+              'sla_minutes': prod['sla_minutes'],
+              'track_inventory':
+                  (prod['track_inventory'] == 1 ||
+                      prod['track_inventory'] == true)
+                  ? 1
+                  : 0,
               'is_active': (prod['is_active'] == 1 || prod['is_active'] == true)
                   ? 1
                   : 0,
@@ -135,6 +147,16 @@ class SyncService {
     } catch (e) {
       debugPrint('Error syncing inventory: $e');
       return false;
+    }
+  }
+
+  static Iterable<Map<dynamic, dynamic>> _flattenCategories(
+    Map<dynamic, dynamic> category,
+  ) sync* {
+    yield category;
+    final children = category['children'] as List? ?? const [];
+    for (final child in children.whereType<Map>()) {
+      yield* _flattenCategories(child);
     }
   }
 

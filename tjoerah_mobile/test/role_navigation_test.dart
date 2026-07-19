@@ -9,6 +9,7 @@ import 'package:tjoerah_mobile/features/auth/providers/auth_provider.dart';
 void main() {
   test('roles resolve from direct and assigned role payloads', () {
     expect(appRoleForUser({'role': 'owner'}), AppRole.owner);
+    expect(appRoleForUser({'role': 'admin'}), AppRole.admin);
     expect(appRoleForUser({'role': 'area_manager'}), AppRole.areaManager);
     expect(appRoleForUser({'role': 'cashier'}), AppRole.cashier);
     expect(appRoleForUser({'role': 'barista'}), AppRole.production);
@@ -20,10 +21,20 @@ void main() {
       }),
       AppRole.outletManager,
     );
+    expect(
+      appRoleForUser({
+        'role': 'cashier',
+        'roles': [
+          {'slug': 'admin'},
+        ],
+      }),
+      AppRole.admin,
+    );
   });
 
   test('every role receives the correct home and destinations', () {
     expect(homePathForUser({'role': 'owner'}), '/dashboard');
+    expect(homePathForUser({'role': 'admin'}), '/dashboard');
     expect(homePathForUser({'role': 'area_manager'}), '/dashboard');
     expect(homePathForUser({'role': 'cashier'}), '/pos');
     expect(homePathForUser({'role': 'kitchen_staff'}), '/kds');
@@ -41,6 +52,9 @@ void main() {
       'Analitik',
       'Lainnya',
     ]);
+    expect(canManageProductsForUser({'role': 'owner'}), isTrue);
+    expect(canManageProductsForUser({'role': 'admin'}), isTrue);
+    expect(canManageProductsForUser({'role': 'cashier'}), isFalse);
   });
 
   testWidgets('shell renders only the destinations allowed for each role', (

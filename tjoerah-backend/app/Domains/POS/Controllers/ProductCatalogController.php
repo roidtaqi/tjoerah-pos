@@ -2,20 +2,30 @@
 
 namespace App\Domains\POS\Controllers;
 
-use App\Domains\POS\Models\Product;
 use App\Domains\POS\Models\Category;
 use App\Domains\POS\Models\ModifierGroup;
-use Illuminate\Http\Request;
-
+use App\Domains\POS\Models\Product;
 use App\Http\Controllers\Controller;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class ProductCatalogController extends Controller
 {
-    // Fetch the entire catalog for the POS offline sync
-    public function sync()
+    public function sync(Request $request)
     {
-        $categories = Category::with('children')->whereNull('parent_id')->get();
-        $products = Product::with(['variants', 'modifierGroups.options', 'category'])->get();
+        $categories = Category::with([
+            'children' => fn ($query) => $query->where('is_active', true)->orderBy('sort_order'),
+        ])
+            ->whereNull('parent_id')
+            ->where('is_active', true)
+            ->when($request->user()?->company_id, fn ($query, $companyId) => $query->where('company_id', $companyId))
+            ->orderBy('sort_order')
+            ->get();
+        $products = $this->productQuery($request)
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get();
 
         return response()->json([
             'categories' => $categories,
@@ -25,11 +35,37 @@ class ProductCatalogController extends Controller
 
     public function getProducts(Request $request)
     {
-        return Product::with(['variants', 'modifierGroups.options', 'category'])
-            ->when($request->integer('company_id'), fn ($query, $companyId) => $query->where('company_id', $companyId))
+        $request->validate([
+            'per_page' => 'nullable|integer|min:1|max:100',
+            'status' => ['nullable', Rule::in(['active', 'inactive', 'all'])],
+            'q' => 'nullable|string|max:255',
+        ]);
+
+        $query = $this->productQuery($request)
             ->when($request->integer('brand_id'), fn ($query, $brandId) => $query->where('brand_id', $brandId))
             ->when($request->integer('category_id'), fn ($query, $categoryId) => $query->where('category_id', $categoryId))
-            ->paginate(50);
+            ->when($request->string('q')->trim()->isNotEmpty(), function ($query) use ($request) {
+                $term = $request->string('q')->trim()->toString();
+                $query->where(fn ($search) => $search
+                    ->where('name', 'like', "%{$term}%")
+                    ->orWhere('sku', 'like', "%{$term}%")
+                    ->orWhere('barcode', 'like', "%{$term}%"));
+            });
+
+        if ($request->input('status') === 'active') {
+            $query->where('is_active', true);
+        } elseif ($request->input('status') === 'inactive') {
+            $query->where('is_active', false);
+        }
+
+        return $query->orderBy('name')->paginate($request->integer('per_page', 50));
+    }
+
+    public function showProduct(Request $request, Product $product)
+    {
+        $this->ensureProductIsAccessible($request, $product);
+
+        return response()->json($product->load(['variants', 'modifierGroups.options', 'category']));
     }
 
     public function search(Request $request)
@@ -37,7 +73,7 @@ class ProductCatalogController extends Controller
         $request->validate(['q' => 'required|string|min:1']);
         $q = $request->string('q')->toString();
 
-        return Product::with(['variants', 'modifierGroups.options', 'category'])
+        return $this->productQuery($request)
             ->where('is_active', true)
             ->where(fn ($query) => $query
                 ->where('name', 'like', "%{$q}%")
@@ -49,29 +85,105 @@ class ProductCatalogController extends Controller
 
     public function storeProduct(Request $request)
     {
-        $validated = $request->validate([
-            'company_id' => 'nullable|exists:companies,id',
-            'brand_id' => 'nullable|exists:brands,id',
-            'name' => 'required|string',
-            'category_id' => 'nullable|exists:categories,id',
-            'base_price' => 'required|numeric',
-            'sku' => 'nullable|string|unique:products',
-            'barcode' => 'nullable|string|unique:products',
-            'product_type' => 'nullable|string',
-            'station' => 'nullable|string',
-            'sla_minutes' => 'nullable|integer',
-            'track_inventory' => 'boolean',
-            'is_active' => 'boolean'
-        ]);
+        $this->normalizeNullableProductFields($request);
+        $validated = $request->validate($this->productRules());
+
+        if ($request->user()?->company_id) {
+            $validated['company_id'] = $request->user()->company_id;
+        }
 
         $product = Product::create($validated);
-        return response()->json($product, 201);
+
+        return response()->json(
+            $product->load(['variants', 'modifierGroups.options', 'category']),
+            201,
+        );
+    }
+
+    public function updateProduct(Request $request, Product $product)
+    {
+        $this->ensureProductIsAccessible($request, $product);
+        $this->normalizeNullableProductFields($request);
+
+        $validated = $request->validate($this->productRules($product));
+        if ($request->user()?->company_id) {
+            $validated['company_id'] = $request->user()->company_id;
+        }
+        $product->update($validated);
+
+        return response()->json($product->fresh()->load([
+            'variants',
+            'modifierGroups.options',
+            'category',
+        ]));
+    }
+
+    public function destroyProduct(Request $request, Product $product)
+    {
+        $this->ensureProductIsAccessible($request, $product);
+        $product->delete();
+
+        return response()->noContent();
+    }
+
+    private function productRules(?Product $product = null): array
+    {
+        $presence = $product ? 'sometimes' : 'required';
+
+        return [
+            'company_id' => 'nullable|exists:companies,id',
+            'brand_id' => 'nullable|exists:brands,id',
+            'name' => [$presence, 'string', 'max:255'],
+            'description' => 'nullable|string|max:5000',
+            'category_id' => 'nullable|exists:categories,id',
+            'base_price' => [$presence, 'numeric', 'min:0'],
+            'sku' => ['nullable', 'string', 'max:100', Rule::unique('products', 'sku')->ignore($product)],
+            'barcode' => ['nullable', 'string', 'max:100', Rule::unique('products', 'barcode')->ignore($product)],
+            'image_url' => 'nullable|url:http,https|max:2048',
+            'product_type' => ['nullable', Rule::in(['simple', 'variant', 'combo', 'bundle'])],
+            'station' => ['nullable', Rule::in(['bar', 'kitchen'])],
+            'sla_minutes' => 'nullable|integer|min:1|max:1440',
+            'track_inventory' => 'boolean',
+            'is_active' => 'boolean',
+        ];
+    }
+
+    private function productQuery(Request $request): Builder
+    {
+        return Product::with(['variants', 'modifierGroups.options', 'category'])
+            ->when(
+                $request->user()?->company_id,
+                fn ($query, $companyId) => $query->where('company_id', $companyId),
+                fn ($query) => $query->when(
+                    $request->integer('company_id'),
+                    fn ($query, $companyId) => $query->where('company_id', $companyId),
+                ),
+            );
+    }
+
+    private function ensureProductIsAccessible(Request $request, Product $product): void
+    {
+        $companyId = $request->user()?->company_id;
+        abort_if($companyId && (int) $product->company_id !== (int) $companyId, 404);
+    }
+
+    private function normalizeNullableProductFields(Request $request): void
+    {
+        foreach (['company_id', 'brand_id', 'category_id', 'description', 'sku', 'barcode', 'image_url', 'station', 'sla_minutes'] as $field) {
+            if ($request->exists($field) && trim((string) $request->input($field)) === '') {
+                $request->merge([$field => null]);
+            }
+        }
     }
 
     public function categories(Request $request)
     {
         return Category::with('children')
-            ->when($request->integer('company_id'), fn ($query, $companyId) => $query->where('company_id', $companyId))
+            ->when(
+                $request->user()?->company_id,
+                fn ($query, $companyId) => $query->where('company_id', $companyId),
+                fn ($query) => $query->when($request->integer('company_id'), fn ($query, $companyId) => $query->where('company_id', $companyId)),
+            )
             ->when($request->integer('brand_id'), fn ($query, $brandId) => $query->where('brand_id', $brandId))
             ->whereNull('parent_id')
             ->orderBy('sort_order')
@@ -80,14 +192,18 @@ class ProductCatalogController extends Controller
 
     public function storeCategory(Request $request)
     {
-        $category = Category::create($request->validate([
+        $validated = $request->validate([
             'company_id' => 'nullable|exists:companies,id',
             'brand_id' => 'nullable|exists:brands,id',
             'parent_id' => 'nullable|exists:categories,id',
             'name' => 'required|string|max:255',
             'sort_order' => 'nullable|integer',
             'is_active' => 'boolean',
-        ]));
+        ]);
+        if ($request->user()?->company_id) {
+            $validated['company_id'] = $request->user()->company_id;
+        }
+        $category = Category::create($validated);
 
         return response()->json($category, 201);
     }

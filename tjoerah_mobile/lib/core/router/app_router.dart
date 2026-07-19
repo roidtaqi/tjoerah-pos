@@ -14,6 +14,7 @@ import '../../features/pos/screens/payment_screen.dart';
 import '../../features/pos/screens/pos_screen.dart';
 import '../../features/pos/screens/table_selection_screen.dart';
 import '../../features/pos/screens/table_management_screen.dart';
+import '../../features/products/screens/product_management_screen.dart';
 import '../../features/recipe/screens/recipe_screen.dart';
 import '../../features/reports/screens/reports_screen.dart';
 import '../../features/reports/screens/shift_report_screen.dart';
@@ -73,6 +74,11 @@ final GoRouter appRouter = GoRouter(
           builder: (context, state) => const SettingsScreen(),
         ),
       ],
+    ),
+    GoRoute(
+      path: '/products/manage',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (context, state) => const ProductManagementScreen(),
     ),
     GoRoute(
       path: '/tables',

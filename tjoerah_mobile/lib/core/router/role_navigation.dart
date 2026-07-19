@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-enum AppRole { owner, areaManager, outletManager, cashier, production }
+enum AppRole { owner, admin, areaManager, outletManager, cashier, production }
 
 class RoleDestination {
   const RoleDestination({
@@ -38,6 +38,7 @@ AppRole appRoleForUser(Map<String, dynamic>? user) {
       .toLowerCase()
       .replaceAll(RegExp(r'[-_]'), ' ');
 
+  if (normalized.contains('admin')) return AppRole.admin;
   if (normalized.contains('owner')) return AppRole.owner;
   if (normalized.contains('area manager')) return AppRole.areaManager;
   if (normalized.contains('cashier') || normalized.contains('kasir')) {
@@ -54,6 +55,7 @@ AppRole appRoleForUser(Map<String, dynamic>? user) {
 
 String roleLabel(AppRole role) => switch (role) {
   AppRole.owner => 'Owner',
+  AppRole.admin => 'Admin',
   AppRole.areaManager => 'Area Manager',
   AppRole.outletManager => 'Outlet Manager',
   AppRole.cashier => 'Kasir',
@@ -62,14 +64,14 @@ String roleLabel(AppRole role) => switch (role) {
 
 String homePathForUser(Map<String, dynamic>? user) {
   return switch (appRoleForUser(user)) {
-    AppRole.owner || AppRole.areaManager => '/dashboard',
+    AppRole.owner || AppRole.admin || AppRole.areaManager => '/dashboard',
     AppRole.outletManager || AppRole.cashier => '/pos',
     AppRole.production => '/kds',
   };
 }
 
 List<RoleDestination> destinationsForRole(AppRole role) => switch (role) {
-  AppRole.owner => const [
+  AppRole.owner || AppRole.admin => const [
     RoleDestination(
       path: '/dashboard',
       label: 'Dashboard',
@@ -206,3 +208,8 @@ List<RoleDestination> destinationsForRole(AppRole role) => switch (role) {
     ),
   ],
 };
+
+bool canManageProductsForUser(Map<String, dynamic>? user) {
+  final role = appRoleForUser(user);
+  return role == AppRole.owner || role == AppRole.admin;
+}
