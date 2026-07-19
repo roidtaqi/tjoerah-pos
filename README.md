@@ -45,15 +45,26 @@ cd tjoerah_mobile
 flutter run
 ```
 
+Dengan USB, aplikasi dapat tetap memakai API bawaan
+`http://127.0.0.1:8000/api`. Periksa koneksi perangkat dengan `adb devices`.
+
+Untuk perangkat Android pada jaringan Wi-Fi yang sama, cari IP laptop:
+
+```bash
+hostname -I
+```
+
+Lalu jalankan Flutter dengan IP tersebut, misalnya:
+
+```bash
+flutter run --dart-define=API_BASE_URL=http://192.168.1.113:8000/api
+```
+
 Android Emulator dapat memakai URL host emulator:
 
 ```bash
 flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8000/api
 ```
-
-Backend juga dapat dijalankan sebagai Docker Web Service di Render. Gunakan
-konfigurasi dan environment variable pada
-[`tjoerah-backend/README.md`](tjoerah-backend/README.md#deploy-ke-render).
 
 ## Akun Demo
 
