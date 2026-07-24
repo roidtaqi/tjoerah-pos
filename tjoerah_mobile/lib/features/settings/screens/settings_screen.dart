@@ -226,9 +226,10 @@ class SettingsScreen extends ConsumerWidget {
                       .setCutPaper(destination, value),
                   onTest: (destination) =>
                       ref.read(printerProvider.notifier).testPrint(destination),
-                  onOpenBluetooth: () => ref
-                      .read(printerProvider.notifier)
-                      .openBluetoothSettings(),
+                  onOpenBluetooth: () {
+                    FocusManager.instance.primaryFocus?.unfocus();
+                    ref.read(printerProvider.notifier).openBluetoothSettings();
+                  },
                 ),
                 const SizedBox(height: 24),
                 AppButton(

@@ -164,6 +164,14 @@ void main() {
     );
     expect(find.text('Operasional'), findsOneWidget);
     expect(tester.takeException(), isNull);
+
+    tester.view.viewInsets = const FakeViewPadding(bottom: 320);
+    tester.view.physicalSize = const Size(390, 1);
+    await tester.pump();
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.viewInsets = FakeViewPadding.zero;
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('role-specific screens render useful data without overflow', (

@@ -1,5 +1,6 @@
 import 'package:blue_thermal_printer/blue_thermal_printer.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -19,6 +20,9 @@ class PrinterService {
   PrinterService._();
 
   static final PrinterService instance = PrinterService._();
+  static const MethodChannel _systemChannel = MethodChannel(
+    'com.tjoerah.tjoerah_mobile/system',
+  );
 
   final BlueThermalPrinter _printer = BlueThermalPrinter.instance;
 
@@ -34,7 +38,14 @@ class PrinterService {
   Future<void> openBluetoothSettings() async {
     _ensureAndroid();
     try {
-      await _printer.openSettings;
+      final opened = await _systemChannel.invokeMethod<bool>(
+        'openBluetoothSettings',
+      );
+      if (opened != true) {
+        throw const PrinterException(
+          'Perangkat tidak dapat membuka pengaturan Bluetooth.',
+        );
+      }
     } catch (error) {
       throw PrinterException('Pengaturan Bluetooth tidak dapat dibuka: $error');
     }
