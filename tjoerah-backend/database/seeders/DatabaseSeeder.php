@@ -13,11 +13,13 @@ use App\Domains\POS\Models\Product;
 use App\Domains\POS\Models\ProductVariant;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
+use RuntimeException;
 
 class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
+        $demoCredentials = $this->demoCredentials();
         $outlet = Outlet::firstOrCreate([
             'name' => 'Tjoerah Main Outlet',
         ], [
@@ -26,29 +28,27 @@ class DatabaseSeeder extends Seeder
             'is_active' => true,
         ]);
 
-        $owner = User::where('email', 'owner@tjoerah.com')->first();
-        if (! $owner) {
-            $owner = User::create([
+        $owner = User::updateOrCreate(
+            ['email' => 'owner@tjoerah.com'],
+            [
                 'name' => 'Owner Admin',
-                'email' => 'owner@tjoerah.com',
-                'password' => Hash::make('password'),
-                'pin' => '1234',
+                'password' => Hash::make($demoCredentials['owner_password']),
+                'pin' => $demoCredentials['owner_pin'],
                 'role' => 'owner',
-            ]);
-        }
+            ],
+        );
 
         $owner->outlets()->syncWithoutDetaching([$outlet->id]);
 
-        $cashier = User::where('email', 'cashier@tjoerah.com')->first();
-        if (! $cashier) {
-            $cashier = User::create([
+        $cashier = User::updateOrCreate(
+            ['email' => 'cashier@tjoerah.com'],
+            [
                 'name' => 'Kasir Demo',
-                'email' => 'cashier@tjoerah.com',
-                'password' => Hash::make('password'),
-                'pin' => '5678',
+                'password' => Hash::make($demoCredentials['cashier_password']),
+                'pin' => $demoCredentials['cashier_pin'],
                 'role' => 'cashier',
-            ]);
-        }
+            ],
+        );
 
         $cashier->outlets()->syncWithoutDetaching([$outlet->id]);
 
@@ -138,5 +138,37 @@ class DatabaseSeeder extends Seeder
         ]);
 
         $matcha->modifierGroups()->syncWithoutDetaching([$sugarLevel->id]);
+    }
+
+    /**
+     * @return array{
+     *     owner_password: string,
+     *     owner_pin: string,
+     *     cashier_password: string,
+     *     cashier_pin: string
+     * }
+     */
+    private function demoCredentials(): array
+    {
+        $credentials = [
+            'owner_password' => env('DEMO_OWNER_PASSWORD') ?: 'password',
+            'owner_pin' => env('DEMO_OWNER_PIN') ?: '1234',
+            'cashier_password' => env('DEMO_CASHIER_PASSWORD') ?: 'password',
+            'cashier_pin' => env('DEMO_CASHIER_PIN') ?: '5678',
+        ];
+
+        if (app()->isProduction() && (
+            $credentials['owner_password'] === 'password'
+            || $credentials['cashier_password'] === 'password'
+            || $credentials['owner_pin'] === '1234'
+            || $credentials['cashier_pin'] === '5678'
+        )) {
+            throw new RuntimeException(
+                'Set custom DEMO_OWNER_PASSWORD, DEMO_OWNER_PIN, '
+                .'DEMO_CASHIER_PASSWORD, and DEMO_CASHIER_PIN before seeding production.',
+            );
+        }
+
+        return $credentials;
     }
 }
