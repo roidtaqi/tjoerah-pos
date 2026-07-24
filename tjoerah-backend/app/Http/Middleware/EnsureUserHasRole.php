@@ -31,7 +31,7 @@ class EnsureUserHasRole
 
         if ($roles->intersect($allowed)->isEmpty()) {
             return response()->json([
-                'message' => 'Anda tidak memiliki izin untuk mengelola katalog produk.',
+                'message' => 'Anda tidak memiliki izin untuk melakukan tindakan ini.',
             ], 403);
         }
 

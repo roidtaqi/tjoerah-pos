@@ -19,7 +19,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 6,
+      version: 7,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -48,6 +48,7 @@ class DatabaseHelper {
     }
     if (oldVersion < 5) await _upgradeProductsTable(db);
     if (oldVersion < 6) await _upgradeCategoriesTable(db);
+    if (oldVersion < 7) await _createOfflineAttendanceTable(db);
   }
 
   Future<void> _createDB(Database db, int version) async {
@@ -181,6 +182,7 @@ class DatabaseHelper {
     ''');
 
     await _createCustomersTable(db);
+    await _createOfflineAttendanceTable(db);
   }
 
   Future<void> _createCustomersTable(Database db) async {
@@ -236,6 +238,20 @@ class DatabaseHelper {
     await db.execute(
       'ALTER TABLE categories ADD COLUMN is_active INTEGER DEFAULT 1',
     );
+  }
+
+  Future<void> _createOfflineAttendanceTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS offline_attendance_actions (
+        id TEXT PRIMARY KEY,
+        action TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        photo_path TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        error_message TEXT
+      )
+    ''');
   }
 
   Future<void> clearCatalog() async {

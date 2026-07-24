@@ -4,6 +4,8 @@ namespace Database\Seeders;
 
 use App\Domains\Core\Models\Outlet;
 use App\Domains\Core\Models\User;
+use App\Domains\Employee\Models\AttendancePolicy;
+use App\Domains\Employee\Models\Employee;
 use App\Domains\POS\Models\Category;
 use App\Domains\POS\Models\ModifierGroup;
 use App\Domains\POS\Models\ModifierOption;
@@ -49,6 +51,33 @@ class DatabaseSeeder extends Seeder
         }
 
         $cashier->outlets()->syncWithoutDetaching([$outlet->id]);
+
+        foreach ([$owner, $cashier] as $user) {
+            Employee::firstOrCreate(
+                ['user_id' => $user->id],
+                [
+                    'company_id' => $user->company_id ?? $outlet->company_id,
+                    'outlet_id' => $outlet->id,
+                    'employee_number' => 'USR-'.str_pad((string) $user->id, 4, '0', STR_PAD_LEFT),
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'position' => $user->role,
+                    'hire_date' => now()->toDateString(),
+                    'is_active' => true,
+                ],
+            );
+        }
+
+        AttendancePolicy::firstOrCreate(
+            ['outlet_id' => $outlet->id],
+            [
+                'company_id' => $outlet->company_id,
+                'timezone' => $outlet->timezone ?: 'Asia/Makassar',
+                'work_start_time' => '08:00',
+                'work_end_time' => '17:00',
+                'late_tolerance_minutes' => 10,
+            ],
+        );
 
         $catCoffee = Category::firstOrCreate(['name' => 'Coffee'], ['is_active' => true]);
         $catNonCoffee = Category::firstOrCreate(['name' => 'Non-Coffee'], ['is_active' => true]);

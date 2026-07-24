@@ -55,6 +55,8 @@ void main() {
     expect(canManageProductsForUser({'role': 'owner'}), isTrue);
     expect(canManageProductsForUser({'role': 'admin'}), isTrue);
     expect(canManageProductsForUser({'role': 'cashier'}), isFalse);
+    expect(canManageAttendanceForUser({'role': 'owner'}), isTrue);
+    expect(canManageAttendanceForUser({'role': 'cashier'}), isFalse);
   });
 
   testWidgets('shell renders only the destinations allowed for each role', (

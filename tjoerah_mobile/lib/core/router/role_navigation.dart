@@ -216,3 +216,6 @@ bool canManageCatalogForUser(Map<String, dynamic>? user) {
 
 bool canManageProductsForUser(Map<String, dynamic>? user) =>
     canManageCatalogForUser(user);
+
+bool canManageAttendanceForUser(Map<String, dynamic>? user) =>
+    canManageCatalogForUser(user);

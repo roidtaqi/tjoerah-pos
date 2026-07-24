@@ -21,6 +21,25 @@ class ApiClient {
     };
   }
 
+  static Future<http.Response> multipart(
+    String endpoint, {
+    required Map<String, String> fields,
+    required String photoPath,
+  }) async {
+    final headers = await _getHeaders();
+    final request =
+        http.MultipartRequest('POST', Uri.parse('$baseUrl$endpoint'))
+          ..headers.addAll({
+            'Accept': headers['Accept']!,
+            if (headers['Authorization'] != null)
+              'Authorization': headers['Authorization']!,
+          })
+          ..fields.addAll(fields)
+          ..files.add(await http.MultipartFile.fromPath('photo', photoPath));
+    final streamed = await request.send().timeout(requestTimeout);
+    return http.Response.fromStream(streamed);
+  }
+
   static Future<http.Response> post(
     String endpoint,
     Map<String, dynamic> data,

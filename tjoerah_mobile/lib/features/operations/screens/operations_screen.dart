@@ -115,6 +115,24 @@ class OperationsScreen extends ConsumerWidget {
                   padding: EdgeInsets.zero,
                   child: Column(
                     children: [
+                      AppListTile(
+                        title: 'Absensi saya',
+                        subtitle:
+                            'Catat masuk atau pulang dengan foto dan lokasi',
+                        icon: Icons.fingerprint_rounded,
+                        onTap: () => context.push('/attendance'),
+                      ),
+                      if (canManageAttendanceForUser(user)) ...[
+                        const Divider(),
+                        AppListTile(
+                          title: 'Manajemen absensi',
+                          subtitle:
+                              'Laporan, jadwal, keterlambatan, dan koreksi',
+                          icon: Icons.fact_check_outlined,
+                          onTap: () => context.push('/attendance/manage'),
+                        ),
+                      ],
+                      const Divider(),
                       if (canManageProductsForUser(user)) ...[
                         AppListTile(
                           title: 'Kelola produk',

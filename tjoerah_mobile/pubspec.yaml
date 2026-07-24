@@ -52,6 +52,9 @@ dependencies:
   fl_chart: ^1.2.0
   intl: ^0.20.3
   permission_handler: ^12.0.3
+  camera: ^0.12.0+2
+  geolocator: ^14.0.3
+  share_plus: ^13.2.1
 
 dev_dependencies:
   flutter_test:

@@ -2,24 +2,32 @@
 
 namespace App\Domains\Employee\Controllers;
 
-use App\Http\Controllers\Controller;
+use App\Domains\Core\Models\Outlet;
+use App\Domains\Core\Models\User;
 use App\Domains\Employee\Models\AttendanceLog;
 use App\Domains\Employee\Models\Employee;
 use App\Domains\Employee\Models\Shift;
+use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 
 class EmployeeController extends Controller
 {
     public function index(Request $request)
     {
-        return Employee::when($request->integer('company_id'), fn ($query, $companyId) => $query->where('company_id', $companyId))
+        return Employee::with(['user', 'outlet'])
+            ->when(
+                $request->user()?->company_id,
+                fn ($query, $companyId) => $query->where('company_id', $companyId),
+                fn ($query) => $query->whereIn('outlet_id', $this->assignedOutletIds($request)),
+            )
             ->when($request->integer('outlet_id'), fn ($query, $outletId) => $query->where('outlet_id', $outletId))
+            ->orderBy('name')
             ->paginate(100);
     }
 
     public function store(Request $request)
     {
-        $employee = Employee::create($request->validate([
+        $validated = $request->validate([
             'company_id' => 'nullable|integer|exists:companies,id',
             'outlet_id' => 'nullable|integer|exists:outlets,id',
             'user_id' => 'nullable|integer|exists:users,id',
@@ -30,9 +38,54 @@ class EmployeeController extends Controller
             'position' => 'nullable|string|max:100',
             'hire_date' => 'nullable|date',
             'is_active' => 'boolean',
-        ]));
+        ]);
+        if ($request->user()?->company_id) {
+            $validated['company_id'] = $request->user()->company_id;
+        }
+        if (isset($validated['outlet_id'])) {
+            $outlet = $this->accessibleOutlet($request, (int) $validated['outlet_id']);
+            $validated['company_id'] = $request->user()?->company_id ?? $outlet->company_id;
+        }
+        if (isset($validated['user_id'])) {
+            $this->accessibleUser($request, (int) $validated['user_id']);
+        }
+        $employee = Employee::create($validated);
 
-        return response()->json($employee, 201);
+        return response()->json($employee->load(['user', 'outlet']), 201);
+    }
+
+    public function update(Request $request, Employee $employee)
+    {
+        $this->ensureAccessible($request, $employee);
+        $validated = $request->validate([
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+            'user_id' => 'nullable|integer|exists:users,id',
+            'employee_number' => 'nullable|string|max:100',
+            'name' => 'sometimes|string|max:255',
+            'phone' => 'nullable|string|max:50',
+            'email' => 'nullable|email|max:255',
+            'position' => 'nullable|string|max:100',
+            'hire_date' => 'nullable|date',
+            'is_active' => 'boolean',
+        ]);
+        if (isset($validated['outlet_id'])) {
+            $this->accessibleOutlet($request, (int) $validated['outlet_id']);
+        }
+        if (isset($validated['user_id'])) {
+            $this->accessibleUser($request, (int) $validated['user_id']);
+        }
+        $employee->update($validated);
+
+        return response()->json($employee->fresh()->load(['user', 'outlet']));
+    }
+
+    public function destroy(Request $request, Employee $employee)
+    {
+        $this->ensureAccessible($request, $employee);
+        abort_if($employee->attendanceLogs()->exists(), 422, 'Karyawan memiliki riwayat absensi dan hanya dapat dinonaktifkan.');
+        $employee->delete();
+
+        return response()->noContent();
     }
 
     public function checkIn(Request $request)
@@ -100,5 +153,47 @@ class EmployeeController extends Controller
         ]);
 
         return response()->json($shift);
+    }
+
+    private function ensureAccessible(Request $request, Employee $employee): void
+    {
+        abort_if(
+            $request->user()?->company_id
+                ? $employee->company_id !== $request->user()->company_id
+                : ! in_array($employee->outlet_id, $this->assignedOutletIds($request), true),
+            404,
+        );
+    }
+
+    private function accessibleOutlet(Request $request, int $outletId): Outlet
+    {
+        return Outlet::query()
+            ->when($request->user()?->company_id, fn ($query, $companyId) => $query->where('company_id', $companyId))
+            ->when(! $request->user()?->company_id, fn ($query) => $query->whereIn('id', $this->assignedOutletIds($request)))
+            ->findOrFail($outletId);
+    }
+
+    private function accessibleUser(Request $request, int $userId): User
+    {
+        return User::query()
+            ->when($request->user()?->company_id, fn ($query, $companyId) => $query->where('company_id', $companyId))
+            ->when(! $request->user()?->company_id, function ($query) use ($request) {
+                $query->whereHas(
+                    'outlets',
+                    fn ($outlets) => $outlets->whereIn('outlets.id', $this->assignedOutletIds($request)),
+                );
+            })
+            ->findOrFail($userId);
+    }
+
+    /**
+     * @return array<int, int>
+     */
+    private function assignedOutletIds(Request $request): array
+    {
+        return $request->user()->outlets()
+            ->pluck('outlets.id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
     }
 }

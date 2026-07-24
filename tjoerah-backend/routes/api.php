@@ -5,6 +5,7 @@ use App\Domains\Core\Controllers\OrganizationController;
 use App\Domains\Core\Controllers\OutletController;
 use App\Domains\Core\Controllers\RbacController;
 use App\Domains\CRM\Controllers\CustomerController;
+use App\Domains\Employee\Controllers\AttendanceController;
 use App\Domains\Employee\Controllers\EmployeeController;
 use App\Domains\Inventory\Controllers\InventoryController;
 use App\Domains\Inventory\Controllers\PurchaseController;
@@ -113,10 +114,31 @@ Route::middleware('auth:api')->group(function () {
     Route::post('/loyalty/redeem', [CustomerController::class, 'redeem']);
     Route::post('/vouchers/validate', [CustomerController::class, 'validateVoucher']);
 
-    Route::get('/employees', [EmployeeController::class, 'index']);
-    Route::post('/employees', [EmployeeController::class, 'store']);
-    Route::post('/attendance/checkin', [EmployeeController::class, 'checkIn']);
-    Route::post('/attendance/checkout', [EmployeeController::class, 'checkOut']);
+    Route::get('/attendance/context', [AttendanceController::class, 'context']);
+    Route::get('/attendance/my-history', [AttendanceController::class, 'myHistory']);
+    Route::post('/attendance/check-in', [AttendanceController::class, 'checkIn']);
+    Route::post('/attendance/check-out', [AttendanceController::class, 'checkOut']);
+    Route::post('/attendance/checkin', [AttendanceController::class, 'checkIn']);
+    Route::post('/attendance/checkout', [AttendanceController::class, 'checkOut']);
+    Route::get('/attendance/{attendance}/photo/{type}', [AttendanceController::class, 'photo']);
+
+    Route::middleware('role:owner,admin')->group(function () {
+        Route::get('/employees', [EmployeeController::class, 'index']);
+        Route::post('/employees', [EmployeeController::class, 'store']);
+        Route::match(['put', 'patch'], '/employees/{employee}', [EmployeeController::class, 'update']);
+        Route::delete('/employees/{employee}', [EmployeeController::class, 'destroy']);
+        Route::get('/attendance/outlets', [AttendanceController::class, 'outlets']);
+        Route::get('/attendance/report', [AttendanceController::class, 'report']);
+        Route::get('/attendance/export', [AttendanceController::class, 'export']);
+        Route::get('/attendance/policy', [AttendanceController::class, 'policy']);
+        Route::put('/attendance/policy', [AttendanceController::class, 'updatePolicy']);
+        Route::get('/attendance/schedules', [AttendanceController::class, 'schedules']);
+        Route::post('/attendance/schedules', [AttendanceController::class, 'storeSchedule']);
+        Route::match(['put', 'patch'], '/attendance/schedules/{schedule}', [AttendanceController::class, 'updateSchedule']);
+        Route::delete('/attendance/schedules/{schedule}', [AttendanceController::class, 'destroySchedule']);
+        Route::patch('/attendance/records/{attendance}/review', [AttendanceController::class, 'review']);
+    });
+
     Route::post('/shifts/start', [EmployeeController::class, 'startShift']);
     Route::post('/shifts/end', [EmployeeController::class, 'endShift']);
 

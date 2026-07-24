@@ -29,6 +29,26 @@ abstract final class AppDateFormatter {
     'Desember',
   ];
 
+  static const _weekdays = <String>[
+    'Senin',
+    'Selasa',
+    'Rabu',
+    'Kamis',
+    'Jumat',
+    'Sabtu',
+    'Minggu',
+  ];
+
+  static const _shortWeekdays = <String>[
+    'Sen',
+    'Sel',
+    'Rab',
+    'Kam',
+    'Jum',
+    'Sab',
+    'Min',
+  ];
+
   static String dayMonthTime(DateTime value) =>
       '${value.day} ${_shortMonth(value)}, ${_time(value)}';
 
@@ -43,6 +63,15 @@ abstract final class AppDateFormatter {
 
   static String longDate(DateTime value) =>
       '${value.day} ${_longMonths[value.month - 1]} ${value.year}';
+
+  static String weekdayLongDate(DateTime value) =>
+      '${_weekdays[value.weekday - 1]}, ${longDate(value)}';
+
+  static String weekdayShortDate(DateTime value) =>
+      '${_shortWeekdays[value.weekday - 1]}, ${shortDate(value)}';
+
+  static String longDateTime(DateTime value) =>
+      '${longDate(value)}, ${_time(value)}';
 
   static String _shortMonth(DateTime value) => _shortMonths[value.month - 1];
 

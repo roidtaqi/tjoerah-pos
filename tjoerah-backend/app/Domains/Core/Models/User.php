@@ -4,6 +4,7 @@ namespace App\Domains\Core\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use App\Domains\Core\Models\Concerns\HasUuid;
+use App\Domains\Employee\Models\Employee;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -45,6 +46,11 @@ class User extends Authenticatable implements JWTSubject
         return $this->belongsToMany(Role::class, 'user_roles')
             ->withPivot(['company_id', 'brand_id', 'outlet_id'])
             ->withTimestamps();
+    }
+
+    public function employee()
+    {
+        return $this->hasOne(Employee::class);
     }
 
     /**

@@ -48,6 +48,23 @@ class SettingsScreen extends ConsumerWidget {
                   padding: EdgeInsets.zero,
                   child: Column(
                     children: [
+                      AppListTile(
+                        title: 'Absensi saya',
+                        subtitle: 'Foto, lokasi, waktu masuk, dan waktu pulang',
+                        icon: Icons.fingerprint_rounded,
+                        onTap: () => context.push('/attendance'),
+                      ),
+                      if (canManageAttendanceForUser(auth.user)) ...[
+                        const Divider(),
+                        AppListTile(
+                          title: 'Manajemen absensi',
+                          subtitle:
+                              'Laporan, jadwal kerja, dan aturan keterlambatan',
+                          icon: Icons.fact_check_outlined,
+                          onTap: () => context.push('/attendance/manage'),
+                        ),
+                      ],
+                      const Divider(),
                       if (role == AppRole.production)
                         AppListTile(
                           title: 'Dapur & bar',

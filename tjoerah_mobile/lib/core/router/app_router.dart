@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../features/attendance/screens/attendance_admin_screen.dart';
+import '../../features/attendance/screens/attendance_screen.dart';
 import '../../features/auth/screens/login_screen.dart';
 import '../../features/customers/screens/customers_screen.dart';
 import '../../features/dashboard/screens/dashboard_screen.dart';
@@ -80,6 +82,16 @@ final GoRouter appRouter = GoRouter(
       path: '/products/manage',
       parentNavigatorKey: _rootNavigatorKey,
       builder: (context, state) => const ProductManagementScreen(),
+    ),
+    GoRoute(
+      path: '/attendance',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (context, state) => const AttendanceScreen(),
+    ),
+    GoRoute(
+      path: '/attendance/manage',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (context, state) => const AttendanceAdminScreen(),
     ),
     GoRoute(
       path: '/categories/manage',

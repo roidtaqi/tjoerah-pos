@@ -75,6 +75,23 @@ flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8000/api
 
 Data demo dibuat oleh `php artisan migrate:fresh --seed`.
 
+## Absensi Karyawan
+
+- Semua role membuka `Lainnya > Absensi saya` untuk absen masuk atau pulang.
+- Owner dan admin membuka `Lainnya > Manajemen absensi` untuk laporan,
+  jadwal, kebijakan keterlambatan, geofence, pemeriksaan foto, koreksi, dan
+  ekspor CSV.
+- Waktu resmi dicatat oleh server. Foto disimpan privat dan hanya dapat dibuka
+  oleh karyawan terkait atau owner/admin pada tenant yang sama.
+- Untuk database lokal yang sudah ada, jalankan `php artisan migrate` lalu
+  `php artisan db:seed`.
+- Di server produksi, jalankan Laravel scheduler agar foto melewati masa
+  retensinya dapat dibersihkan otomatis:
+
+```bash
+php artisan schedule:work
+```
+
 ## Pengujian
 
 ```bash

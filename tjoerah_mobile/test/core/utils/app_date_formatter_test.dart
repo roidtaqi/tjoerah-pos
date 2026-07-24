@@ -11,5 +11,8 @@ void main() {
     expect(AppDateFormatter.shortDate(date), '03 Agu 2026');
     expect(AppDateFormatter.dayMonth(date), '03 Agu');
     expect(AppDateFormatter.longDate(date), '3 Agustus 2026');
+    expect(AppDateFormatter.weekdayLongDate(date), 'Senin, 3 Agustus 2026');
+    expect(AppDateFormatter.weekdayShortDate(date), 'Sen, 03 Agu 2026');
+    expect(AppDateFormatter.longDateTime(date), '3 Agustus 2026, 07:05');
   });
 }

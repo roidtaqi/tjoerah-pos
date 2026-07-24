@@ -3,9 +3,10 @@
 namespace App\Domains\Core\Models;
 
 use App\Domains\Core\Models\Concerns\HasUuid;
+use App\Domains\Employee\Models\AttendancePolicy;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Outlet extends Model
 {
@@ -13,18 +14,27 @@ class Outlet extends Model
 
     protected $guarded = [];
 
+    protected $casts = [
+        'is_active' => 'boolean',
+    ];
+
     public function users(): BelongsToMany
     {
-        return $this->belongsToMany(\App\Domains\Core\Models\User::class);
+        return $this->belongsToMany(User::class);
     }
 
     public function company()
     {
-        return $this->belongsTo(\App\Domains\Core\Models\Company::class);
+        return $this->belongsTo(Company::class);
     }
 
     public function brand()
     {
-        return $this->belongsTo(\App\Domains\Core\Models\Brand::class);
+        return $this->belongsTo(Brand::class);
+    }
+
+    public function attendancePolicy()
+    {
+        return $this->hasOne(AttendancePolicy::class);
     }
 }
