@@ -192,6 +192,88 @@ class AttendanceManagementTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_owner_can_manage_two_shifts_and_exact_late_boundary_is_applied(): void
+    {
+        Storage::fake('local');
+        [$cashier, $employee, $outlet, $company] = $this->attendanceFixture();
+        $owner = User::factory()->create([
+            'company_id' => $company->id,
+            'role' => 'owner',
+        ]);
+        $owner->outlets()->attach($outlet);
+
+        $morningShift = $this->actingAs($owner, 'api')
+            ->postJson('/api/attendance/shifts', [
+                'outlet_id' => $outlet->id,
+                'name' => 'Shift Pagi',
+                'start_time' => '07:30',
+                'late_after_time' => '07:45',
+                'end_time' => '15:30',
+                'check_in_open_minutes' => 60,
+                'is_active' => true,
+                'sort_order' => 1,
+            ])
+            ->assertCreated()
+            ->assertJsonPath('late_after_time', '07:45')
+            ->json();
+
+        $this->postJson('/api/attendance/shifts', [
+            'outlet_id' => $outlet->id,
+            'name' => 'Shift Kedua',
+            'start_time' => '15:30',
+            'late_after_time' => '15:45',
+            'end_time' => '23:30',
+            'check_in_open_minutes' => 60,
+            'is_active' => true,
+            'sort_order' => 2,
+        ])->assertCreated();
+
+        $this->getJson("/api/attendance/shifts?outlet_id={$outlet->id}")
+            ->assertOk()
+            ->assertJsonCount(2);
+
+        $this->putJson('/api/attendance/shift-assignments', [
+            'outlet_id' => $outlet->id,
+            'assignments' => [[
+                'employee_id' => $employee->id,
+                'attendance_shift_id' => $morningShift['id'],
+            ]],
+        ])->assertOk()
+            ->assertJsonPath('0.attendance_shift.name', 'Shift Pagi');
+
+        CarbonImmutable::setTestNow('2026-07-23 23:45:00 UTC');
+        $this->actingAs($cashier, 'api')
+            ->getJson('/api/attendance/context')
+            ->assertOk()
+            ->assertJsonPath('attendance_shift.name', 'Shift Pagi')
+            ->assertJsonPath('scheduled_start_at', '2026-07-23T23:30:00.000000Z')
+            ->assertJsonPath('scheduled_late_after_at', '2026-07-23T23:45:00.000000Z');
+
+        $attendance = $this->post('/api/attendance/check-in', [
+            ...$this->capturePayload($outlet, (string) Str::uuid()),
+            'photo' => UploadedFile::fake()->image('shift-check-in.jpg', 480, 640),
+        ], ['Accept' => 'application/json'])
+            ->assertCreated()
+            ->assertJsonPath('attendance.punctuality_status', 'late')
+            ->assertJsonPath('attendance.late_minutes', 1)
+            ->assertJsonPath('attendance.attendance_shift.name', 'Shift Pagi')
+            ->json('attendance');
+
+        $this->assertDatabaseHas('attendance_logs', [
+            'id' => $attendance['id'],
+            'attendance_shift_id' => $morningShift['id'],
+            'late_minutes' => 1,
+        ]);
+
+        $this->actingAs($owner, 'api')
+            ->deleteJson("/api/attendance/shifts/{$morningShift['id']}")
+            ->assertUnprocessable();
+        $this->patchJson("/api/attendance/shifts/{$morningShift['id']}", [
+            'is_active' => false,
+        ])->assertOk()
+            ->assertJsonPath('is_active', false);
+    }
+
     public function test_employee_cannot_view_another_company_attendance_photo(): void
     {
         Storage::fake('local');

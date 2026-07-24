@@ -50,7 +50,7 @@ class _AttendanceAdminScreenState extends ConsumerState<AttendanceAdminScreen> {
 
     final admin = ref.watch(attendanceAdminProvider);
     return DefaultTabController(
-      length: 3,
+      length: 4,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Manajemen absensi'),
@@ -65,9 +65,12 @@ class _AttendanceAdminScreenState extends ConsumerState<AttendanceAdminScreen> {
             const SizedBox(width: 4),
           ],
           bottom: const TabBar(
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
             tabs: [
               Tab(icon: Icon(Icons.analytics_outlined), text: 'Laporan'),
               Tab(icon: Icon(Icons.calendar_month_outlined), text: 'Jadwal'),
+              Tab(icon: Icon(Icons.schedule_rounded), text: 'Shift'),
               Tab(icon: Icon(Icons.tune_rounded), text: 'Kebijakan'),
             ],
           ),
@@ -109,6 +112,15 @@ class _AttendanceAdminScreenState extends ConsumerState<AttendanceAdminScreen> {
                       onAdd: () => _openScheduleForm(data),
                       onEdit: (schedule) => _openScheduleForm(data, schedule),
                       onDelete: _confirmDeleteSchedule,
+                    ),
+                    _AttendanceShiftTab(
+                      shifts: data.shifts,
+                      employees: data.employees,
+                      enabled: !_isMutating,
+                      onAdd: () => _openAttendanceShiftForm(data),
+                      onEdit: (shift) => _openAttendanceShiftForm(data, shift),
+                      onDelete: _confirmDeleteAttendanceShift,
+                      onAssignments: () => _openShiftAssignments(data),
                     ),
                     _PolicyTab(
                       key: ValueKey(data.selectedOutlet.id),
@@ -162,6 +174,7 @@ class _AttendanceAdminScreenState extends ConsumerState<AttendanceAdminScreen> {
       subtitle: 'Tetapkan waktu kerja karyawan untuk tanggal tertentu',
       child: _ScheduleForm(
         employees: data.employees,
+        shifts: data.shifts,
         outletId: data.selectedOutlet.id,
         schedule: schedule,
       ),
@@ -205,6 +218,84 @@ class _AttendanceAdminScreenState extends ConsumerState<AttendanceAdminScreen> {
     final result = await ref
         .read(attendanceAdminProvider.notifier)
         .deleteSchedule(schedule);
+    if (!mounted) return;
+    setState(() => _isMutating = false);
+    _showResult(result);
+  }
+
+  Future<void> _openAttendanceShiftForm(
+    AttendanceAdminState data, [
+    AttendanceShiftModel? shift,
+  ]) async {
+    final value = await AppBottomSheet.show<AttendanceShiftModel>(
+      context,
+      title: shift == null ? 'Shift baru' : 'Edit shift',
+      subtitle: 'Atur jam kerja dan waktu mulai dihitung terlambat',
+      child: _AttendanceShiftForm(
+        outletId: data.selectedOutlet.id,
+        shift: shift,
+        suggestedOrder: data.shifts.length + 1,
+      ),
+    );
+    if (value == null || !mounted) return;
+    setState(() => _isMutating = true);
+    final result = await ref
+        .read(attendanceAdminProvider.notifier)
+        .saveAttendanceShift(value, isNew: shift == null);
+    if (!mounted) return;
+    setState(() => _isMutating = false);
+    _showResult(result);
+  }
+
+  Future<void> _confirmDeleteAttendanceShift(AttendanceShiftModel shift) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Hapus shift?'),
+        content: Text(
+          '${shift.name} akan dihapus. Shift yang sudah digunakan harus '
+          'dinonaktifkan agar riwayat tetap tersimpan.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: const Text('Hapus'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _isMutating = true);
+    final result = await ref
+        .read(attendanceAdminProvider.notifier)
+        .deleteAttendanceShift(shift);
+    if (!mounted) return;
+    setState(() => _isMutating = false);
+    _showResult(result);
+  }
+
+  Future<void> _openShiftAssignments(AttendanceAdminState data) async {
+    final assignments = await AppBottomSheet.show<Map<int, int?>>(
+      context,
+      title: 'Shift karyawan',
+      subtitle: 'Pilih shift harian utama untuk setiap karyawan',
+      child: _ShiftAssignmentsForm(
+        employees: data.employees,
+        shifts: data.shifts,
+      ),
+    );
+    if (assignments == null || !mounted) return;
+    setState(() => _isMutating = true);
+    final result = await ref
+        .read(attendanceAdminProvider.notifier)
+        .assignAttendanceShifts(assignments);
     if (!mounted) return;
     setState(() => _isMutating = false);
     _showResult(result);
@@ -682,6 +773,11 @@ class _AdminAttendanceRow extends StatelessWidget {
                           : AppColors.successSoft,
                       textColor: isLate ? AppColors.error : AppColors.success,
                     ),
+                    if (record.attendanceShift != null)
+                      AppBadge(
+                        text: record.attendanceShift!.name,
+                        icon: Icons.schedule_outlined,
+                      ),
                     if (record.reviewStatus == 'pending')
                       const AppBadge(
                         text: 'Perlu ditinjau',
@@ -831,9 +927,23 @@ class _ScheduleTab extends StatelessWidget {
                                     ).textTheme.bodySmall,
                                   ),
                                   const SizedBox(height: 7),
-                                  AppBadge(
-                                    text: schedule.shiftName,
-                                    icon: Icons.schedule_rounded,
+                                  Wrap(
+                                    spacing: 6,
+                                    runSpacing: 6,
+                                    children: [
+                                      AppBadge(
+                                        text: schedule.shiftName,
+                                        icon: Icons.schedule_rounded,
+                                      ),
+                                      if (schedule.lateAfterAt != null)
+                                        AppBadge(
+                                          text:
+                                              'Terlambat ${time.format(schedule.lateAfterAt!.toLocal())}',
+                                          icon: Icons.timer_outlined,
+                                          color: AppColors.warningSoft,
+                                          textColor: AppColors.warning,
+                                        ),
+                                    ],
                                   ),
                                 ],
                               ),
@@ -875,6 +985,213 @@ class _ScheduleTab extends StatelessWidget {
         ),
       ],
     );
+  }
+}
+
+class _AttendanceShiftTab extends StatelessWidget {
+  const _AttendanceShiftTab({
+    required this.shifts,
+    required this.employees,
+    required this.enabled,
+    required this.onAdd,
+    required this.onEdit,
+    required this.onDelete,
+    required this.onAssignments,
+  });
+
+  final List<AttendanceShiftModel> shifts;
+  final List<AttendanceEmployee> employees;
+  final bool enabled;
+  final VoidCallback onAdd;
+  final ValueChanged<AttendanceShiftModel> onEdit;
+  final ValueChanged<AttendanceShiftModel> onDelete;
+  final VoidCallback onAssignments;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: AppSpacing.page(context),
+      children: [
+        Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 900),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Shift absensi',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Atur shift karyawan',
+                      onPressed:
+                          enabled && shifts.isNotEmpty && employees.isNotEmpty
+                          ? onAssignments
+                          : null,
+                      icon: const Icon(Icons.group_outlined),
+                    ),
+                    const SizedBox(width: 4),
+                    FilledButton.icon(
+                      onPressed: enabled ? onAdd : null,
+                      icon: const Icon(Icons.add_rounded),
+                      label: const Text('Tambah'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Shift utama berlaku setiap hari. Jadwal khusus tetap dapat '
+                  'menggantinya pada tanggal tertentu.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 14),
+                if (shifts.isEmpty)
+                  AppEmptyState(
+                    title: 'Belum ada shift absensi',
+                    message:
+                        'Tambahkan shift lalu tetapkan kepada setiap karyawan.',
+                    icon: Icons.schedule_outlined,
+                    onAction: enabled ? onAdd : null,
+                    actionLabel: enabled ? 'Tambah shift' : null,
+                  )
+                else
+                  ...shifts.map(
+                    (shift) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: AppCard(
+                        onTap: enabled ? () => onEdit(shift) : null,
+                        padding: const EdgeInsets.all(12),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                color: shift.isActive
+                                    ? AppColors.successSoft
+                                    : AppColors.surfaceMuted,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Icon(
+                                Icons.schedule_rounded,
+                                color: shift.isActive
+                                    ? AppColors.success
+                                    : AppColors.textSecondary,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          shift.name,
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.titleMedium,
+                                        ),
+                                      ),
+                                      AppBadge(
+                                        text: shift.isActive
+                                            ? 'Aktif'
+                                            : 'Nonaktif',
+                                        color: shift.isActive
+                                            ? AppColors.successSoft
+                                            : AppColors.surfaceMuted,
+                                        textColor: shift.isActive
+                                            ? AppColors.success
+                                            : AppColors.textSecondary,
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    '${shift.startTime} - ${shift.endTime}',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodyMedium,
+                                  ),
+                                  const SizedBox(height: 7),
+                                  Wrap(
+                                    spacing: 6,
+                                    runSpacing: 6,
+                                    children: [
+                                      AppBadge(
+                                        text:
+                                            'Terlambat ${shift.lateAfterTime}',
+                                        icon: Icons.timer_outlined,
+                                        color: AppColors.warningSoft,
+                                        textColor: AppColors.warning,
+                                      ),
+                                      AppBadge(
+                                        text:
+                                            '${_assignedEmployeeCount(shift.id)} karyawan',
+                                        icon: Icons.badge_outlined,
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                            PopupMenuButton<String>(
+                              tooltip: 'Aksi shift',
+                              enabled: enabled,
+                              onSelected: (value) {
+                                if (value == 'edit') onEdit(shift);
+                                if (value == 'delete') onDelete(shift);
+                              },
+                              itemBuilder: (context) => const [
+                                PopupMenuItem(
+                                  value: 'edit',
+                                  child: ListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    leading: Icon(Icons.edit_outlined),
+                                    title: Text('Edit'),
+                                  ),
+                                ),
+                                PopupMenuItem(
+                                  value: 'delete',
+                                  child: ListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    leading: Icon(Icons.delete_outline_rounded),
+                                    title: Text('Hapus'),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                if (shifts.isNotEmpty && employees.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  OutlinedButton.icon(
+                    onPressed: enabled ? onAssignments : null,
+                    icon: const Icon(Icons.group_outlined),
+                    label: const Text('Atur shift karyawan'),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  int _assignedEmployeeCount(int shiftId) {
+    return employees
+        .where((employee) => employee.attendanceShiftId == shiftId)
+        .length;
   }
 }
 
@@ -967,8 +1284,13 @@ class _PolicyTabState extends State<_PolicyTab> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    'Jam kerja',
+                    'Jam kerja cadangan',
                     style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Digunakan jika karyawan belum memiliki shift utama.',
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 10),
                   Row(
@@ -996,7 +1318,7 @@ class _PolicyTabState extends State<_PolicyTab> {
                       Expanded(
                         child: _NumberField(
                           controller: _tolerance,
-                          label: 'Toleransi terlambat',
+                          label: 'Toleransi cadangan',
                           suffix: 'menit',
                           max: 240,
                         ),
@@ -1262,14 +1584,274 @@ class _NumberField extends StatelessWidget {
   }
 }
 
+class _AttendanceShiftForm extends StatefulWidget {
+  const _AttendanceShiftForm({
+    required this.outletId,
+    required this.shift,
+    required this.suggestedOrder,
+  });
+
+  final int outletId;
+  final AttendanceShiftModel? shift;
+  final int suggestedOrder;
+
+  @override
+  State<_AttendanceShiftForm> createState() => _AttendanceShiftFormState();
+}
+
+class _AttendanceShiftFormState extends State<_AttendanceShiftForm> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _name;
+  late final TextEditingController _openMinutes;
+  late TimeOfDay _start;
+  late TimeOfDay _lateAfter;
+  late TimeOfDay _end;
+  late bool _isActive;
+
+  @override
+  void initState() {
+    super.initState();
+    final shift = widget.shift;
+    final isSecondShift = widget.suggestedOrder == 2;
+    _name = TextEditingController(
+      text:
+          shift?.name ??
+          (isSecondShift
+              ? 'Shift Kedua'
+              : widget.suggestedOrder == 1
+              ? 'Shift Pagi'
+              : 'Shift ${widget.suggestedOrder}'),
+    );
+    _openMinutes = TextEditingController(
+      text: (shift?.checkInOpenMinutes ?? 60).toString(),
+    );
+    _start = _parseTime(
+      shift?.startTime ?? (isSecondShift ? '15:30' : '07:30'),
+    );
+    _lateAfter = _parseTime(
+      shift?.lateAfterTime ?? (isSecondShift ? '15:45' : '07:45'),
+    );
+    _end = _parseTime(shift?.endTime ?? (isSecondShift ? '23:30' : '15:30'));
+    _isActive = shift?.isActive ?? true;
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _openMinutes.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextFormField(
+              controller: _name,
+              decoration: const InputDecoration(
+                labelText: 'Nama shift',
+                prefixIcon: Icon(Icons.work_outline_rounded),
+              ),
+              validator: (value) => (value ?? '').trim().isEmpty
+                  ? 'Nama shift wajib diisi'
+                  : null,
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _TimeField(
+                    label: 'Mulai',
+                    value: _start,
+                    onTap: () => _pickTime('start'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _TimeField(
+                    label: 'Selesai',
+                    value: _end,
+                    onTap: () => _pickTime('end'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _TimeField(
+              label: 'Mulai dihitung terlambat',
+              value: _lateAfter,
+              onTap: () => _pickTime('late'),
+            ),
+            const SizedBox(height: 12),
+            _NumberField(
+              controller: _openMinutes,
+              label: 'Absen masuk dibuka',
+              suffix: 'menit sebelum',
+              max: 720,
+            ),
+            const SizedBox(height: 8),
+            SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Shift aktif'),
+              subtitle: const Text(
+                'Shift nonaktif tidak digunakan untuk absensi berikutnya',
+              ),
+              value: _isActive,
+              onChanged: (value) => setState(() => _isActive = value),
+            ),
+            const SizedBox(height: 16),
+            AppButton(
+              text: widget.shift == null ? 'Tambah shift' : 'Simpan perubahan',
+              icon: Icons.check_rounded,
+              onPressed: _submit,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickTime(String type) async {
+    final initial = switch (type) {
+      'start' => _start,
+      'late' => _lateAfter,
+      _ => _end,
+    };
+    final selected = await showTimePicker(
+      context: context,
+      initialTime: initial,
+    );
+    if (selected == null) return;
+    setState(() {
+      if (type == 'start') _start = selected;
+      if (type == 'late') _lateAfter = selected;
+      if (type == 'end') _end = selected;
+    });
+  }
+
+  void _submit() {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    if (!_isTimeInsideShift(_start, _lateAfter, _end)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Waktu mulai terlambat harus berada di antara jam mulai dan selesai.',
+          ),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
+    Navigator.pop(
+      context,
+      AttendanceShiftModel(
+        id: widget.shift?.id ?? 0,
+        outletId: widget.outletId,
+        name: _name.text.trim(),
+        startTime: _formatTime(_start),
+        lateAfterTime: _formatTime(_lateAfter),
+        endTime: _formatTime(_end),
+        checkInOpenMinutes: int.parse(_openMinutes.text),
+        isActive: _isActive,
+        sortOrder: widget.shift?.sortOrder ?? widget.suggestedOrder,
+        employeesCount: widget.shift?.employeesCount ?? 0,
+      ),
+    );
+  }
+}
+
+class _ShiftAssignmentsForm extends StatefulWidget {
+  const _ShiftAssignmentsForm({required this.employees, required this.shifts});
+
+  final List<AttendanceEmployee> employees;
+  final List<AttendanceShiftModel> shifts;
+
+  @override
+  State<_ShiftAssignmentsForm> createState() => _ShiftAssignmentsFormState();
+}
+
+class _ShiftAssignmentsFormState extends State<_ShiftAssignmentsForm> {
+  late final Map<int, int?> _assignments;
+
+  @override
+  void initState() {
+    super.initState();
+    _assignments = {
+      for (final employee in widget.employees)
+        employee.id: employee.attendanceShiftId,
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ...widget.employees.map(
+            (employee) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: DropdownButtonFormField<int>(
+                initialValue: _assignments[employee.id] ?? 0,
+                isExpanded: true,
+                decoration: InputDecoration(
+                  labelText: employee.name,
+                  helperText: employee.position,
+                  prefixIcon: const Icon(Icons.badge_outlined),
+                ),
+                items: [
+                  const DropdownMenuItem<int>(
+                    value: 0,
+                    child: Text('Jam kerja cadangan'),
+                  ),
+                  ...widget.shifts.map(
+                    (shift) => DropdownMenuItem<int>(
+                      value: shift.id,
+                      child: Text(
+                        '${shift.name} (${shift.startTime}-${shift.endTime})'
+                        '${shift.isActive ? '' : ' - nonaktif'}',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                ],
+                onChanged: (value) {
+                  setState(() {
+                    _assignments[employee.id] = value == 0 ? null : value;
+                  });
+                },
+              ),
+            ),
+          ),
+          AppButton(
+            text: 'Simpan penugasan',
+            icon: Icons.save_outlined,
+            onPressed: widget.employees.isEmpty
+                ? null
+                : () => Navigator.pop(context, _assignments),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ScheduleForm extends StatefulWidget {
   const _ScheduleForm({
     required this.employees,
+    required this.shifts,
     required this.outletId,
     required this.schedule,
   });
 
   final List<AttendanceEmployee> employees;
+  final List<AttendanceShiftModel> shifts;
   final int outletId;
   final EmployeeScheduleModel? schedule;
 
@@ -1280,8 +1862,10 @@ class _ScheduleForm extends StatefulWidget {
 class _ScheduleFormState extends State<_ScheduleForm> {
   final _formKey = GlobalKey<FormState>();
   late int? _employeeId;
+  late int? _attendanceShiftId;
   late DateTime _date;
   late TimeOfDay _start;
+  late TimeOfDay _lateAfter;
   late TimeOfDay _end;
   late final TextEditingController _name;
   late final TextEditingController _notes;
@@ -1294,10 +1878,14 @@ class _ScheduleFormState extends State<_ScheduleForm> {
     _employeeId =
         schedule?.employeeId ??
         (widget.employees.isEmpty ? null : widget.employees.first.id);
+    _attendanceShiftId = schedule?.attendanceShiftId;
     _date = schedule?.workDate.toLocal() ?? DateTime.now();
     _start = schedule == null
         ? const TimeOfDay(hour: 8, minute: 0)
         : TimeOfDay.fromDateTime(schedule.startAt.toLocal());
+    _lateAfter = schedule?.lateAfterAt == null
+        ? const TimeOfDay(hour: 8, minute: 10)
+        : TimeOfDay.fromDateTime(schedule!.lateAfterAt!.toLocal());
     _end = schedule == null
         ? const TimeOfDay(hour: 17, minute: 0)
         : TimeOfDay.fromDateTime(schedule.endAt.toLocal());
@@ -1344,6 +1932,40 @@ class _ScheduleFormState extends State<_ScheduleForm> {
               validator: (value) => value == null ? 'Pilih karyawan' : null,
             ),
             const SizedBox(height: 12),
+            DropdownButtonFormField<int>(
+              initialValue: _attendanceShiftId ?? 0,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Pola waktu',
+                prefixIcon: Icon(Icons.schedule_outlined),
+              ),
+              items: [
+                const DropdownMenuItem<int>(
+                  value: 0,
+                  child: Text('Waktu khusus'),
+                ),
+                ...widget.shifts.map(
+                  (shift) => DropdownMenuItem<int>(
+                    value: shift.id,
+                    child: Text(
+                      '${shift.name} (${shift.startTime}-${shift.endTime})',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              ],
+              onChanged: (value) {
+                setState(() {
+                  _attendanceShiftId = value == 0 ? null : value;
+                  if (value != null && value != 0) {
+                    _applyShift(
+                      widget.shifts.firstWhere((shift) => shift.id == value),
+                    );
+                  }
+                });
+              },
+            ),
+            const SizedBox(height: 12),
             InkWell(
               onTap: _pickDate,
               borderRadius: BorderRadius.circular(8),
@@ -1362,7 +1984,9 @@ class _ScheduleFormState extends State<_ScheduleForm> {
                   child: _TimeField(
                     label: 'Mulai',
                     value: _start,
-                    onTap: () => _pickTime(true),
+                    onTap: _attendanceShiftId == null
+                        ? () => _pickTime('start')
+                        : null,
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -1370,14 +1994,25 @@ class _ScheduleFormState extends State<_ScheduleForm> {
                   child: _TimeField(
                     label: 'Selesai',
                     value: _end,
-                    onTap: () => _pickTime(false),
+                    onTap: _attendanceShiftId == null
+                        ? () => _pickTime('end')
+                        : null,
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 12),
+            _TimeField(
+              label: 'Mulai dihitung terlambat',
+              value: _lateAfter,
+              onTap: _attendanceShiftId == null
+                  ? () => _pickTime('late')
+                  : null,
+            ),
+            const SizedBox(height: 12),
             TextFormField(
               controller: _name,
+              readOnly: _attendanceShiftId != null,
               decoration: const InputDecoration(
                 labelText: 'Nama shift',
                 prefixIcon: Icon(Icons.work_outline_rounded),
@@ -1440,23 +2075,44 @@ class _ScheduleFormState extends State<_ScheduleForm> {
     if (selected != null) setState(() => _date = selected);
   }
 
-  Future<void> _pickTime(bool isStart) async {
+  Future<void> _pickTime(String type) async {
+    final initial = switch (type) {
+      'start' => _start,
+      'late' => _lateAfter,
+      _ => _end,
+    };
     final selected = await showTimePicker(
       context: context,
-      initialTime: isStart ? _start : _end,
+      initialTime: initial,
     );
     if (selected == null) return;
     setState(() {
-      if (isStart) {
-        _start = selected;
-      } else {
-        _end = selected;
-      }
+      if (type == 'start') _start = selected;
+      if (type == 'late') _lateAfter = selected;
+      if (type == 'end') _end = selected;
     });
+  }
+
+  void _applyShift(AttendanceShiftModel shift) {
+    _start = _parseTime(shift.startTime);
+    _lateAfter = _parseTime(shift.lateAfterTime);
+    _end = _parseTime(shift.endTime);
+    _name.text = shift.name;
   }
 
   void _submit() {
     if (!(_formKey.currentState?.validate() ?? false)) return;
+    if (!_isTimeInsideShift(_start, _lateAfter, _end)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Waktu mulai terlambat harus berada di antara jam mulai dan selesai.',
+          ),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
     final start = DateTime(
       _date.year,
       _date.month,
@@ -1472,12 +2128,24 @@ class _ScheduleFormState extends State<_ScheduleForm> {
       _end.minute,
     );
     if (!end.isAfter(start)) end = end.add(const Duration(days: 1));
+    var lateAfter = DateTime(
+      _date.year,
+      _date.month,
+      _date.day,
+      _lateAfter.hour,
+      _lateAfter.minute,
+    );
+    if (lateAfter.isBefore(start)) {
+      lateAfter = lateAfter.add(const Duration(days: 1));
+    }
 
     Navigator.pop(context, {
       'employee_id': _employeeId,
       'outlet_id': widget.outletId,
       'work_date': DateFormat('yyyy-MM-dd').format(_date),
+      'attendance_shift_id': _attendanceShiftId,
       'start_at': start.toUtc().toIso8601String(),
+      'late_after_at': lateAfter.toUtc().toIso8601String(),
       'end_at': end.toUtc().toIso8601String(),
       'shift_name': _name.text.trim(),
       'status': _status,
@@ -1646,4 +2314,14 @@ TimeOfDay _parseTime(String value) {
 String _formatTime(TimeOfDay value) {
   return '${value.hour.toString().padLeft(2, '0')}:'
       '${value.minute.toString().padLeft(2, '0')}';
+}
+
+bool _isTimeInsideShift(TimeOfDay start, TimeOfDay lateAfter, TimeOfDay end) {
+  final startMinutes = (start.hour * 60) + start.minute;
+  var lateMinutes = (lateAfter.hour * 60) + lateAfter.minute;
+  var endMinutes = (end.hour * 60) + end.minute;
+  if (endMinutes <= startMinutes) endMinutes += 1440;
+  if (lateMinutes < startMinutes) lateMinutes += 1440;
+
+  return lateMinutes <= endMinutes;
 }

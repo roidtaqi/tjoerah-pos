@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use App\Domains\Core\Models\Outlet;
 use App\Domains\Core\Models\User;
 use App\Domains\Employee\Models\AttendancePolicy;
+use App\Domains\Employee\Models\AttendanceShift;
 use App\Domains\Employee\Models\Employee;
 use App\Domains\POS\Models\Category;
 use App\Domains\POS\Models\ModifierGroup;
@@ -52,8 +53,36 @@ class DatabaseSeeder extends Seeder
 
         $cashier->outlets()->syncWithoutDetaching([$outlet->id]);
 
-        foreach ([$owner, $cashier] as $user) {
-            Employee::firstOrCreate(
+        $attendanceShifts = collect([
+            [
+                'name' => 'Shift Pagi',
+                'start_time' => '07:30',
+                'late_after_time' => '07:45',
+                'end_time' => '15:30',
+                'sort_order' => 1,
+            ],
+            [
+                'name' => 'Shift Kedua',
+                'start_time' => '15:30',
+                'late_after_time' => '15:45',
+                'end_time' => '23:30',
+                'sort_order' => 2,
+            ],
+        ])->map(fn (array $data) => AttendanceShift::updateOrCreate(
+            [
+                'outlet_id' => $outlet->id,
+                'name' => $data['name'],
+            ],
+            [
+                ...$data,
+                'company_id' => $outlet->company_id,
+                'check_in_open_minutes' => 60,
+                'is_active' => true,
+            ],
+        ))->values();
+
+        foreach ([$owner, $cashier] as $index => $user) {
+            $employee = Employee::firstOrCreate(
                 ['user_id' => $user->id],
                 [
                     'company_id' => $user->company_id ?? $outlet->company_id,
@@ -66,6 +95,11 @@ class DatabaseSeeder extends Seeder
                     'is_active' => true,
                 ],
             );
+            if (! $employee->attendance_shift_id) {
+                $employee->update([
+                    'attendance_shift_id' => $attendanceShifts[$index]->id,
+                ]);
+            }
         }
 
         AttendancePolicy::firstOrCreate(

@@ -461,7 +461,9 @@ class _SchedulePanel extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  data.schedule?.shiftName ?? 'Jadwal reguler',
+                  data.schedule?.shiftName ??
+                      data.attendanceShift?.name ??
+                      'Jam kerja cadangan',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
               ),
@@ -479,6 +481,17 @@ class _SchedulePanel extends StatelessWidget {
                 ),
             ],
           ),
+          if ((data.schedule == null || data.schedule!.status == 'scheduled') &&
+              data.scheduledLateAfterAt != null) ...[
+            const SizedBox(height: 7),
+            Text(
+              'Mulai dihitung terlambat pukul '
+              '${time.format(data.scheduledLateAfterAt!.toLocal())}',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: AppColors.warning),
+            ),
+          ],
           if (attendance?.checkInAt != null) ...[
             const Divider(height: 24),
             Row(

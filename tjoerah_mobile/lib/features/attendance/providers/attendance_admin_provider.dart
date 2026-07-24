@@ -13,6 +13,7 @@ class AttendanceAdminState {
     required this.summary,
     required this.records,
     required this.schedules,
+    required this.shifts,
     required this.dateFrom,
     required this.dateTo,
     this.status = 'all',
@@ -25,6 +26,7 @@ class AttendanceAdminState {
   final AttendanceSummary summary;
   final List<AttendanceRecord> records;
   final List<EmployeeScheduleModel> schedules;
+  final List<AttendanceShiftModel> shifts;
   final DateTime dateFrom;
   final DateTime dateTo;
   final String status;
@@ -36,6 +38,7 @@ class AttendanceAdminState {
     AttendanceSummary? summary,
     List<AttendanceRecord>? records,
     List<EmployeeScheduleModel>? schedules,
+    List<AttendanceShiftModel>? shifts,
     DateTime? dateFrom,
     DateTime? dateTo,
     String? status,
@@ -48,6 +51,7 @@ class AttendanceAdminState {
       summary: summary ?? this.summary,
       records: records ?? this.records,
       schedules: schedules ?? this.schedules,
+      shifts: shifts ?? this.shifts,
       dateFrom: dateFrom ?? this.dateFrom,
       dateTo: dateTo ?? this.dateTo,
       status: status ?? this.status,
@@ -186,6 +190,70 @@ class AttendanceAdminNotifier extends AsyncNotifier<AttendanceAdminState> {
     }
   }
 
+  Future<AttendanceAdminResult> saveAttendanceShift(
+    AttendanceShiftModel shift, {
+    required bool isNew,
+  }) async {
+    try {
+      if (isNew) {
+        await _repository.createAttendanceShift(shift);
+      } else {
+        await _repository.updateAttendanceShift(shift);
+      }
+      await refresh();
+      return AttendanceAdminResult(
+        true,
+        isNew ? 'Shift berhasil ditambahkan.' : 'Shift berhasil diperbarui.',
+      );
+    } on AttendanceApiException catch (error) {
+      return AttendanceAdminResult(false, error.message);
+    } catch (_) {
+      return const AttendanceAdminResult(
+        false,
+        'Shift belum dapat disimpan. Periksa koneksi server.',
+      );
+    }
+  }
+
+  Future<AttendanceAdminResult> deleteAttendanceShift(
+    AttendanceShiftModel shift,
+  ) async {
+    try {
+      await _repository.deleteAttendanceShift(shift.id);
+      await refresh();
+      return const AttendanceAdminResult(true, 'Shift berhasil dihapus.');
+    } on AttendanceApiException catch (error) {
+      return AttendanceAdminResult(false, error.message);
+    } catch (_) {
+      return const AttendanceAdminResult(false, 'Shift belum dapat dihapus.');
+    }
+  }
+
+  Future<AttendanceAdminResult> assignAttendanceShifts(
+    Map<int, int?> assignments,
+  ) async {
+    try {
+      final current = state.requireValue;
+      final employees = await _repository.assignAttendanceShifts(
+        outletId: current.selectedOutlet.id,
+        assignments: assignments,
+      );
+      state = AsyncValue.data(current.copyWith(employees: employees));
+      await refresh();
+      return const AttendanceAdminResult(
+        true,
+        'Shift karyawan berhasil diperbarui.',
+      );
+    } on AttendanceApiException catch (error) {
+      return AttendanceAdminResult(false, error.message);
+    } catch (_) {
+      return const AttendanceAdminResult(
+        false,
+        'Penugasan shift belum dapat disimpan.',
+      );
+    }
+  }
+
   Future<AttendanceAdminResult> deleteSchedule(
     EmployeeScheduleModel schedule,
   ) async {
@@ -242,6 +310,7 @@ class AttendanceAdminNotifier extends AsyncNotifier<AttendanceAdminState> {
         dateFrom: dateFrom,
         dateTo: dateTo,
       ),
+      _repository.getAttendanceShifts(outlet.id),
     ]);
     final report = results[2] as (AttendanceSummary, List<AttendanceRecord>);
 
@@ -253,6 +322,7 @@ class AttendanceAdminNotifier extends AsyncNotifier<AttendanceAdminState> {
       summary: report.$1,
       records: report.$2,
       schedules: results[3] as List<EmployeeScheduleModel>,
+      shifts: results[4] as List<AttendanceShiftModel>,
       dateFrom: dateFrom,
       dateTo: dateTo,
       status: status,

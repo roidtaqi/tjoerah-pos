@@ -6,6 +6,7 @@ use App\Domains\Core\Models\Outlet;
 use App\Domains\Employee\Models\AttendanceAudit;
 use App\Domains\Employee\Models\AttendanceLog;
 use App\Domains\Employee\Models\AttendancePolicy;
+use App\Domains\Employee\Models\AttendanceShift;
 use App\Domains\Employee\Models\Employee;
 use App\Domains\Employee\Models\EmployeeSchedule;
 use App\Domains\Employee\Services\AttendanceService;
@@ -13,8 +14,10 @@ use App\Http\Controllers\Controller;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class AttendanceController extends Controller
 {
@@ -44,7 +47,7 @@ class AttendanceController extends Controller
         );
 
         return $employee->attendanceLogs()
-            ->with(['outlet', 'schedule'])
+            ->with(['outlet', 'schedule', 'attendanceShift'])
             ->latest('check_in_at')
             ->paginate($request->integer('per_page', 30));
     }
@@ -163,7 +166,9 @@ class AttendanceController extends Controller
             'Tanggal',
             'Karyawan',
             'Outlet',
+            'Shift',
             'Jadwal masuk',
+            'Mulai terlambat',
             'Absen masuk',
             'Absen pulang',
             'Status',
@@ -176,7 +181,9 @@ class AttendanceController extends Controller
                 $record->work_date?->format('Y-m-d'),
                 $record->employee?->name,
                 $record->outlet?->name,
+                $record->attendanceShift?->name ?? $record->schedule?->shift_name,
                 $record->scheduled_start_at?->toIso8601String(),
+                $record->scheduled_late_after_at?->toIso8601String(),
                 $record->check_in_at?->toIso8601String(),
                 $record->check_out_at?->toIso8601String(),
                 $record->punctuality_status,
@@ -240,6 +247,134 @@ class AttendanceController extends Controller
         return response()->json($policy);
     }
 
+    public function attendanceShifts(Request $request)
+    {
+        $validated = $request->validate([
+            'outlet_id' => 'required|integer|exists:outlets,id',
+        ]);
+        $outlet = $this->accessibleOutlet($request, (int) $validated['outlet_id']);
+
+        return response()->json(
+            AttendanceShift::withCount('employees')
+                ->where('outlet_id', $outlet->id)
+                ->orderBy('sort_order')
+                ->orderBy('start_time')
+                ->get(),
+        );
+    }
+
+    public function storeAttendanceShift(Request $request)
+    {
+        $validated = $request->validate($this->attendanceShiftRules());
+        $outlet = $this->accessibleOutlet($request, (int) $validated['outlet_id']);
+        $this->validateAttendanceShiftTimes($validated);
+        $this->ensureUniqueAttendanceShiftName(
+            $outlet->id,
+            $validated['name'],
+        );
+
+        $shift = AttendanceShift::create([
+            ...$validated,
+            'company_id' => $request->user()->company_id ?? $outlet->company_id,
+        ]);
+
+        return response()->json($shift->loadCount('employees'), 201);
+    }
+
+    public function updateAttendanceShift(
+        Request $request,
+        AttendanceShift $attendanceShift,
+    ) {
+        $this->ensureAttendanceShiftAccessible($request, $attendanceShift);
+        $validated = $request->validate($this->attendanceShiftRules(partial: true));
+        $merged = [
+            ...$attendanceShift->only([
+                'outlet_id',
+                'name',
+                'start_time',
+                'late_after_time',
+                'end_time',
+                'check_in_open_minutes',
+                'is_active',
+                'sort_order',
+            ]),
+            ...$validated,
+        ];
+        $outlet = $this->accessibleOutlet($request, (int) $merged['outlet_id']);
+        $this->validateAttendanceShiftTimes($merged);
+        $this->ensureUniqueAttendanceShiftName(
+            $outlet->id,
+            $merged['name'],
+            $attendanceShift->id,
+        );
+        abort_if(
+            isset($validated['outlet_id'])
+                && $attendanceShift->outlet_id !== $outlet->id,
+            422,
+            'Outlet shift tidak dapat dipindahkan.',
+        );
+
+        $attendanceShift->update($validated);
+
+        return response()->json($attendanceShift->fresh()->loadCount('employees'));
+    }
+
+    public function destroyAttendanceShift(
+        Request $request,
+        AttendanceShift $attendanceShift,
+    ) {
+        $this->ensureAttendanceShiftAccessible($request, $attendanceShift);
+        abort_if(
+            $attendanceShift->employees()->exists()
+                || $attendanceShift->schedules()->exists()
+                || $attendanceShift->attendanceLogs()->exists(),
+            422,
+            'Shift sudah digunakan. Nonaktifkan shift agar riwayat tetap terjaga.',
+        );
+        $attendanceShift->delete();
+
+        return response()->noContent();
+    }
+
+    public function assignAttendanceShifts(Request $request)
+    {
+        $validated = $request->validate([
+            'outlet_id' => 'required|integer|exists:outlets,id',
+            'assignments' => 'required|array|min:1',
+            'assignments.*.employee_id' => 'required|integer|distinct|exists:employees,id',
+            'assignments.*.attendance_shift_id' => 'nullable|integer|exists:attendance_shifts,id',
+        ]);
+        $outlet = $this->accessibleOutlet($request, (int) $validated['outlet_id']);
+
+        DB::transaction(function () use ($request, $validated, $outlet): void {
+            foreach ($validated['assignments'] as $assignment) {
+                $employee = $this->accessibleEmployee($request, (int) $assignment['employee_id']);
+                abort_unless(
+                    $employee->outlet_id === $outlet->id,
+                    422,
+                    'Semua karyawan harus berasal dari outlet yang dipilih.',
+                );
+                $shiftId = $assignment['attendance_shift_id'] ?? null;
+                if ($shiftId) {
+                    $shift = $this->accessibleAttendanceShift($request, (int) $shiftId);
+                    abort_unless(
+                        $shift->outlet_id === $outlet->id,
+                        422,
+                        'Shift dan karyawan harus berasal dari outlet yang sama.',
+                    );
+                }
+                $employee->update(['attendance_shift_id' => $shiftId]);
+            }
+        });
+
+        return response()->json(
+            Employee::with('attendanceShift')
+                ->where('outlet_id', $outlet->id)
+                ->orderBy('name')
+                ->get(),
+        );
+    }
+
     public function schedules(Request $request)
     {
         $validated = $request->validate([
@@ -250,7 +385,7 @@ class AttendanceController extends Controller
         ]);
         [$dateFrom, $dateTo] = $this->reportDates($validated);
 
-        return EmployeeSchedule::with(['employee', 'outlet'])
+        return EmployeeSchedule::with(['employee', 'outlet', 'attendanceShift'])
             ->whereDate('work_date', '>=', $dateFrom)
             ->whereDate('work_date', '<=', $dateTo)
             ->when($request->user()->company_id, function ($query, $companyId) {
@@ -271,12 +406,16 @@ class AttendanceController extends Controller
         $outlet = $this->accessibleOutlet($request, (int) $validated['outlet_id']);
         abort_if($employee->outlet_id && $employee->outlet_id !== $outlet->id, 422, 'Karyawan tidak terhubung dengan outlet tersebut.');
 
+        $scheduleData = $this->prepareScheduleData($request, $validated, $outlet);
         $schedule = EmployeeSchedule::create([
-            ...$validated,
+            ...$scheduleData,
             'created_by' => $request->user()->id,
         ]);
 
-        return response()->json($schedule->load(['employee', 'outlet']), 201);
+        return response()->json(
+            $schedule->load(['employee', 'outlet', 'attendanceShift']),
+            201,
+        );
     }
 
     public function updateSchedule(Request $request, EmployeeSchedule $schedule)
@@ -298,9 +437,30 @@ class AttendanceController extends Controller
             422,
             'Karyawan tidak terhubung dengan outlet tersebut.',
         );
-        $schedule->update($validated);
+        $scheduleData = $this->prepareScheduleData(
+            $request,
+            [
+                ...$schedule->only([
+                    'employee_id',
+                    'outlet_id',
+                    'attendance_shift_id',
+                    'work_date',
+                    'start_at',
+                    'late_after_at',
+                    'end_at',
+                    'shift_name',
+                    'status',
+                    'notes',
+                ]),
+                ...$validated,
+            ],
+            $outlet,
+        );
+        $schedule->update($scheduleData);
 
-        return response()->json($schedule->fresh()->load(['employee', 'outlet']));
+        return response()->json(
+            $schedule->fresh()->load(['employee', 'outlet', 'attendanceShift']),
+        );
     }
 
     public function destroySchedule(Request $request, EmployeeSchedule $schedule)
@@ -345,13 +505,18 @@ class AttendanceController extends Controller
             $checkIn = CarbonImmutable::parse($validated['check_in_at'])->utc();
             $changes['check_in_at'] = $checkIn;
             if ($attendance->scheduled_start_at) {
-                $deadline = CarbonImmutable::instance($attendance->scheduled_start_at)->addMinutes(
-                    $attendance->outlet?->attendancePolicy?->late_tolerance_minutes ?? 0,
+                $deadline = $attendance->scheduled_late_after_at
+                    ? CarbonImmutable::instance($attendance->scheduled_late_after_at)
+                    : CarbonImmutable::instance($attendance->scheduled_start_at)->addMinutes(
+                        $attendance->outlet?->attendancePolicy?->late_tolerance_minutes ?? 0,
+                    );
+                [$punctuality, $lateMinutes] = $this->attendanceService->lateness(
+                    $checkIn,
+                    $deadline,
                 );
-                $lateMinutes = max(0, intdiv($checkIn->getTimestamp() - $deadline->getTimestamp(), 60));
                 $changes += [
                     'late_minutes' => $lateMinutes,
-                    'punctuality_status' => $lateMinutes > 0 ? 'late' : 'on_time',
+                    'punctuality_status' => $punctuality,
                 ];
             }
         }
@@ -376,7 +541,13 @@ class AttendanceController extends Controller
             'reason' => $validated['review_notes'],
         ]);
 
-        return response()->json($attendance->fresh()->load(['employee', 'outlet', 'reviewer', 'audits.actor']));
+        return response()->json($attendance->fresh()->load([
+            'employee',
+            'outlet',
+            'attendanceShift',
+            'reviewer',
+            'audits.actor',
+        ]));
     }
 
     private function captureRules(): array
@@ -406,11 +577,118 @@ class AttendanceController extends Controller
             'outlet_id' => [$required, 'integer', 'exists:outlets,id'],
             'work_date' => [$required, 'date'],
             'start_at' => [$required, 'date'],
+            'late_after_at' => ['nullable', 'date'],
             'end_at' => [$required, 'date', 'after:start_at'],
+            'attendance_shift_id' => ['nullable', 'integer', 'exists:attendance_shifts,id'],
             'shift_name' => [$required, 'string', 'max:100'],
             'status' => [$required, Rule::in(['scheduled', 'leave', 'sick', 'off', 'cancelled'])],
             'notes' => 'nullable|string|max:2000',
         ];
+    }
+
+    private function attendanceShiftRules(bool $partial = false): array
+    {
+        $required = $partial ? 'sometimes' : 'required';
+
+        return [
+            'outlet_id' => [$required, 'integer', 'exists:outlets,id'],
+            'name' => [$required, 'string', 'max:100'],
+            'start_time' => [$required, 'date_format:H:i'],
+            'late_after_time' => [$required, 'date_format:H:i'],
+            'end_time' => [$required, 'date_format:H:i'],
+            'check_in_open_minutes' => [$required, 'integer', 'min:0', 'max:720'],
+            'is_active' => [$required, 'boolean'],
+            'sort_order' => ['nullable', 'integer', 'min:0', 'max:999'],
+        ];
+    }
+
+    private function validateAttendanceShiftTimes(array $data): void
+    {
+        $start = $this->minutesFromTime($data['start_time']);
+        $lateAfter = $this->minutesFromTime($data['late_after_time']);
+        $end = $this->minutesFromTime($data['end_time']);
+        if ($end <= $start) {
+            $end += 1440;
+        }
+        if ($lateAfter < $start) {
+            $lateAfter += 1440;
+        }
+        if ($lateAfter > $end) {
+            throw ValidationException::withMessages([
+                'late_after_time' => 'Batas terlambat harus berada di antara jam mulai dan selesai.',
+            ]);
+        }
+    }
+
+    private function ensureUniqueAttendanceShiftName(
+        int $outletId,
+        string $name,
+        ?int $ignoreId = null,
+    ): void {
+        $exists = AttendanceShift::where('outlet_id', $outletId)
+            ->whereRaw('LOWER(name) = ?', [strtolower(trim($name))])
+            ->when($ignoreId, fn ($query, $id) => $query->where('id', '!=', $id))
+            ->exists();
+        if ($exists) {
+            throw ValidationException::withMessages([
+                'name' => 'Nama shift sudah digunakan pada outlet ini.',
+            ]);
+        }
+    }
+
+    private function prepareScheduleData(
+        Request $request,
+        array $data,
+        Outlet $outlet,
+    ): array {
+        $policy = $this->attendanceService->policyForOutlet($outlet);
+        $shiftId = $data['attendance_shift_id'] ?? null;
+        if ($shiftId) {
+            $shift = $this->accessibleAttendanceShift($request, (int) $shiftId);
+            abort_unless(
+                $shift->outlet_id === $outlet->id,
+                422,
+                'Shift dan jadwal harus berasal dari outlet yang sama.',
+            );
+            $window = $this->attendanceService->shiftWindowForDate(
+                $shift,
+                CarbonImmutable::parse($data['work_date'])->toDateString(),
+                $policy->timezone,
+            );
+            $data = [
+                ...$data,
+                'start_at' => $window['start'],
+                'late_after_at' => $window['late_after'],
+                'end_at' => $window['end'],
+                'shift_name' => $shift->name,
+            ];
+        } else {
+            $start = CarbonImmutable::parse($data['start_at'])->utc();
+            $end = CarbonImmutable::parse($data['end_at'])->utc();
+            $lateAfter = filled($data['late_after_at'] ?? null)
+                ? CarbonImmutable::parse($data['late_after_at'])->utc()
+                : $start->addMinutes($policy->late_tolerance_minutes);
+            if ($lateAfter->lessThan($start) || $lateAfter->greaterThan($end)) {
+                throw ValidationException::withMessages([
+                    'late_after_at' => 'Batas terlambat harus berada di antara jam mulai dan selesai.',
+                ]);
+            }
+            $data = [
+                ...$data,
+                'start_at' => $start,
+                'late_after_at' => $lateAfter,
+                'end_at' => $end,
+            ];
+        }
+
+        return $data;
+    }
+
+    private function minutesFromTime(string $time): int
+    {
+        [$hour, $minute] = array_map('intval', explode(':', $time));
+
+        return ($hour * 60) + $minute;
     }
 
     private function reportDates(array $validated): array
@@ -427,7 +705,7 @@ class AttendanceController extends Controller
         string $dateFrom,
         string $dateTo,
     ): Builder {
-        return AttendanceLog::with(['employee', 'outlet', 'schedule', 'reviewer'])
+        return AttendanceLog::with(['employee', 'outlet', 'schedule', 'attendanceShift', 'reviewer'])
             ->whereDate('work_date', '>=', $dateFrom)
             ->whereDate('work_date', '<=', $dateTo)
             ->when($request->user()->company_id, function ($query, $companyId) {
@@ -462,6 +740,34 @@ class AttendanceController extends Controller
             ->when($request->user()->company_id, fn ($query, $companyId) => $query->where('company_id', $companyId))
             ->when(! $request->user()->company_id, fn ($query) => $query->whereIn('outlet_id', $this->assignedOutletIds($request)))
             ->findOrFail($employeeId);
+    }
+
+    private function accessibleAttendanceShift(
+        Request $request,
+        int $attendanceShiftId,
+    ): AttendanceShift {
+        return AttendanceShift::query()
+            ->when(
+                $request->user()->company_id,
+                fn ($query, $companyId) => $query->where('company_id', $companyId),
+            )
+            ->when(
+                ! $request->user()->company_id,
+                fn ($query) => $query->whereIn('outlet_id', $this->assignedOutletIds($request)),
+            )
+            ->findOrFail($attendanceShiftId);
+    }
+
+    private function ensureAttendanceShiftAccessible(
+        Request $request,
+        AttendanceShift $attendanceShift,
+    ): void {
+        abort_if(
+            $request->user()->company_id
+                ? $attendanceShift->company_id !== $request->user()->company_id
+                : ! in_array($attendanceShift->outlet_id, $this->assignedOutletIds($request), true),
+            404,
+        );
     }
 
     private function ensureAttendanceAccessible(

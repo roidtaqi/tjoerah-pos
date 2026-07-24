@@ -6,6 +6,7 @@ use App\Domains\Core\Models\Outlet;
 use App\Domains\Core\Models\User;
 use App\Domains\Employee\Models\AttendanceLog;
 use App\Domains\Employee\Models\AttendancePolicy;
+use App\Domains\Employee\Models\AttendanceShift;
 use App\Domains\Employee\Models\Employee;
 use App\Domains\Employee\Models\EmployeeSchedule;
 use Carbon\CarbonImmutable;
@@ -23,21 +24,25 @@ class AttendanceService
         $employee = $this->resolveEmployee($user, $requestedOutletId);
         $outlet = $employee->outlet;
         $policy = $this->policyForOutlet($outlet);
-        [$schedule, $scheduledStart, $scheduledEnd] = $this->scheduleWindow($employee, $policy);
+        $window = $this->scheduleWindow($employee, $policy);
         $activeAttendance = $employee->attendanceLogs()
+            ->with('attendanceShift')
             ->whereNull('check_out_at')
             ->latest('check_in_at')
             ->first();
 
         return [
-            'employee' => $employee->load('outlet'),
+            'employee' => $employee->load(['outlet', 'attendanceShift']),
             'outlet' => $outlet,
             'policy' => $policy,
-            'schedule' => $schedule,
-            'scheduled_start_at' => $scheduledStart,
-            'scheduled_end_at' => $scheduledEnd,
+            'schedule' => $window['schedule'],
+            'attendance_shift' => $window['shift'],
+            'scheduled_start_at' => $window['start'],
+            'scheduled_late_after_at' => $window['late_after'],
+            'scheduled_end_at' => $window['end'],
             'active_attendance' => $activeAttendance,
             'recent_attendance' => $employee->attendanceLogs()
+                ->with('attendanceShift')
                 ->latest('check_in_at')
                 ->limit(10)
                 ->get(),
@@ -55,7 +60,7 @@ class AttendanceService
                 ->whereHas('employee', fn ($employee) => $employee->where('user_id', $user->id))
                 ->first();
             if ($existing) {
-                return $existing->load(['employee', 'outlet', 'schedule']);
+                return $existing->load(['employee', 'outlet', 'schedule', 'attendanceShift']);
             }
         }
 
@@ -80,7 +85,8 @@ class AttendanceService
             ]);
         }
 
-        [$schedule, $scheduledStart, $scheduledEnd] = $this->scheduleWindow($employee, $policy);
+        $window = $this->scheduleWindow($employee, $policy);
+        $schedule = $window['schedule'];
         if ($schedule && $schedule->status !== 'scheduled') {
             $label = match ($schedule->status) {
                 'leave' => 'cuti',
@@ -94,7 +100,7 @@ class AttendanceService
             ]);
         }
         $now = CarbonImmutable::now('UTC');
-        $checkInOpensAt = $scheduledStart->subMinutes($policy->check_in_open_minutes);
+        $checkInOpensAt = $window['start']->subMinutes($window['check_in_open_minutes']);
         if ($now->isBefore($checkInOpensAt)) {
             throw ValidationException::withMessages([
                 'attendance' => 'Absen masuk dibuka pada '.$checkInOpensAt->setTimezone($policy->timezone)->format('H:i').'.',
@@ -104,9 +110,7 @@ class AttendanceService
         $assessment = $this->assessLocation($policy, $data);
         $this->validateOutsideReason($policy, $assessment['outside'], $data['outside_reason'] ?? null);
 
-        $deadline = $scheduledStart->addMinutes($policy->late_tolerance_minutes);
-        $lateMinutes = max(0, intdiv($now->getTimestamp() - $deadline->getTimestamp(), 60));
-        $punctuality = $lateMinutes > 0 ? 'late' : 'on_time';
+        [$punctuality, $lateMinutes] = $this->lateness($now, $window['late_after']);
         $reviewStatus = $assessment['flags'] === [] ? 'approved' : 'pending';
         $photoData = $this->storePhoto($photo, $employee, 'check-in', $now);
 
@@ -114,10 +118,12 @@ class AttendanceService
             $attendance = DB::transaction(fn () => AttendanceLog::create([
                 'employee_id' => $employee->id,
                 'outlet_id' => $outlet->id,
-                'work_date' => $scheduledStart->setTimezone($policy->timezone)->toDateString(),
+                'work_date' => $window['start']->setTimezone($policy->timezone)->toDateString(),
                 'employee_schedule_id' => $schedule?->id,
-                'scheduled_start_at' => $scheduledStart,
-                'scheduled_end_at' => $scheduledEnd,
+                'attendance_shift_id' => $window['shift']?->id,
+                'scheduled_start_at' => $window['start'],
+                'scheduled_late_after_at' => $window['late_after'],
+                'scheduled_end_at' => $window['end'],
                 'check_in_at' => $now,
                 'punctuality_status' => $punctuality,
                 'late_minutes' => $lateMinutes,
@@ -145,7 +151,7 @@ class AttendanceService
             throw $error;
         }
 
-        return $attendance->load(['employee', 'outlet', 'schedule']);
+        return $attendance->load(['employee', 'outlet', 'schedule', 'attendanceShift']);
     }
 
     public function checkOut(
@@ -158,7 +164,7 @@ class AttendanceService
                 ->whereHas('employee', fn ($employee) => $employee->where('user_id', $user->id))
                 ->first();
             if ($existing) {
-                return $existing->load(['employee', 'outlet', 'schedule']);
+                return $existing->load(['employee', 'outlet', 'schedule', 'attendanceShift']);
             }
         }
 
@@ -237,7 +243,7 @@ class AttendanceService
             throw $error;
         }
 
-        return $attendance->fresh()->load(['employee', 'outlet', 'schedule']);
+        return $attendance->fresh()->load(['employee', 'outlet', 'schedule', 'attendanceShift']);
     }
 
     public function resolveEmployee(User $user, ?int $requestedOutletId = null): Employee
@@ -254,7 +260,7 @@ class AttendanceService
                 $employee->update(['outlet_id' => $this->resolveOutlet($user, $requestedOutletId)->id]);
             }
 
-            return $employee->fresh('outlet');
+            return $employee->fresh(['outlet', 'attendanceShift']);
         }
 
         $outlet = $this->resolveOutlet($user, $requestedOutletId);
@@ -269,7 +275,7 @@ class AttendanceService
             'position' => $user->role,
             'hire_date' => now()->toDateString(),
             'is_active' => true,
-        ])->load('outlet');
+        ])->load(['outlet', 'attendanceShift']);
     }
 
     public function policyForOutlet(Outlet $outlet): AttendancePolicy
@@ -284,7 +290,14 @@ class AttendanceService
     }
 
     /**
-     * @return array{0: ?EmployeeSchedule, 1: CarbonImmutable, 2: CarbonImmutable}
+     * @return array{
+     *     schedule: ?EmployeeSchedule,
+     *     shift: ?AttendanceShift,
+     *     start: CarbonImmutable,
+     *     late_after: CarbonImmutable,
+     *     end: CarbonImmutable,
+     *     check_in_open_minutes: int
+     * }
      */
     public function scheduleWindow(
         Employee $employee,
@@ -299,10 +312,40 @@ class AttendanceService
             ->first();
 
         if ($schedule) {
+            $schedule->loadMissing('attendanceShift');
+            $scheduledStart = CarbonImmutable::instance($schedule->start_at)->utc();
+
             return [
-                $schedule,
-                CarbonImmutable::instance($schedule->start_at)->utc(),
-                CarbonImmutable::instance($schedule->end_at)->utc(),
+                'schedule' => $schedule,
+                'shift' => $schedule->attendanceShift,
+                'start' => $scheduledStart,
+                'late_after' => $schedule->late_after_at
+                    ? CarbonImmutable::instance($schedule->late_after_at)->utc()
+                    : $scheduledStart->addMinutes($policy->late_tolerance_minutes),
+                'end' => CarbonImmutable::instance($schedule->end_at)->utc(),
+                'check_in_open_minutes' => $schedule->attendanceShift?->check_in_open_minutes
+                    ?? $policy->check_in_open_minutes,
+            ];
+        }
+
+        $employee->loadMissing('attendanceShift');
+        $shift = $employee->attendanceShift;
+        if ($shift && $shift->is_active && $shift->outlet_id === $employee->outlet_id) {
+            $localNow = $now->setTimezone($policy->timezone);
+            $shiftDate = $localDate;
+            if (
+                $shift->end_time <= $shift->start_time
+                && $localNow->format('H:i') < $shift->end_time
+            ) {
+                $shiftDate = $localNow->subDay()->toDateString();
+            }
+            $shiftWindow = $this->shiftWindowForDate($shift, $shiftDate, $policy->timezone);
+
+            return [
+                'schedule' => null,
+                'shift' => $shift,
+                ...$shiftWindow,
+                'check_in_open_minutes' => $shift->check_in_open_minutes,
             ];
         }
 
@@ -318,7 +361,54 @@ class AttendanceService
             $scheduledEnd = $scheduledEnd->addDay();
         }
 
-        return [null, $scheduledStart, $scheduledEnd];
+        return [
+            'schedule' => null,
+            'shift' => null,
+            'start' => $scheduledStart,
+            'late_after' => $scheduledStart->addMinutes($policy->late_tolerance_minutes),
+            'end' => $scheduledEnd,
+            'check_in_open_minutes' => $policy->check_in_open_minutes,
+        ];
+    }
+
+    /**
+     * @return array{start: CarbonImmutable, late_after: CarbonImmutable, end: CarbonImmutable}
+     */
+    public function shiftWindowForDate(
+        AttendanceShift $shift,
+        string $localDate,
+        string $timezone,
+    ): array {
+        $start = CarbonImmutable::parse("{$localDate} {$shift->start_time}", $timezone);
+        $lateAfter = CarbonImmutable::parse("{$localDate} {$shift->late_after_time}", $timezone);
+        $end = CarbonImmutable::parse("{$localDate} {$shift->end_time}", $timezone);
+        if ($end->lessThanOrEqualTo($start)) {
+            $end = $end->addDay();
+        }
+        if ($lateAfter->lessThan($start)) {
+            $lateAfter = $lateAfter->addDay();
+        }
+
+        return [
+            'start' => $start->utc(),
+            'late_after' => $lateAfter->utc(),
+            'end' => $end->utc(),
+        ];
+    }
+
+    /**
+     * @return array{0: string, 1: int}
+     */
+    public function lateness(
+        CarbonImmutable $checkIn,
+        CarbonImmutable $lateAfter,
+    ): array {
+        $secondsLate = $checkIn->getTimestamp() - $lateAfter->getTimestamp();
+        if ($secondsLate < 0) {
+            return ['on_time', 0];
+        }
+
+        return ['late', max(1, intdiv($secondsLate + 59, 60))];
     }
 
     private function resolveOutlet(User $user, ?int $requestedOutletId): Outlet

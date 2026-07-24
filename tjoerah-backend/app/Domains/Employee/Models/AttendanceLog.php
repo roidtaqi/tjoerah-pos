@@ -27,6 +27,7 @@ class AttendanceLog extends Model
         'check_in_at' => 'datetime',
         'check_out_at' => 'datetime',
         'scheduled_start_at' => 'datetime',
+        'scheduled_late_after_at' => 'datetime',
         'scheduled_end_at' => 'datetime',
         'reviewed_at' => 'datetime',
         'check_in_device_at' => 'datetime',
@@ -61,6 +62,11 @@ class AttendanceLog extends Model
     public function schedule()
     {
         return $this->belongsTo(EmployeeSchedule::class, 'employee_schedule_id');
+    }
+
+    public function attendanceShift()
+    {
+        return $this->belongsTo(AttendanceShift::class);
     }
 
     public function reviewer()

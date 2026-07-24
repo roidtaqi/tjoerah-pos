@@ -148,6 +148,82 @@ class AttendanceRepository {
     );
   }
 
+  Future<List<AttendanceShiftModel>> getAttendanceShifts(int outletId) async {
+    final response = await ApiClient.get(
+      '/attendance/shifts?outlet_id=$outletId',
+    );
+    if (response.statusCode != 200) {
+      throw _apiError(response.body, response.statusCode);
+    }
+    return (jsonDecode(response.body) as List)
+        .whereType<Map>()
+        .map(
+          (row) =>
+              AttendanceShiftModel.fromJson(Map<String, dynamic>.from(row)),
+        )
+        .toList();
+  }
+
+  Future<AttendanceShiftModel> createAttendanceShift(
+    AttendanceShiftModel shift,
+  ) async {
+    final response = await ApiClient.post('/attendance/shifts', shift.toJson());
+    if (response.statusCode != 201) {
+      throw _apiError(response.body, response.statusCode);
+    }
+    return AttendanceShiftModel.fromJson(
+      Map<String, dynamic>.from(jsonDecode(response.body) as Map),
+    );
+  }
+
+  Future<AttendanceShiftModel> updateAttendanceShift(
+    AttendanceShiftModel shift,
+  ) async {
+    final response = await ApiClient.patch(
+      '/attendance/shifts/${shift.id}',
+      shift.toJson(),
+    );
+    if (response.statusCode != 200) {
+      throw _apiError(response.body, response.statusCode);
+    }
+    return AttendanceShiftModel.fromJson(
+      Map<String, dynamic>.from(jsonDecode(response.body) as Map),
+    );
+  }
+
+  Future<void> deleteAttendanceShift(int shiftId) async {
+    final response = await ApiClient.delete('/attendance/shifts/$shiftId');
+    if (response.statusCode != 204) {
+      throw _apiError(response.body, response.statusCode);
+    }
+  }
+
+  Future<List<AttendanceEmployee>> assignAttendanceShifts({
+    required int outletId,
+    required Map<int, int?> assignments,
+  }) async {
+    final response = await ApiClient.put('/attendance/shift-assignments', {
+      'outlet_id': outletId,
+      'assignments': assignments.entries
+          .map(
+            (entry) => {
+              'employee_id': entry.key,
+              'attendance_shift_id': entry.value,
+            },
+          )
+          .toList(),
+    });
+    if (response.statusCode != 200) {
+      throw _apiError(response.body, response.statusCode);
+    }
+    return (jsonDecode(response.body) as List)
+        .whereType<Map>()
+        .map(
+          (row) => AttendanceEmployee.fromJson(Map<String, dynamic>.from(row)),
+        )
+        .toList();
+  }
+
   Future<(AttendanceSummary, List<AttendanceRecord>)> getReport({
     required int outletId,
     required DateTime dateFrom,

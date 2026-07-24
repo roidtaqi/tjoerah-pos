@@ -50,6 +50,7 @@ void main() {
     expect(find.text('Manajemen absensi'), findsOneWidget);
     expect(find.text('Laporan'), findsOneWidget);
     expect(find.text('Jadwal'), findsOneWidget);
+    expect(find.text('Shift'), findsOneWidget);
     expect(find.text('Kebijakan'), findsOneWidget);
     expect(find.text('Hadir'), findsOneWidget);
     expect(find.text('Rani Kasir'), findsOneWidget);
@@ -60,9 +61,17 @@ void main() {
     expect(find.text('Jadwal karyawan'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
+    await tester.tap(find.text('Shift'));
+    await tester.pumpAndSettle();
+    expect(find.text('Shift absensi'), findsOneWidget);
+    expect(find.text('Shift Pagi'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.ensureVisible(find.text('Kebijakan'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Kebijakan'));
     await tester.pumpAndSettle();
-    expect(find.text('Jam kerja'), findsOneWidget);
+    expect(find.text('Jam kerja cadangan'), findsOneWidget);
     expect(find.text('Simpan kebijakan'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -122,9 +131,21 @@ const _employee = AttendanceEmployee(
   name: 'Rani Kasir',
   position: 'Kasir',
   outletId: 1,
+  attendanceShiftId: 1,
+  attendanceShift: _shift,
 );
 
 const _outlet = AttendanceOutlet(id: 1, name: 'Tjoerah Utama');
+
+const _shift = AttendanceShiftModel(
+  id: 1,
+  outletId: 1,
+  name: 'Shift Pagi',
+  startTime: '07:30',
+  lateAfterTime: '07:45',
+  endTime: '15:30',
+  employeesCount: 1,
+);
 
 const _policy = AttendancePolicy(
   outletId: 1,
@@ -138,19 +159,23 @@ final _record = AttendanceRecord(
   outletId: 1,
   workDate: DateTime(2026, 7, 24),
   scheduledStartAt: DateTime.utc(2026, 7, 24),
+  scheduledLateAfterAt: DateTime.utc(2026, 7, 24, 0, 15),
   scheduledEndAt: DateTime.utc(2026, 7, 24, 9),
   checkInAt: DateTime.utc(2026, 7, 24, 0, 20),
   punctualityStatus: 'late',
   lateMinutes: 10,
   employee: _employee,
   outlet: _outlet,
+  attendanceShift: _shift,
 );
 
 final _context = AttendanceContextModel(
   employee: _employee,
   outlet: _outlet,
   policy: _policy,
+  attendanceShift: _shift,
   scheduledStartAt: DateTime.utc(2026, 7, 24),
+  scheduledLateAfterAt: DateTime.utc(2026, 7, 24, 0, 15),
   scheduledEndAt: DateTime.utc(2026, 7, 24, 9),
   serverTime: DateTime.utc(2026, 7, 24),
   recentAttendance: [_record],
@@ -169,6 +194,7 @@ final _adminState = AttendanceAdminState(
   ),
   records: [_record],
   schedules: const [],
+  shifts: const [_shift],
   dateFrom: DateTime(2026, 7, 1),
   dateTo: DateTime(2026, 7, 31),
 );

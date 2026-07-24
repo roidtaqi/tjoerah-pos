@@ -4,6 +4,7 @@ namespace App\Domains\Core\Models;
 
 use App\Domains\Core\Models\Concerns\HasUuid;
 use App\Domains\Employee\Models\AttendancePolicy;
+use App\Domains\Employee\Models\AttendanceShift;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -36,5 +37,10 @@ class Outlet extends Model
     public function attendancePolicy()
     {
         return $this->hasOne(AttendancePolicy::class);
+    }
+
+    public function attendanceShifts()
+    {
+        return $this->hasMany(AttendanceShift::class);
     }
 }

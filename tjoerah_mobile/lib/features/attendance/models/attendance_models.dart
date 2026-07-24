@@ -5,6 +5,8 @@ class AttendanceEmployee {
     this.employeeNumber,
     this.position,
     this.outletId,
+    this.attendanceShiftId,
+    this.attendanceShift,
   });
 
   factory AttendanceEmployee.fromJson(Map<String, dynamic> json) {
@@ -14,6 +16,12 @@ class AttendanceEmployee {
       employeeNumber: _nullableString(json['employee_number']),
       position: _nullableString(json['position']),
       outletId: _nullableInt(json['outlet_id']),
+      attendanceShiftId: _nullableInt(json['attendance_shift_id']),
+      attendanceShift: json['attendance_shift'] is Map
+          ? AttendanceShiftModel.fromJson(
+              Map<String, dynamic>.from(json['attendance_shift'] as Map),
+            )
+          : null,
     );
   }
 
@@ -22,6 +30,8 @@ class AttendanceEmployee {
   final String? employeeNumber;
   final String? position;
   final int? outletId;
+  final int? attendanceShiftId;
+  final AttendanceShiftModel? attendanceShift;
 }
 
 class AttendanceOutlet {
@@ -42,6 +52,60 @@ class AttendanceOutlet {
   final int id;
   final String name;
   final String timezone;
+}
+
+class AttendanceShiftModel {
+  const AttendanceShiftModel({
+    required this.id,
+    required this.outletId,
+    required this.name,
+    required this.startTime,
+    required this.lateAfterTime,
+    required this.endTime,
+    this.checkInOpenMinutes = 60,
+    this.isActive = true,
+    this.sortOrder = 0,
+    this.employeesCount = 0,
+  });
+
+  factory AttendanceShiftModel.fromJson(Map<String, dynamic> json) {
+    return AttendanceShiftModel(
+      id: _asInt(json['id']),
+      outletId: _asInt(json['outlet_id']),
+      name: json['name']?.toString() ?? '',
+      startTime: json['start_time']?.toString() ?? '08:00',
+      lateAfterTime: json['late_after_time']?.toString() ?? '08:15',
+      endTime: json['end_time']?.toString() ?? '17:00',
+      checkInOpenMinutes: _asInt(json['check_in_open_minutes'], fallback: 60),
+      isActive: _asBool(json['is_active'], fallback: true),
+      sortOrder: _asInt(json['sort_order']),
+      employeesCount: _asInt(json['employees_count']),
+    );
+  }
+
+  final int id;
+  final int outletId;
+  final String name;
+  final String startTime;
+  final String lateAfterTime;
+  final String endTime;
+  final int checkInOpenMinutes;
+  final bool isActive;
+  final int sortOrder;
+  final int employeesCount;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'outlet_id': outletId,
+      'name': name,
+      'start_time': startTime,
+      'late_after_time': lateAfterTime,
+      'end_time': endTime,
+      'check_in_open_minutes': checkInOpenMinutes,
+      'is_active': isActive,
+      'sort_order': sortOrder,
+    };
+  }
 }
 
 class AttendancePolicy {
@@ -145,11 +209,14 @@ class EmployeeScheduleModel {
     required this.outletId,
     required this.workDate,
     required this.startAt,
+    this.lateAfterAt,
     required this.endAt,
     required this.shiftName,
     required this.status,
     this.notes,
     this.employee,
+    this.attendanceShiftId,
+    this.attendanceShift,
   });
 
   factory EmployeeScheduleModel.fromJson(Map<String, dynamic> json) {
@@ -160,12 +227,19 @@ class EmployeeScheduleModel {
       outletId: _asInt(json['outlet_id']),
       workDate: DateTime.parse(json['work_date'].toString()),
       startAt: DateTime.parse(json['start_at'].toString()),
+      lateAfterAt: _nullableDate(json['late_after_at']),
       endAt: DateTime.parse(json['end_at'].toString()),
       shiftName: json['shift_name']?.toString() ?? 'Reguler',
       status: json['status']?.toString() ?? 'scheduled',
       notes: _nullableString(json['notes']),
       employee: employee is Map
           ? AttendanceEmployee.fromJson(Map<String, dynamic>.from(employee))
+          : null,
+      attendanceShiftId: _nullableInt(json['attendance_shift_id']),
+      attendanceShift: json['attendance_shift'] is Map
+          ? AttendanceShiftModel.fromJson(
+              Map<String, dynamic>.from(json['attendance_shift'] as Map),
+            )
           : null,
     );
   }
@@ -175,11 +249,14 @@ class EmployeeScheduleModel {
   final int outletId;
   final DateTime workDate;
   final DateTime startAt;
+  final DateTime? lateAfterAt;
   final DateTime endAt;
   final String shiftName;
   final String status;
   final String? notes;
   final AttendanceEmployee? employee;
+  final int? attendanceShiftId;
+  final AttendanceShiftModel? attendanceShift;
 }
 
 class AttendanceRecord {
@@ -189,6 +266,7 @@ class AttendanceRecord {
     required this.outletId,
     this.workDate,
     this.scheduledStartAt,
+    this.scheduledLateAfterAt,
     this.scheduledEndAt,
     this.checkInAt,
     this.checkOutAt,
@@ -206,6 +284,7 @@ class AttendanceRecord {
     this.anomalyFlags = const [],
     this.employee,
     this.outlet,
+    this.attendanceShift,
   });
 
   factory AttendanceRecord.fromJson(Map<String, dynamic> json) {
@@ -217,6 +296,7 @@ class AttendanceRecord {
       outletId: _asInt(json['outlet_id']),
       workDate: _nullableDate(json['work_date']),
       scheduledStartAt: _nullableDate(json['scheduled_start_at']),
+      scheduledLateAfterAt: _nullableDate(json['scheduled_late_after_at']),
       scheduledEndAt: _nullableDate(json['scheduled_end_at']),
       checkInAt: _nullableDate(json['check_in_at']),
       checkOutAt: _nullableDate(json['check_out_at']),
@@ -242,6 +322,11 @@ class AttendanceRecord {
       outlet: outlet is Map
           ? AttendanceOutlet.fromJson(Map<String, dynamic>.from(outlet))
           : null,
+      attendanceShift: json['attendance_shift'] is Map
+          ? AttendanceShiftModel.fromJson(
+              Map<String, dynamic>.from(json['attendance_shift'] as Map),
+            )
+          : null,
     );
   }
 
@@ -250,6 +335,7 @@ class AttendanceRecord {
   final int outletId;
   final DateTime? workDate;
   final DateTime? scheduledStartAt;
+  final DateTime? scheduledLateAfterAt;
   final DateTime? scheduledEndAt;
   final DateTime? checkInAt;
   final DateTime? checkOutAt;
@@ -267,6 +353,7 @@ class AttendanceRecord {
   final List<String> anomalyFlags;
   final AttendanceEmployee? employee;
   final AttendanceOutlet? outlet;
+  final AttendanceShiftModel? attendanceShift;
 }
 
 class AttendanceContextModel {
@@ -278,6 +365,8 @@ class AttendanceContextModel {
     required this.scheduledEndAt,
     required this.serverTime,
     this.schedule,
+    this.attendanceShift,
+    this.scheduledLateAfterAt,
     this.activeAttendance,
     this.recentAttendance = const [],
     this.pendingOfflineCount = 0,
@@ -299,7 +388,13 @@ class AttendanceContextModel {
       schedule: schedule is Map
           ? EmployeeScheduleModel.fromJson(Map<String, dynamic>.from(schedule))
           : null,
+      attendanceShift: json['attendance_shift'] is Map
+          ? AttendanceShiftModel.fromJson(
+              Map<String, dynamic>.from(json['attendance_shift'] as Map),
+            )
+          : null,
       scheduledStartAt: DateTime.parse(json['scheduled_start_at'].toString()),
+      scheduledLateAfterAt: _nullableDate(json['scheduled_late_after_at']),
       scheduledEndAt: DateTime.parse(json['scheduled_end_at'].toString()),
       activeAttendance: active is Map
           ? AttendanceRecord.fromJson(Map<String, dynamic>.from(active))
@@ -318,7 +413,9 @@ class AttendanceContextModel {
   final AttendanceOutlet outlet;
   final AttendancePolicy policy;
   final EmployeeScheduleModel? schedule;
+  final AttendanceShiftModel? attendanceShift;
   final DateTime scheduledStartAt;
+  final DateTime? scheduledLateAfterAt;
   final DateTime scheduledEndAt;
   final AttendanceRecord? activeAttendance;
   final List<AttendanceRecord> recentAttendance;
@@ -337,7 +434,9 @@ class AttendanceContextModel {
       outlet: outlet,
       policy: policy,
       schedule: schedule,
+      attendanceShift: attendanceShift,
       scheduledStartAt: scheduledStartAt,
+      scheduledLateAfterAt: scheduledLateAfterAt,
       scheduledEndAt: scheduledEndAt,
       activeAttendance: clearActiveAttendance
           ? null

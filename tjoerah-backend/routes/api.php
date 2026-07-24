@@ -132,6 +132,11 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/attendance/export', [AttendanceController::class, 'export']);
         Route::get('/attendance/policy', [AttendanceController::class, 'policy']);
         Route::put('/attendance/policy', [AttendanceController::class, 'updatePolicy']);
+        Route::get('/attendance/shifts', [AttendanceController::class, 'attendanceShifts']);
+        Route::post('/attendance/shifts', [AttendanceController::class, 'storeAttendanceShift']);
+        Route::match(['put', 'patch'], '/attendance/shifts/{attendanceShift}', [AttendanceController::class, 'updateAttendanceShift']);
+        Route::delete('/attendance/shifts/{attendanceShift}', [AttendanceController::class, 'destroyAttendanceShift']);
+        Route::put('/attendance/shift-assignments', [AttendanceController::class, 'assignAttendanceShifts']);
         Route::get('/attendance/schedules', [AttendanceController::class, 'schedules']);
         Route::post('/attendance/schedules', [AttendanceController::class, 'storeSchedule']);
         Route::match(['put', 'patch'], '/attendance/schedules/{schedule}', [AttendanceController::class, 'updateSchedule']);

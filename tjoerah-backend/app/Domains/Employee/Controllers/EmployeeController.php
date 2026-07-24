@@ -5,6 +5,7 @@ namespace App\Domains\Employee\Controllers;
 use App\Domains\Core\Models\Outlet;
 use App\Domains\Core\Models\User;
 use App\Domains\Employee\Models\AttendanceLog;
+use App\Domains\Employee\Models\AttendanceShift;
 use App\Domains\Employee\Models\Employee;
 use App\Domains\Employee\Models\Shift;
 use App\Http\Controllers\Controller;
@@ -14,7 +15,7 @@ class EmployeeController extends Controller
 {
     public function index(Request $request)
     {
-        return Employee::with(['user', 'outlet'])
+        return Employee::with(['user', 'outlet', 'attendanceShift'])
             ->when(
                 $request->user()?->company_id,
                 fn ($query, $companyId) => $query->where('company_id', $companyId),
@@ -30,6 +31,7 @@ class EmployeeController extends Controller
         $validated = $request->validate([
             'company_id' => 'nullable|integer|exists:companies,id',
             'outlet_id' => 'nullable|integer|exists:outlets,id',
+            'attendance_shift_id' => 'nullable|integer|exists:attendance_shifts,id',
             'user_id' => 'nullable|integer|exists:users,id',
             'employee_number' => 'nullable|string|max:100',
             'name' => 'required|string|max:255',
@@ -46,12 +48,16 @@ class EmployeeController extends Controller
             $outlet = $this->accessibleOutlet($request, (int) $validated['outlet_id']);
             $validated['company_id'] = $request->user()?->company_id ?? $outlet->company_id;
         }
+        $this->ensureShiftMatchesOutlet(
+            $validated['attendance_shift_id'] ?? null,
+            $validated['outlet_id'] ?? null,
+        );
         if (isset($validated['user_id'])) {
             $this->accessibleUser($request, (int) $validated['user_id']);
         }
         $employee = Employee::create($validated);
 
-        return response()->json($employee->load(['user', 'outlet']), 201);
+        return response()->json($employee->load(['user', 'outlet', 'attendanceShift']), 201);
     }
 
     public function update(Request $request, Employee $employee)
@@ -59,6 +65,7 @@ class EmployeeController extends Controller
         $this->ensureAccessible($request, $employee);
         $validated = $request->validate([
             'outlet_id' => 'nullable|integer|exists:outlets,id',
+            'attendance_shift_id' => 'nullable|integer|exists:attendance_shifts,id',
             'user_id' => 'nullable|integer|exists:users,id',
             'employee_number' => 'nullable|string|max:100',
             'name' => 'sometimes|string|max:255',
@@ -71,12 +78,16 @@ class EmployeeController extends Controller
         if (isset($validated['outlet_id'])) {
             $this->accessibleOutlet($request, (int) $validated['outlet_id']);
         }
+        $this->ensureShiftMatchesOutlet(
+            $validated['attendance_shift_id'] ?? $employee->attendance_shift_id,
+            $validated['outlet_id'] ?? $employee->outlet_id,
+        );
         if (isset($validated['user_id'])) {
             $this->accessibleUser($request, (int) $validated['user_id']);
         }
         $employee->update($validated);
 
-        return response()->json($employee->fresh()->load(['user', 'outlet']));
+        return response()->json($employee->fresh()->load(['user', 'outlet', 'attendanceShift']));
     }
 
     public function destroy(Request $request, Employee $employee)
@@ -184,6 +195,21 @@ class EmployeeController extends Controller
                 );
             })
             ->findOrFail($userId);
+    }
+
+    private function ensureShiftMatchesOutlet(?int $shiftId, ?int $outletId): void
+    {
+        if (! $shiftId) {
+            return;
+        }
+
+        abort_unless(
+            AttendanceShift::whereKey($shiftId)
+                ->where('outlet_id', $outletId)
+                ->exists(),
+            422,
+            'Shift absensi tidak terhubung dengan outlet karyawan.',
+        );
     }
 
     /**

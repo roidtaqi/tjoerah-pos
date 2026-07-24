@@ -13,6 +13,7 @@ class EmployeeSchedule extends Model
     protected $casts = [
         'work_date' => 'date',
         'start_at' => 'datetime',
+        'late_after_at' => 'datetime',
         'end_at' => 'datetime',
     ];
 
@@ -24,6 +25,11 @@ class EmployeeSchedule extends Model
     public function outlet()
     {
         return $this->belongsTo(Outlet::class);
+    }
+
+    public function attendanceShift()
+    {
+        return $this->belongsTo(AttendanceShift::class);
     }
 
     public function creator()

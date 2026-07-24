@@ -2,36 +2,27 @@
 
 namespace App\Domains\Employee\Models;
 
-use App\Domains\Core\Models\Concerns\HasUuid;
 use App\Domains\Core\Models\Outlet;
-use App\Domains\Core\Models\User;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\SoftDeletes;
 
-class Employee extends Model
+class AttendanceShift extends Model
 {
-    use HasUuid, SoftDeletes;
-
     protected $guarded = [];
 
     protected $casts = [
-        'hire_date' => 'date',
+        'check_in_open_minutes' => 'integer',
         'is_active' => 'boolean',
+        'sort_order' => 'integer',
     ];
-
-    public function user()
-    {
-        return $this->belongsTo(User::class);
-    }
 
     public function outlet()
     {
         return $this->belongsTo(Outlet::class);
     }
 
-    public function attendanceShift()
+    public function employees()
     {
-        return $this->belongsTo(AttendanceShift::class);
+        return $this->hasMany(Employee::class);
     }
 
     public function schedules()
