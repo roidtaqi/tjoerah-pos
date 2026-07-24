@@ -81,7 +81,7 @@ APP_NAME=Tjoerah POS
 APP_ENV=production
 APP_KEY=base64:HASIL_KEY_GENERATE
 APP_DEBUG=false
-APP_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}
+APP_URL=http://localhost
 APP_LOCALE=id
 APP_FALLBACK_LOCALE=id
 LOG_CHANNEL=stderr
@@ -106,6 +106,8 @@ DEMO_CASHIER_PIN=PIN_KASIR_BARU
    baru diaktifkan.
 5. Buka `Settings > Networking`, pilih `Generate Domain`, lalu pastikan
    `https://DOMAIN_RAILWAY/up` menghasilkan status `200`.
+   Setelah domain tersedia, ubah `APP_URL` menjadi URL Railway lengkap,
+   misalnya `https://tjoerah-pos-production.up.railway.app`, tanpa `/api`.
 6. Agar foto absensi tidak hilang saat redeploy, tambahkan volume ke service
    dengan mount path `/data`, lalu tambahkan variable
    `LOCAL_FILESYSTEM_ROOT=/data`.
