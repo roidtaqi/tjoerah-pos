@@ -100,11 +100,12 @@ class FloatingCartPanel extends ConsumerWidget {
   }
 
   Future<void> _showCart(BuildContext context) {
+    final navigator = Navigator.of(context);
     return AppBottomSheet.show<void>(
       context,
       child: SizedBox(
         height: MediaQuery.sizeOf(context).height * 0.82,
-        child: OrderCart(onClose: () => Navigator.pop(context)),
+        child: OrderCart(onClose: () => navigator.pop()),
       ),
     );
   }

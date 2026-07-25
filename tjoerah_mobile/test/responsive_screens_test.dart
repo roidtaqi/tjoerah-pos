@@ -66,6 +66,30 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('cashier cart remains valid when device orientation changes', (
+    tester,
+  ) async {
+    await _render(
+      tester,
+      size: const Size(390, 844),
+      screen: const PosScreen(),
+      overrides: _posOverrides(),
+    );
+
+    await tester.tap(find.text('Lihat pesanan'));
+    await tester.pumpAndSettle();
+    expect(find.text('Pesanan saat ini'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    tester.view.physicalSize = const Size(844, 390);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.byTooltip('Tutup'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('KDS board adapts between phone and tablet', (tester) async {
     await _render(
       tester,
