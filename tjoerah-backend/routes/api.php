@@ -128,6 +128,7 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/employees', [EmployeeController::class, 'store']);
         Route::match(['put', 'patch'], '/employees/{employee}', [EmployeeController::class, 'update']);
         Route::delete('/employees/{employee}', [EmployeeController::class, 'destroy']);
+        Route::get('/attendance/admin-context', [AttendanceController::class, 'adminContext']);
         Route::get('/attendance/outlets', [AttendanceController::class, 'outlets']);
         Route::get('/attendance/report', [AttendanceController::class, 'report']);
         Route::get('/attendance/export', [AttendanceController::class, 'export']);

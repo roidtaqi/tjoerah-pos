@@ -172,6 +172,21 @@ class AttendanceManagementTest extends TestCase
             ->assertJsonPath('summary.pending_review', 1)
             ->assertJsonPath('records.data.0.employee.id', $employee->id);
 
+        $this->getJson(
+            "/api/attendance/admin-context?outlet_id={$outlet->id}"
+            .'&date_from=2026-07-24&date_to=2026-07-24',
+        )
+            ->assertOk()
+            ->assertJsonPath('outlets.0.id', $outlet->id)
+            ->assertJsonPath('selected_outlet.id', $outlet->id)
+            ->assertJsonPath('policy.outlet_id', $outlet->id)
+            ->assertJsonPath('employees.0.id', $employee->id)
+            ->assertJsonPath('summary.total', 1)
+            ->assertJsonPath('summary.late', 1)
+            ->assertJsonPath('records.data.0.id', $attendance->id)
+            ->assertJsonPath('schedules.0.id', $schedule['id'])
+            ->assertJsonCount(0, 'shifts');
+
         $this->patchJson("/api/attendance/records/{$attendance->id}/review", [
             'review_status' => 'approved',
             'review_notes' => 'Terlambat karena penugasan pembukaan booth.',
@@ -189,6 +204,8 @@ class AttendanceManagementTest extends TestCase
 
         $this->actingAs($cashier, 'api')
             ->getJson('/api/attendance/report')
+            ->assertForbidden();
+        $this->getJson('/api/attendance/admin-context')
             ->assertForbidden();
     }
 

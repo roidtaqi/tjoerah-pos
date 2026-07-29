@@ -49,6 +49,7 @@ class _AttendanceAdminScreenState extends ConsumerState<AttendanceAdminScreen> {
     }
 
     final admin = ref.watch(attendanceAdminProvider);
+    final isRefreshing = admin.value?.isRefreshing ?? false;
     return DefaultTabController(
       length: 4,
       child: Scaffold(
@@ -57,7 +58,7 @@ class _AttendanceAdminScreenState extends ConsumerState<AttendanceAdminScreen> {
           actions: [
             IconButton(
               tooltip: 'Muat ulang data',
-              onPressed: _isMutating
+              onPressed: _isMutating || isRefreshing
                   ? null
                   : () => ref.read(attendanceAdminProvider.notifier).refresh(),
               icon: const Icon(Icons.refresh_rounded),
@@ -83,59 +84,69 @@ class _AttendanceAdminScreenState extends ConsumerState<AttendanceAdminScreen> {
             message: 'Pastikan server aktif dan akun memiliki akses ke outlet.',
             onRetry: () => ref.read(attendanceAdminProvider.notifier).refresh(),
           ),
-          data: (data) => Column(
-            children: [
-              _OutletSelector(
-                data: data,
-                enabled: !_isMutating,
-                onSelected: (outlet) => ref
-                    .read(attendanceAdminProvider.notifier)
-                    .selectOutlet(outlet),
-              ),
-              Expanded(
-                child: TabBarView(
-                  children: [
-                    _ReportTab(
-                      data: data,
-                      enabled: !_isMutating,
-                      onDateRange: () => _selectDateRange(data),
-                      onStatus: (status) => ref
-                          .read(attendanceAdminProvider.notifier)
-                          .setFilters(status: status),
-                      onReview: _openReview,
-                      onPhoto: _openPhoto,
-                      onExport: () => _exportReport(data),
-                    ),
-                    _ScheduleTab(
-                      data: data,
-                      enabled: !_isMutating,
-                      onAdd: () => _openScheduleForm(data),
-                      onEdit: (schedule) => _openScheduleForm(data, schedule),
-                      onDelete: _confirmDeleteSchedule,
-                    ),
-                    _AttendanceShiftTab(
-                      shifts: data.shifts,
-                      employees: data.employees,
-                      enabled: !_isMutating,
-                      onAdd: () => _openAttendanceShiftForm(data),
-                      onEdit: (shift) => _openAttendanceShiftForm(data, shift),
-                      onDelete: _confirmDeleteAttendanceShift,
-                      onAssignments: () => _openShiftAssignments(data),
-                    ),
-                    _PolicyTab(
-                      key: ValueKey(data.selectedOutlet.id),
-                      policy: data.policy,
-                      enabled: !_isMutating,
-                      onSave: _savePolicy,
-                      captureService: ref.read(
-                        attendanceCaptureServiceProvider,
-                      ),
-                    ),
-                  ],
+          data: (data) {
+            final enabled = !_isMutating && !data.isRefreshing;
+            return Column(
+              children: [
+                SizedBox(
+                  height: 2,
+                  child: data.isRefreshing
+                      ? const LinearProgressIndicator()
+                      : null,
                 ),
-              ),
-            ],
-          ),
+                _OutletSelector(
+                  data: data,
+                  enabled: enabled,
+                  onSelected: (outlet) => ref
+                      .read(attendanceAdminProvider.notifier)
+                      .selectOutlet(outlet),
+                ),
+                Expanded(
+                  child: TabBarView(
+                    children: [
+                      _ReportTab(
+                        data: data,
+                        enabled: enabled,
+                        onDateRange: () => _selectDateRange(data),
+                        onStatus: (status) => ref
+                            .read(attendanceAdminProvider.notifier)
+                            .setFilters(status: status),
+                        onReview: _openReview,
+                        onPhoto: _openPhoto,
+                        onExport: () => _exportReport(data),
+                      ),
+                      _ScheduleTab(
+                        data: data,
+                        enabled: enabled,
+                        onAdd: () => _openScheduleForm(data),
+                        onEdit: (schedule) => _openScheduleForm(data, schedule),
+                        onDelete: _confirmDeleteSchedule,
+                      ),
+                      _AttendanceShiftTab(
+                        shifts: data.shifts,
+                        employees: data.employees,
+                        enabled: enabled,
+                        onAdd: () => _openAttendanceShiftForm(data),
+                        onEdit: (shift) =>
+                            _openAttendanceShiftForm(data, shift),
+                        onDelete: _confirmDeleteAttendanceShift,
+                        onAssignments: () => _openShiftAssignments(data),
+                      ),
+                      _PolicyTab(
+                        key: ValueKey(data.selectedOutlet.id),
+                        policy: data.policy,
+                        enabled: enabled,
+                        onSave: _savePolicy,
+                        captureService: ref.read(
+                          attendanceCaptureServiceProvider,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
         ),
       ),
     );

@@ -54,17 +54,61 @@ class AttendanceController extends Controller
 
     public function outlets(Request $request)
     {
-        $query = Outlet::query()
-            ->where('is_active', true)
-            ->orderBy('name');
+        return response()->json($this->outletsQuery($request)->get());
+    }
 
-        if ($request->user()->company_id) {
-            $query->where('company_id', $request->user()->company_id);
-        } else {
-            $query->whereHas('users', fn ($users) => $users->whereKey($request->user()->id));
-        }
+    public function adminContext(Request $request)
+    {
+        $validated = $request->validate([
+            'date_from' => 'nullable|date',
+            'date_to' => 'nullable|date|after_or_equal:date_from',
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+            'status' => ['nullable', Rule::in(['all', 'on_time', 'late', 'pending_review', 'early_leave'])],
+            'per_page' => 'nullable|integer|min:1|max:100',
+        ]);
+        [$dateFrom, $dateTo] = $this->reportDates($validated);
+        $outlets = $this->outletsQuery($request)->get();
+        abort_if($outlets->isEmpty(), 422, 'Belum ada outlet yang dapat dikelola.');
 
-        return response()->json($query->get());
+        $requestedOutletId = isset($validated['outlet_id'])
+            ? (int) $validated['outlet_id']
+            : (int) $outlets->first()->id;
+        $outlet = $outlets->first(
+            fn (Outlet $candidate) => (int) $candidate->id === $requestedOutletId,
+        );
+        abort_if(! $outlet, 404);
+
+        $filters = [
+            ...$validated,
+            'outlet_id' => $outlet->id,
+        ];
+        $reportQuery = $this->reportQuery(
+            $request,
+            $filters,
+            $dateFrom,
+            $dateTo,
+        );
+
+        return response()->json([
+            'outlets' => $outlets,
+            'selected_outlet' => $outlet,
+            'policy' => $this->attendanceService->policyForOutlet($outlet),
+            'employees' => Employee::with('attendanceShift')
+                ->where('outlet_id', $outlet->id)
+                ->orderBy('name')
+                ->get(),
+            'summary' => $this->attendanceSummary($reportQuery),
+            'records' => $reportQuery
+                ->latest('check_in_at')
+                ->paginate($request->integer('per_page', 100)),
+            'schedules' => $this->scheduleQuery(
+                $request,
+                $filters,
+                $dateFrom,
+                $dateTo,
+            )->get(),
+            'shifts' => $this->attendanceShiftsForOutlet($outlet->id),
+        ]);
     }
 
     public function checkIn(Request $request)
@@ -129,19 +173,9 @@ class AttendanceController extends Controller
 
         [$dateFrom, $dateTo] = $this->reportDates($validated);
         $query = $this->reportQuery($request, $validated, $dateFrom, $dateTo);
-        $summaryQuery = clone $query;
-
-        $summary = [
-            'total' => (clone $summaryQuery)->count(),
-            'on_time' => (clone $summaryQuery)->where('punctuality_status', 'on_time')->count(),
-            'late' => (clone $summaryQuery)->where('punctuality_status', 'late')->count(),
-            'pending_review' => (clone $summaryQuery)->where('review_status', 'pending')->count(),
-            'early_leave' => (clone $summaryQuery)->where('early_leave_minutes', '>', 0)->count(),
-            'late_minutes' => (int) (clone $summaryQuery)->sum('late_minutes'),
-        ];
 
         return response()->json([
-            'summary' => $summary,
+            'summary' => $this->attendanceSummary($query),
             'records' => $query->latest('check_in_at')
                 ->paginate($request->integer('per_page', 50)),
         ]);
@@ -255,11 +289,7 @@ class AttendanceController extends Controller
         $outlet = $this->accessibleOutlet($request, (int) $validated['outlet_id']);
 
         return response()->json(
-            AttendanceShift::withCount('employees')
-                ->where('outlet_id', $outlet->id)
-                ->orderBy('sort_order')
-                ->orderBy('start_time')
-                ->get(),
+            $this->attendanceShiftsForOutlet($outlet->id),
         );
     }
 
@@ -385,18 +415,12 @@ class AttendanceController extends Controller
         ]);
         [$dateFrom, $dateTo] = $this->reportDates($validated);
 
-        return EmployeeSchedule::with(['employee', 'outlet', 'attendanceShift'])
-            ->whereDate('work_date', '>=', $dateFrom)
-            ->whereDate('work_date', '<=', $dateTo)
-            ->when($request->user()->company_id, function ($query, $companyId) {
-                $query->whereHas('employee', fn ($employee) => $employee->where('company_id', $companyId));
-            }, function ($query) use ($request) {
-                $query->whereIn('outlet_id', $this->assignedOutletIds($request));
-            })
-            ->when($validated['outlet_id'] ?? null, fn ($query, $outletId) => $query->where('outlet_id', $outletId))
-            ->when($validated['employee_id'] ?? null, fn ($query, $employeeId) => $query->where('employee_id', $employeeId))
-            ->orderBy('start_at')
-            ->get();
+        return $this->scheduleQuery(
+            $request,
+            $validated,
+            $dateFrom,
+            $dateTo,
+        )->get();
     }
 
     public function storeSchedule(Request $request)
@@ -705,9 +729,13 @@ class AttendanceController extends Controller
         string $dateFrom,
         string $dateTo,
     ): Builder {
+        $dateToExclusive = CarbonImmutable::parse($dateTo)
+            ->addDay()
+            ->toDateString();
+
         return AttendanceLog::with(['employee', 'outlet', 'schedule', 'attendanceShift', 'reviewer'])
-            ->whereDate('work_date', '>=', $dateFrom)
-            ->whereDate('work_date', '<=', $dateTo)
+            ->where('work_date', '>=', $dateFrom)
+            ->where('work_date', '<', $dateToExclusive)
             ->when($request->user()->company_id, function ($query, $companyId) {
                 $query->whereHas('employee', fn ($employee) => $employee->where('company_id', $companyId));
             }, function ($query) use ($request) {
@@ -724,6 +752,80 @@ class AttendanceController extends Controller
                     $query->where('early_leave_minutes', '>', 0);
                 }
             });
+    }
+
+    private function attendanceSummary(Builder $query): array
+    {
+        $summary = (clone $query)
+            ->setEagerLoads([])
+            ->selectRaw(
+                <<<'SQL'
+                COUNT(*) AS total,
+                COALESCE(SUM(CASE WHEN punctuality_status = ? THEN 1 ELSE 0 END), 0) AS on_time,
+                COALESCE(SUM(CASE WHEN punctuality_status = ? THEN 1 ELSE 0 END), 0) AS late,
+                COALESCE(SUM(CASE WHEN review_status = ? THEN 1 ELSE 0 END), 0) AS pending_review,
+                COALESCE(SUM(CASE WHEN early_leave_minutes > 0 THEN 1 ELSE 0 END), 0) AS early_leave,
+                COALESCE(SUM(late_minutes), 0) AS late_minutes
+                SQL,
+                ['on_time', 'late', 'pending'],
+            )
+            ->first();
+
+        return [
+            'total' => (int) ($summary?->total ?? 0),
+            'on_time' => (int) ($summary?->on_time ?? 0),
+            'late' => (int) ($summary?->late ?? 0),
+            'pending_review' => (int) ($summary?->pending_review ?? 0),
+            'early_leave' => (int) ($summary?->early_leave ?? 0),
+            'late_minutes' => (int) ($summary?->late_minutes ?? 0),
+        ];
+    }
+
+    private function scheduleQuery(
+        Request $request,
+        array $validated,
+        string $dateFrom,
+        string $dateTo,
+    ): Builder {
+        $dateToExclusive = CarbonImmutable::parse($dateTo)
+            ->addDay()
+            ->toDateString();
+
+        return EmployeeSchedule::with(['employee', 'outlet', 'attendanceShift'])
+            ->where('work_date', '>=', $dateFrom)
+            ->where('work_date', '<', $dateToExclusive)
+            ->when($request->user()->company_id, function ($query, $companyId) {
+                $query->whereHas('employee', fn ($employee) => $employee->where('company_id', $companyId));
+            }, function ($query) use ($request) {
+                $query->whereIn('outlet_id', $this->assignedOutletIds($request));
+            })
+            ->when($validated['outlet_id'] ?? null, fn ($query, $outletId) => $query->where('outlet_id', $outletId))
+            ->when($validated['employee_id'] ?? null, fn ($query, $employeeId) => $query->where('employee_id', $employeeId))
+            ->orderBy('start_at');
+    }
+
+    private function attendanceShiftsForOutlet(int $outletId)
+    {
+        return AttendanceShift::withCount('employees')
+            ->where('outlet_id', $outletId)
+            ->orderBy('sort_order')
+            ->orderBy('start_time')
+            ->get();
+    }
+
+    private function outletsQuery(Request $request): Builder
+    {
+        return Outlet::query()
+            ->where('is_active', true)
+            ->when(
+                $request->user()->company_id,
+                fn ($query, $companyId) => $query->where('company_id', $companyId),
+                fn ($query) => $query->whereHas(
+                    'users',
+                    fn ($users) => $users->whereKey($request->user()->id),
+                ),
+            )
+            ->orderBy('name');
     }
 
     private function accessibleOutlet(Request $request, int $outletId): Outlet

@@ -78,8 +78,12 @@ class SyncService {
 
   static Future<bool> syncInventory() async {
     try {
-      final inventoryResponse = await ApiClient.get('/inventory');
-      final recipeResponse = await ApiClient.get('/recipes');
+      final responses = await Future.wait([
+        ApiClient.get('/inventory'),
+        ApiClient.get('/recipes'),
+      ]);
+      final inventoryResponse = responses[0];
+      final recipeResponse = responses[1];
 
       if (inventoryResponse.statusCode == 200 &&
           recipeResponse.statusCode == 200) {
@@ -166,8 +170,12 @@ class SyncService {
 
   static Future<bool> syncTables() async {
     try {
-      final floorsResponse = await ApiClient.get('/floors');
-      final tablesResponse = await ApiClient.get('/tables');
+      final responses = await Future.wait([
+        ApiClient.get('/floors'),
+        ApiClient.get('/tables'),
+      ]);
+      final floorsResponse = responses[0];
+      final tablesResponse = responses[1];
 
       if (floorsResponse.statusCode == 200 &&
           tablesResponse.statusCode == 200) {

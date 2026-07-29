@@ -15,6 +15,76 @@ class AttendanceApiException implements Exception {
   String toString() => message;
 }
 
+class AttendanceAdminSnapshot {
+  const AttendanceAdminSnapshot({
+    required this.outlets,
+    required this.selectedOutlet,
+    required this.policy,
+    required this.employees,
+    required this.summary,
+    required this.records,
+    required this.schedules,
+    required this.shifts,
+  });
+
+  factory AttendanceAdminSnapshot.fromJson(Map<String, dynamic> body) {
+    final records = Map<String, dynamic>.from(body['records'] as Map);
+    return AttendanceAdminSnapshot(
+      outlets: (body['outlets'] as List? ?? const [])
+          .whereType<Map>()
+          .map(
+            (row) => AttendanceOutlet.fromJson(Map<String, dynamic>.from(row)),
+          )
+          .toList(),
+      selectedOutlet: AttendanceOutlet.fromJson(
+        Map<String, dynamic>.from(body['selected_outlet'] as Map),
+      ),
+      policy: AttendancePolicy.fromJson(
+        Map<String, dynamic>.from(body['policy'] as Map),
+      ),
+      employees: (body['employees'] as List? ?? const [])
+          .whereType<Map>()
+          .map(
+            (row) =>
+                AttendanceEmployee.fromJson(Map<String, dynamic>.from(row)),
+          )
+          .toList(),
+      summary: AttendanceSummary.fromJson(
+        Map<String, dynamic>.from(body['summary'] as Map),
+      ),
+      records: (records['data'] as List? ?? const [])
+          .whereType<Map>()
+          .map(
+            (row) => AttendanceRecord.fromJson(Map<String, dynamic>.from(row)),
+          )
+          .toList(),
+      schedules: (body['schedules'] as List? ?? const [])
+          .whereType<Map>()
+          .map(
+            (row) =>
+                EmployeeScheduleModel.fromJson(Map<String, dynamic>.from(row)),
+          )
+          .toList(),
+      shifts: (body['shifts'] as List? ?? const [])
+          .whereType<Map>()
+          .map(
+            (row) =>
+                AttendanceShiftModel.fromJson(Map<String, dynamic>.from(row)),
+          )
+          .toList(),
+    );
+  }
+
+  final List<AttendanceOutlet> outlets;
+  final AttendanceOutlet selectedOutlet;
+  final AttendancePolicy policy;
+  final List<AttendanceEmployee> employees;
+  final AttendanceSummary summary;
+  final List<AttendanceRecord> records;
+  final List<EmployeeScheduleModel> schedules;
+  final List<AttendanceShiftModel> shifts;
+}
+
 class AttendanceRepository {
   AttendanceRepository({AttendanceOfflineQueue? offlineQueue})
     : _offlineQueue = offlineQueue ?? AttendanceOfflineQueue();
@@ -108,6 +178,31 @@ class AttendanceRepository {
         .whereType<Map>()
         .map((row) => AttendanceOutlet.fromJson(Map<String, dynamic>.from(row)))
         .toList();
+  }
+
+  Future<AttendanceAdminSnapshot> getAdminContext({
+    int? outletId,
+    required DateTime dateFrom,
+    required DateTime dateTo,
+    String status = 'all',
+  }) async {
+    final query = <String, String>{
+      if (outletId != null) 'outlet_id': '$outletId',
+      'date_from': _dateOnly(dateFrom),
+      'date_to': _dateOnly(dateTo),
+      'status': status,
+      'per_page': '100',
+    };
+    final response = await ApiClient.get(
+      '/attendance/admin-context?${Uri(queryParameters: query).query}',
+    );
+    if (response.statusCode != 200) {
+      throw _apiError(response.body, response.statusCode);
+    }
+
+    return AttendanceAdminSnapshot.fromJson(
+      Map<String, dynamic>.from(jsonDecode(response.body) as Map),
+    );
   }
 
   Future<List<AttendanceEmployee>> getEmployees(int outletId) async {

@@ -86,13 +86,14 @@ class ReportsNotifier extends Notifier<ReportsState> {
       final startStr = state.startDate.toIso8601String().split('T').first;
       final endStr = state.endDate.toIso8601String().split('T').first;
 
-      final salesResponse = await ApiClient.get(
-        '/reports/sales?from=$startStr&to=$endStr',
-      );
-      final productsResponse = await ApiClient.get(
-        '/reports/products?from=$startStr&to=$endStr',
-      );
-      final alertsResponse = await ApiClient.get('/reports/alerts');
+      final responses = await Future.wait([
+        ApiClient.get('/reports/sales?from=$startStr&to=$endStr'),
+        ApiClient.get('/reports/products?from=$startStr&to=$endStr'),
+        ApiClient.get('/reports/alerts'),
+      ]);
+      final salesResponse = responses[0];
+      final productsResponse = responses[1];
+      final alertsResponse = responses[2];
 
       if (salesResponse.statusCode == 200 &&
           productsResponse.statusCode == 200 &&

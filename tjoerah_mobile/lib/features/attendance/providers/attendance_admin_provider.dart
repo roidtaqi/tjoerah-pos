@@ -17,6 +17,7 @@ class AttendanceAdminState {
     required this.dateFrom,
     required this.dateTo,
     this.status = 'all',
+    this.isRefreshing = false,
   });
 
   final List<AttendanceOutlet> outlets;
@@ -30,6 +31,7 @@ class AttendanceAdminState {
   final DateTime dateFrom;
   final DateTime dateTo;
   final String status;
+  final bool isRefreshing;
 
   AttendanceAdminState copyWith({
     AttendanceOutlet? selectedOutlet,
@@ -42,6 +44,7 @@ class AttendanceAdminState {
     DateTime? dateFrom,
     DateTime? dateTo,
     String? status,
+    bool? isRefreshing,
   }) {
     return AttendanceAdminState(
       outlets: outlets,
@@ -55,6 +58,7 @@ class AttendanceAdminState {
       dateFrom: dateFrom ?? this.dateFrom,
       dateTo: dateTo ?? this.dateTo,
       status: status ?? this.status,
+      isRefreshing: isRefreshing ?? this.isRefreshing,
     );
   }
 }
@@ -67,27 +71,17 @@ class AttendanceAdminResult {
 }
 
 class AttendanceAdminNotifier extends AsyncNotifier<AttendanceAdminState> {
+  int _loadGeneration = 0;
+
   AttendanceRepository get _repository =>
       ref.read(attendanceRepositoryProvider);
 
   @override
   Future<AttendanceAdminState> build() async {
-    final outlets = await _repository.getOutlets();
-    if (outlets.isEmpty) {
-      throw const AttendanceApiException(
-        'Belum ada outlet yang dapat dikelola.',
-      );
-    }
     final now = DateTime.now();
     final dateFrom = DateTime(now.year, now.month, 1);
     final dateTo = DateTime(now.year, now.month + 1, 0);
-    return _load(
-      outlets: outlets,
-      outlet: outlets.first,
-      dateFrom: dateFrom,
-      dateTo: dateTo,
-      status: 'all',
-    );
+    return _load(dateFrom: dateFrom, dateTo: dateTo, status: 'all');
   }
 
   Future<void> refresh() async {
@@ -96,33 +90,23 @@ class AttendanceAdminNotifier extends AsyncNotifier<AttendanceAdminState> {
       ref.invalidateSelf();
       return;
     }
-    state = const AsyncValue.loading();
-    try {
-      state = AsyncValue.data(
-        await _load(
-          outlets: current.outlets,
-          outlet: current.selectedOutlet,
-          dateFrom: current.dateFrom,
-          dateTo: current.dateTo,
-          status: current.status,
-        ),
-      );
-    } catch (error, stackTrace) {
-      state = AsyncValue.error(error, stackTrace);
-    }
+    await _reload(
+      current,
+      outlet: current.selectedOutlet,
+      dateFrom: current.dateFrom,
+      dateTo: current.dateTo,
+      status: current.status,
+    );
   }
 
   Future<void> selectOutlet(AttendanceOutlet outlet) async {
     final current = state.requireValue;
-    state = const AsyncValue.loading();
-    state = await AsyncValue.guard(
-      () => _load(
-        outlets: current.outlets,
-        outlet: outlet,
-        dateFrom: current.dateFrom,
-        dateTo: current.dateTo,
-        status: current.status,
-      ),
+    await _reload(
+      current,
+      outlet: outlet,
+      dateFrom: current.dateFrom,
+      dateTo: current.dateTo,
+      status: current.status,
     );
   }
 
@@ -132,15 +116,12 @@ class AttendanceAdminNotifier extends AsyncNotifier<AttendanceAdminState> {
     String? status,
   }) async {
     final current = state.requireValue;
-    state = const AsyncValue.loading();
-    state = await AsyncValue.guard(
-      () => _load(
-        outlets: current.outlets,
-        outlet: current.selectedOutlet,
-        dateFrom: dateFrom ?? current.dateFrom,
-        dateTo: dateTo ?? current.dateTo,
-        status: status ?? current.status,
-      ),
+    await _reload(
+      current,
+      outlet: current.selectedOutlet,
+      dateFrom: dateFrom ?? current.dateFrom,
+      dateTo: dateTo ?? current.dateTo,
+      status: status ?? current.status,
     );
   }
 
@@ -290,33 +271,64 @@ class AttendanceAdminNotifier extends AsyncNotifier<AttendanceAdminState> {
   }
 
   Future<AttendanceAdminState> _load({
-    required List<AttendanceOutlet> outlets,
-    required AttendanceOutlet outlet,
+    List<AttendanceOutlet>? outlets,
+    AttendanceOutlet? outlet,
     required DateTime dateFrom,
     required DateTime dateTo,
     required String status,
   }) async {
+    try {
+      final snapshot = await _repository.getAdminContext(
+        outletId: outlet?.id,
+        dateFrom: dateFrom,
+        dateTo: dateTo,
+        status: status,
+      );
+      return AttendanceAdminState(
+        outlets: snapshot.outlets,
+        selectedOutlet: snapshot.selectedOutlet,
+        policy: snapshot.policy,
+        employees: snapshot.employees,
+        summary: snapshot.summary,
+        records: snapshot.records,
+        schedules: snapshot.schedules,
+        shifts: snapshot.shifts,
+        dateFrom: dateFrom,
+        dateTo: dateTo,
+        status: status,
+      );
+    } on AttendanceApiException catch (error) {
+      if (error.statusCode != 404) rethrow;
+    }
+
+    final availableOutlets = outlets ?? await _repository.getOutlets();
+    if (availableOutlets.isEmpty) {
+      throw const AttendanceApiException(
+        'Belum ada outlet yang dapat dikelola.',
+      );
+    }
+    final selectedOutlet = outlet ?? availableOutlets.first;
     final results = await Future.wait([
-      _repository.getPolicy(outlet.id),
-      _repository.getEmployees(outlet.id),
+      _repository.getPolicy(selectedOutlet.id),
+      _repository.getEmployees(selectedOutlet.id),
       _repository.getReport(
-        outletId: outlet.id,
+        outletId: selectedOutlet.id,
         dateFrom: dateFrom,
         dateTo: dateTo,
         status: status,
       ),
       _repository.getSchedules(
-        outletId: outlet.id,
+        outletId: selectedOutlet.id,
         dateFrom: dateFrom,
         dateTo: dateTo,
       ),
-      _repository.getAttendanceShifts(outlet.id),
+      _repository.getAttendanceShifts(selectedOutlet.id),
     ]);
     final report = results[2] as (AttendanceSummary, List<AttendanceRecord>);
 
     return AttendanceAdminState(
-      outlets: outlets,
-      selectedOutlet: outlet,
+      outlets: availableOutlets,
+      selectedOutlet: selectedOutlet,
       policy: results[0] as AttendancePolicy,
       employees: results[1] as List<AttendanceEmployee>,
       summary: report.$1,
@@ -327,6 +339,33 @@ class AttendanceAdminNotifier extends AsyncNotifier<AttendanceAdminState> {
       dateTo: dateTo,
       status: status,
     );
+  }
+
+  Future<void> _reload(
+    AttendanceAdminState current, {
+    required AttendanceOutlet outlet,
+    required DateTime dateFrom,
+    required DateTime dateTo,
+    required String status,
+  }) async {
+    final generation = ++_loadGeneration;
+    state = AsyncValue.data(current.copyWith(isRefreshing: true));
+    try {
+      final next = await _load(
+        outlets: current.outlets,
+        outlet: outlet,
+        dateFrom: dateFrom,
+        dateTo: dateTo,
+        status: status,
+      );
+      if (generation == _loadGeneration) {
+        state = AsyncValue.data(next);
+      }
+    } catch (_) {
+      if (generation == _loadGeneration) {
+        state = AsyncValue.data(current.copyWith(isRefreshing: false));
+      }
+    }
   }
 }
 
