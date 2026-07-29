@@ -6,6 +6,16 @@ import 'package:pusher_channels_flutter/pusher_channels_flutter.dart';
 import '../../../core/network/api_client.dart';
 import '../models/kitchen_ticket_model.dart';
 
+class ProductionIncidentResult {
+  const ProductionIncidentResult({
+    required this.isSuccess,
+    required this.message,
+  });
+
+  final bool isSuccess;
+  final String message;
+}
+
 class KdsStationNotifier extends Notifier<String> {
   @override
   String build() => 'kitchen';
@@ -152,6 +162,71 @@ class KdsNotifier extends AsyncNotifier<List<KitchenTicketModel>> {
       state = previousState;
     }
   }
+
+  Future<ProductionIncidentResult> recordProductionIncident({
+    required KitchenTicketModel ticket,
+    required KitchenTicketItemModel item,
+    required int quantity,
+    required String resolution,
+    required String reason,
+  }) async {
+    try {
+      final response = await ApiClient.post('/inventory/production-incidents', {
+        'order_item_id': item.orderItemId,
+        'ticket_id': ticket.id,
+        'quantity': quantity,
+        'resolution': resolution,
+        'reason': reason.trim(),
+      });
+      final decoded = jsonDecode(response.body);
+      final body = decoded is Map
+          ? Map<String, dynamic>.from(decoded)
+          : <String, dynamic>{};
+      final message =
+          body['message']?.toString() ??
+          'Insiden produksi belum dapat diproses.';
+      if (response.statusCode != 201) {
+        return ProductionIncidentResult(
+          isSuccess: false,
+          message: _firstError(body) ?? message,
+        );
+      }
+
+      final rawTicket = body['ticket'];
+      if (rawTicket is Map) {
+        final updatedTicket = KitchenTicketModel.fromJson(
+          Map<String, dynamic>.from(rawTicket),
+        );
+        state = state.whenData(
+          (tickets) => tickets
+              .map(
+                (current) =>
+                    current.id == updatedTicket.id ? updatedTicket : current,
+              )
+              .toList(),
+        );
+      }
+      ref.invalidate(kdsOverviewProvider);
+      return ProductionIncidentResult(isSuccess: true, message: message);
+    } catch (_) {
+      return const ProductionIncidentResult(
+        isSuccess: false,
+        message:
+            'Insiden belum dapat disimpan. Periksa koneksi lalu coba lagi.',
+      );
+    }
+  }
+}
+
+String? _firstError(Map<String, dynamic> body) {
+  final errors = body['errors'];
+  if (errors is! Map) return null;
+  for (final messages in errors.values) {
+    if (messages is List && messages.isNotEmpty) {
+      return messages.first.toString();
+    }
+  }
+  return null;
 }
 
 List<KitchenTicketModel> _decodeTickets(String body) {

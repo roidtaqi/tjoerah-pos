@@ -2,107 +2,398 @@
 
 namespace App\Domains\Recipe\Controllers;
 
-use App\Http\Controllers\Controller;
+use App\Domains\Inventory\Models\InventoryItem;
+use App\Domains\POS\Models\Product;
 use App\Domains\Recipe\Models\Recipe;
 use App\Domains\Recipe\Models\RecipeVersion;
+use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class RecipeController extends Controller
 {
     public function index(Request $request)
     {
-        return Recipe::with(['items', 'versions'])
-            ->when($request->integer('company_id'), fn ($query, $companyId) => $query->where('company_id', $companyId))
+        $request->validate([
+            'per_page' => 'nullable|integer|min:1|max:100',
+            'product_id' => 'nullable|integer',
+            'status' => ['nullable', Rule::in(['draft', 'active', 'inactive', 'all'])],
+            'q' => 'nullable|string|max:255',
+        ]);
+
+        $query = $this->recipeQuery($request)
             ->when($request->integer('product_id'), fn ($query, $productId) => $query->where('product_id', $productId))
-            ->paginate(100);
+            ->when(
+                $request->string('q')->trim()->isNotEmpty(),
+                fn ($query) => $query->where('name', 'like', '%'.$request->string('q')->trim()->toString().'%'),
+            );
+
+        if ($request->input('status') && $request->input('status') !== 'all') {
+            $query->where('status', $request->input('status'));
+        }
+
+        $recipes = $query
+            ->orderBy('name')
+            ->paginate($request->integer('per_page', 100));
+        $recipes->getCollection()->transform(
+            fn (Recipe $recipe) => $this->serializeRecipe($recipe),
+        );
+
+        return $recipes;
     }
 
     public function store(Request $request)
     {
-        $validated = $request->validate([
-            'company_id' => 'nullable|integer|exists:companies,id',
-            'product_id' => 'nullable|integer|exists:products,id',
-            'name' => 'required|string|max:255',
-            'status' => 'nullable|string|max:50',
-            'yield_quantity' => 'nullable|numeric',
-            'yield_unit' => 'nullable|string|max:50',
-            'items' => 'nullable|array',
-            'items.*.inventory_item_id' => 'nullable|integer|exists:inventory_items,id',
-            'items.*.child_recipe_id' => 'nullable|integer|exists:recipes,id',
-            'items.*.quantity' => 'required_with:items|numeric',
-            'items.*.unit' => 'nullable|string|max:50',
-            'items.*.waste_percent' => 'nullable|numeric',
-            'items.*.unit_cost' => 'nullable|numeric',
-            'items.*.notes' => 'nullable|string',
-        ]);
+        $this->normalizeNullableFields($request);
+        $validated = $request->validate($this->recipeRules());
+        $companyId = $request->user()?->company_id ?? ($validated['company_id'] ?? null);
 
-        $recipe = Recipe::create(collect($validated)->except('items')->all());
-        $version = $recipe->versions()->create([
-            'version' => 1,
-            'status' => $recipe->status,
-            'effective_at' => now(),
-        ]);
+        $this->validateAssociations(
+            $validated,
+            $companyId ? (int) $companyId : null,
+        );
 
-        foreach ($validated['items'] ?? [] as $item) {
-            $recipe->items()->create([
-                ...$item,
-                'recipe_version_id' => $version->id,
-                'total_cost' => ($item['quantity'] ?? 0) * ($item['unit_cost'] ?? 0),
+        $recipe = DB::transaction(function () use ($request, $validated, $companyId) {
+            $recipe = Recipe::create([
+                'company_id' => $companyId,
+                'product_id' => $validated['product_id'] ?? null,
+                'name' => $validated['name'],
+                'status' => $validated['status'],
+                'active_version' => 1,
+                'yield_quantity' => $validated['yield_quantity'],
+                'yield_unit' => $validated['yield_unit'],
+                'current_cost' => 0,
             ]);
-        }
 
-        $this->recalculateCost($recipe);
+            $this->createVersion(
+                $recipe,
+                $validated['items'],
+                1,
+                $validated['status'],
+                $request->user()?->id,
+            );
 
-        return response()->json($recipe->load(['items', 'versions']), 201);
+            return $recipe;
+        });
+
+        return response()->json(
+            $this->loadAndSerialize($recipe),
+            201,
+        );
     }
 
     public function update(Request $request, Recipe $recipe)
     {
-        $recipe->update($request->validate([
-            'product_id' => 'nullable|integer|exists:products,id',
-            'name' => 'sometimes|string|max:255',
-            'status' => 'nullable|string|max:50',
-            'yield_quantity' => 'nullable|numeric',
-            'yield_unit' => 'nullable|string|max:50',
-        ]));
+        $this->ensureRecipeIsAccessible($request, $recipe);
+        $this->normalizeNullableFields($request);
+        $validated = $request->validate($this->recipeRules($recipe));
+        $companyId = $request->user()?->company_id ?? $recipe->company_id;
 
-        return response()->json($recipe->load(['items', 'versions']));
+        $this->validateAssociations(
+            $validated,
+            $companyId ? (int) $companyId : null,
+            $recipe,
+        );
+
+        DB::transaction(function () use ($request, $validated, $recipe, $companyId) {
+            $nextVersion = ((int) $recipe->versions()->max('version')) + 1;
+
+            $recipe->update([
+                'company_id' => $companyId,
+                'product_id' => $validated['product_id'] ?? null,
+                'name' => $validated['name'],
+                'status' => $validated['status'],
+                'active_version' => $nextVersion,
+                'yield_quantity' => $validated['yield_quantity'],
+                'yield_unit' => $validated['yield_unit'],
+            ]);
+
+            $this->createVersion(
+                $recipe,
+                $validated['items'],
+                $nextVersion,
+                $validated['status'],
+                $request->user()?->id,
+            );
+        });
+
+        return response()->json($this->loadAndSerialize($recipe));
+    }
+
+    public function destroy(Request $request, Recipe $recipe)
+    {
+        $this->ensureRecipeIsAccessible($request, $recipe);
+        $recipe->delete();
+
+        return response()->noContent();
     }
 
     public function version(Request $request)
     {
         $validated = $request->validate([
             'recipe_id' => 'required|integer|exists:recipes,id',
-            'status' => 'nullable|string|max:50',
-            'effective_at' => 'nullable|date',
+            'status' => ['nullable', Rule::in(['draft', 'active', 'inactive'])],
         ]);
 
         $recipe = Recipe::findOrFail($validated['recipe_id']);
-        $nextVersion = ((int) $recipe->versions()->max('version')) + 1;
+        $this->ensureRecipeIsAccessible($request, $recipe);
+        $recipe->load('latestVersionRecord.items');
 
-        $version = RecipeVersion::create([
-            'recipe_id' => $recipe->id,
-            'version' => $nextVersion,
-            'total_cost' => $recipe->current_cost,
-            'status' => $validated['status'] ?? 'draft',
-            'effective_at' => $validated['effective_at'] ?? null,
-        ]);
+        $sourceItems = $recipe->latestVersionRecord?->items
+            ->map(fn ($item) => [
+                'inventory_item_id' => $item->inventory_item_id,
+                'quantity' => $item->quantity,
+                'waste_percent' => $item->waste_percent,
+                'notes' => $item->notes,
+            ])
+            ->all() ?? [];
 
-        return response()->json($version, 201);
+        if ($sourceItems === []) {
+            throw ValidationException::withMessages([
+                'items' => 'Versi resep aktif belum memiliki bahan.',
+            ]);
+        }
+
+        $nextVersion = DB::transaction(function () use ($request, $validated, $recipe, $sourceItems) {
+            $nextVersion = ((int) $recipe->versions()->max('version')) + 1;
+            $status = $validated['status'] ?? $recipe->status;
+            $recipe->update([
+                'status' => $status,
+                'active_version' => $nextVersion,
+            ]);
+            $this->createVersion(
+                $recipe,
+                $sourceItems,
+                $nextVersion,
+                $status,
+                $request->user()?->id,
+            );
+
+            return $nextVersion;
+        });
+
+        return response()->json(
+            $recipe->versions()->where('version', $nextVersion)->firstOrFail(),
+            201,
+        );
     }
 
     public function costing(Request $request)
     {
-        return Recipe::query()
-            ->select(['id', 'product_id', 'name', 'current_cost', 'yield_quantity', 'yield_unit', 'active_version'])
+        return $this->recipeQuery($request)
+            ->select([
+                'id',
+                'product_id',
+                'name',
+                'status',
+                'current_cost',
+                'yield_quantity',
+                'yield_unit',
+                'active_version',
+            ])
             ->when($request->integer('product_id'), fn ($query, $productId) => $query->where('product_id', $productId))
+            ->orderBy('name')
             ->paginate(100);
     }
 
-    private function recalculateCost(Recipe $recipe): void
+    private function recipeRules(?Recipe $recipe = null): array
     {
-        $recipe->update([
-            'current_cost' => $recipe->items()->sum('total_cost'),
+        return [
+            'company_id' => 'nullable|integer|exists:companies,id',
+            'product_id' => 'nullable|integer|exists:products,id',
+            'name' => 'required|string|max:255',
+            'status' => ['required', Rule::in(['draft', 'active', 'inactive'])],
+            'yield_quantity' => 'required|numeric|gt:0',
+            'yield_unit' => 'required|string|max:50',
+            'items' => 'required|array|min:1',
+            'items.*.inventory_item_id' => 'required|integer|distinct|exists:inventory_items,id',
+            'items.*.quantity' => 'required|numeric|gt:0',
+            'items.*.waste_percent' => 'nullable|numeric|min:0|max:100',
+            'items.*.notes' => 'nullable|string|max:2000',
+        ];
+    }
+
+    private function validateAssociations(
+        array $validated,
+        ?int $companyId,
+        ?Recipe $recipe = null,
+    ): void {
+        $productId = $validated['product_id'] ?? null;
+        if ($productId) {
+            $product = Product::query()
+                ->when($companyId, fn ($query) => $query->where('company_id', $companyId))
+                ->find($productId);
+            if (! $product) {
+                throw ValidationException::withMessages([
+                    'product_id' => 'Produk tidak tersedia untuk perusahaan ini.',
+                ]);
+            }
+
+            $duplicate = Recipe::query()
+                ->where('product_id', $productId)
+                ->when($companyId, fn ($query) => $query->where('company_id', $companyId))
+                ->when($recipe, fn ($query) => $query->whereKeyNot($recipe->getKey()))
+                ->exists();
+            if ($duplicate) {
+                throw ValidationException::withMessages([
+                    'product_id' => 'Produk ini sudah memiliki resep.',
+                ]);
+            }
+        }
+
+        $itemIds = collect($validated['items'])
+            ->pluck('inventory_item_id')
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+        $availableItemIds = InventoryItem::query()
+            ->whereIn('id', $itemIds)
+            ->when($companyId, fn ($query) => $query->where('company_id', $companyId))
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id);
+
+        if ($availableItemIds->count() !== $itemIds->count()) {
+            throw ValidationException::withMessages([
+                'items' => 'Satu atau lebih bahan tidak tersedia untuk perusahaan ini.',
+            ]);
+        }
+    }
+
+    private function createVersion(
+        Recipe $recipe,
+        array $items,
+        int $versionNumber,
+        string $status,
+        ?int $approvedBy,
+    ): RecipeVersion {
+        $inventory = $this->inventoryFor($recipe, $items);
+        $lines = collect($items)->map(function (array $item) use ($inventory) {
+            $inventoryItem = $inventory->get((int) $item['inventory_item_id']);
+            $quantity = (float) $item['quantity'];
+            $wastePercent = (float) ($item['waste_percent'] ?? 0);
+            $unitCost = (float) $inventoryItem->weighted_average_cost;
+
+            return [
+                'inventory_item_id' => $inventoryItem->id,
+                'quantity' => $quantity,
+                'unit' => $inventoryItem->unit ?: 'pcs',
+                'waste_percent' => $wastePercent,
+                'unit_cost' => $unitCost,
+                'total_cost' => $quantity * $unitCost * (1 + ($wastePercent / 100)),
+                'notes' => $item['notes'] ?? null,
+            ];
+        });
+        $totalCost = (float) $lines->sum('total_cost');
+
+        $version = $recipe->versions()->create([
+            'version' => $versionNumber,
+            'total_cost' => $totalCost,
+            'waste_percent' => $this->averageWaste($lines),
+            'status' => $status,
+            'effective_at' => now(),
+            'approved_by' => $approvedBy,
         ]);
+
+        foreach ($lines as $line) {
+            $recipe->items()->create([
+                ...$line,
+                'recipe_version_id' => $version->id,
+            ]);
+        }
+
+        $yieldQuantity = max((float) $recipe->yield_quantity, 0.0001);
+        $recipe->update([
+            'current_cost' => $totalCost / $yieldQuantity,
+        ]);
+
+        return $version;
+    }
+
+    private function inventoryFor(Recipe $recipe, array $items): Collection
+    {
+        $ids = collect($items)->pluck('inventory_item_id')->unique();
+
+        return InventoryItem::query()
+            ->whereIn('id', $ids)
+            ->when($recipe->company_id, fn ($query, $companyId) => $query->where('company_id', $companyId))
+            ->get()
+            ->keyBy(fn (InventoryItem $item) => (int) $item->id);
+    }
+
+    private function averageWaste(Collection $items): float
+    {
+        if ($items->isEmpty()) {
+            return 0;
+        }
+
+        return (float) $items->avg('waste_percent');
+    }
+
+    private function recipeQuery(Request $request)
+    {
+        return Recipe::with([
+            'product:id,name,base_price,is_active',
+            'latestVersionRecord.items.inventoryItem:id,name,sku,unit,weighted_average_cost,is_active',
+            'versions' => fn ($query) => $query->latest('version'),
+        ])->when(
+            $request->user()?->company_id,
+            fn ($query, $companyId) => $query->where('company_id', $companyId),
+            fn ($query) => $query->when(
+                $request->integer('company_id'),
+                fn ($query, $companyId) => $query->where('company_id', $companyId),
+            ),
+        );
+    }
+
+    private function ensureRecipeIsAccessible(Request $request, Recipe $recipe): void
+    {
+        $companyId = $request->user()?->company_id;
+        abort_if($companyId && (int) $recipe->company_id !== (int) $companyId, 404);
+    }
+
+    private function loadAndSerialize(Recipe $recipe): array
+    {
+        $recipe->unsetRelations();
+        $recipe->load([
+            'product:id,name,base_price,is_active',
+            'latestVersionRecord.items.inventoryItem:id,name,sku,unit,weighted_average_cost,is_active',
+            'versions' => fn ($query) => $query->latest('version'),
+        ]);
+
+        return $this->serializeRecipe($recipe);
+    }
+
+    private function serializeRecipe(Recipe $recipe): array
+    {
+        $data = $recipe->attributesToArray();
+        $data['product'] = $recipe->product?->toArray();
+        $data['items'] = $recipe->latestVersionRecord?->items
+            ->map(function ($item) {
+                $row = $item->toArray();
+                $row['inventory_item_name'] = $item->inventoryItem?->name;
+                $row['inventory_item'] = $item->inventoryItem?->toArray();
+
+                return $row;
+            })
+            ->values()
+            ->all() ?? [];
+        $data['versions'] = $recipe->versions
+            ->map(fn ($version) => $version->toArray())
+            ->values()
+            ->all();
+
+        return $data;
+    }
+
+    private function normalizeNullableFields(Request $request): void
+    {
+        foreach (['company_id', 'product_id'] as $field) {
+            if ($request->exists($field) && trim((string) $request->input($field)) === '') {
+                $request->merge([$field => null]);
+            }
+        }
     }
 }

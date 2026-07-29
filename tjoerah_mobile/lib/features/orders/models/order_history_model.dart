@@ -5,6 +5,7 @@ import '../../../core/printer/print_job.dart';
 class OrderHistoryItem {
   const OrderHistoryItem({
     required this.id,
+    this.serverId,
     required this.receiptNumber,
     required this.orderType,
     required this.paymentMethod,
@@ -23,9 +24,12 @@ class OrderHistoryItem {
     this.tableId,
     this.tableName,
     this.note,
+    this.orderStatus = 'completed',
+    this.refundedAmount = 0,
   });
 
   final String id;
+  final String? serverId;
   final String receiptNumber;
   final String orderType;
   final String paymentMethod;
@@ -44,8 +48,12 @@ class OrderHistoryItem {
   final String? tableId;
   final String? tableName;
   final String? note;
+  final String orderStatus;
+  final double refundedAmount;
 
   bool get isPending => syncStatus == 'pending';
+  bool get isRefunded =>
+      orderStatus == 'refunded' || orderStatus == 'partially_refunded';
   int get itemCount => items.fold(0, (sum, item) => sum + item.quantity);
 
   TransactionPrintData toPrintData() {
@@ -104,6 +112,7 @@ class OrderHistoryItem {
         .whereType<Map>()
         .map(
           (item) => OrderHistoryLine(
+            id: item['server_order_item_id']?.toString(),
             name: item['snapshot_name']?.toString() ?? 'Produk',
             quantity: _integer(item['qty']),
             price: _number(item['snapshot_price']),
@@ -115,6 +124,7 @@ class OrderHistoryItem {
 
     return OrderHistoryItem(
       id: id,
+      serverId: meta['server_order_id']?.toString(),
       receiptNumber:
           payload['receipt_number']?.toString() ??
           (fallbackReceipt.isEmpty ? '-' : fallbackReceipt.toUpperCase()),
@@ -142,6 +152,8 @@ class OrderHistoryItem {
       tableId: payload['table_id']?.toString(),
       tableName: meta['table_name']?.toString(),
       note: meta['note']?.toString(),
+      orderStatus: meta['server_order_status']?.toString() ?? 'completed',
+      refundedAmount: _number(meta['refunded_amount']),
       items: items,
       paymentBreakdown: rawPayments.map(
         (key, value) => MapEntry(key, _number(value)),
@@ -166,6 +178,7 @@ class OrderHistoryItem {
     final items = rawItems.whereType<Map>().map((rawItem) {
       final item = Map<String, dynamic>.from(rawItem);
       return OrderHistoryLine(
+        id: item['id']?.toString(),
         name: item['snapshot_name']?.toString() ?? 'Produk',
         quantity: _integer(item['qty']),
         price: _number(item['snapshot_price']),
@@ -173,9 +186,15 @@ class OrderHistoryItem {
         station: item['station']?.toString(),
       );
     }).toList();
+    final rawRefunds = json['refunds'] is List ? json['refunds'] as List : [];
+    final refundedAmount = rawRefunds
+        .whereType<Map>()
+        .where((refund) => refund['status']?.toString() == 'approved')
+        .fold<double>(0, (sum, refund) => sum + _number(refund['amount']));
 
     return OrderHistoryItem(
       id: json['id']?.toString() ?? '',
+      serverId: json['id']?.toString(),
       receiptNumber: json['receipt_number']?.toString() ?? '-',
       orderType: json['order_type']?.toString() ?? 'take_away',
       paymentMethod: payments.keys.firstOrNull ?? 'unknown',
@@ -196,6 +215,8 @@ class OrderHistoryItem {
       tableId: json['table_id']?.toString(),
       tableName: meta['table_name']?.toString(),
       note: meta['note']?.toString(),
+      orderStatus: json['status']?.toString() ?? 'completed',
+      refundedAmount: refundedAmount,
       items: items,
       paymentBreakdown: payments,
     );
@@ -210,6 +231,7 @@ class OrderHistoryItem {
 
 class OrderHistoryLine {
   const OrderHistoryLine({
+    this.id,
     required this.name,
     required this.quantity,
     required this.price,
@@ -217,6 +239,7 @@ class OrderHistoryLine {
     this.station,
   });
 
+  final String? id;
   final String name;
   final int quantity;
   final double price;

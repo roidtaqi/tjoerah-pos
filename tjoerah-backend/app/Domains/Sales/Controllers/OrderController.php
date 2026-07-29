@@ -2,19 +2,54 @@
 
 namespace App\Domains\Sales\Controllers;
 
+use App\Domains\Inventory\Services\ProductionIncidentService;
+use App\Domains\KDS\Models\KitchenTicket;
 use App\Domains\POS\Models\Order;
+use App\Domains\POS\Models\OrderItem;
 use App\Domains\POS\Models\Refund;
 use App\Domains\POS\Models\VoidTransaction;
 use App\Domains\Sales\DTOs\OrderData;
 use App\Domains\Sales\Services\OrderService;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class OrderController extends Controller
 {
     public function __construct(
-        private OrderService $orderService
+        private OrderService $orderService,
+        private ProductionIncidentService $productionIncidentService,
     ) {}
+
+    public function index(Request $request)
+    {
+        $request->validate([
+            'per_page' => 'nullable|integer|min:1|max:100',
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+            'status' => 'nullable|string|max:50',
+            'q' => 'nullable|string|max:255',
+        ]);
+
+        return Order::with(['items', 'payments', 'refunds'])
+            ->when(
+                $request->user()?->company_id,
+                fn ($query, $companyId) => $query->whereHas(
+                    'outlet',
+                    fn ($outlet) => $outlet->where('company_id', $companyId),
+                ),
+            )
+            ->when($request->integer('outlet_id'), fn ($query, $outletId) => $query->where('outlet_id', $outletId))
+            ->when($request->string('status')->trim()->isNotEmpty(), fn ($query) => $query->where('status', $request->string('status')->trim()->toString()))
+            ->when($request->string('q')->trim()->isNotEmpty(), function ($query) use ($request) {
+                $term = $request->string('q')->trim()->toString();
+                $query->where(fn ($search) => $search
+                    ->where('receipt_number', 'like', "%{$term}%")
+                    ->orWhereHas('items', fn ($items) => $items->where('snapshot_name', 'like', "%{$term}%")));
+            })
+            ->latest()
+            ->paginate($request->integer('per_page', 100));
+    }
 
     public function store(Request $request)
     {
@@ -105,9 +140,11 @@ class OrderController extends Controller
             ->first();
     }
 
-    public function show(Order $order)
+    public function show(Request $request, Order $order)
     {
-        return response()->json($order->load(['items', 'payments', 'kitchenTickets.items']));
+        $this->ensureOrderIsAccessible($request, $order);
+
+        return response()->json($order->load(['items', 'payments', 'refunds', 'kitchenTickets.items']));
     }
 
     public function hold(Order $order)
@@ -154,25 +191,119 @@ class OrderController extends Controller
 
     public function refund(Request $request, Order $order)
     {
+        $this->ensureOrderIsAccessible($request, $order);
+
         $validated = $request->validate([
-            'payment_id' => 'nullable|integer|exists:payments,id',
-            'amount' => 'required|numeric|min:0',
+            'payment_id' => 'nullable|uuid|exists:payments,id',
+            'order_item_id' => 'nullable|uuid|exists:order_items,id',
+            'quantity' => 'nullable|integer|min:1',
+            'amount' => 'required|numeric|min:0.01',
             'type' => 'nullable|string|in:full,partial',
+            'inventory_outcome' => 'nullable|string|in:no_stock_return,wrong_discard,wrong_remake',
             'reason' => 'required|string',
         ]);
 
-        $refund = Refund::create([
-            'order_id' => $order->id,
-            'payment_id' => $validated['payment_id'] ?? null,
-            'user_id' => $request->user()?->id,
-            'amount' => $validated['amount'],
-            'type' => $validated['type'] ?? 'full',
-            'reason' => $validated['reason'],
-            'status' => 'approved',
-        ]);
+        $orderItem = isset($validated['order_item_id'])
+            ? OrderItem::where('order_id', $order->id)->find($validated['order_item_id'])
+            : null;
+        if (isset($validated['order_item_id']) && ! $orderItem) {
+            throw ValidationException::withMessages([
+                'order_item_id' => 'Produk refund tidak ditemukan pada pesanan ini.',
+            ]);
+        }
+        if (isset($validated['payment_id']) && ! $order->payments()->whereKey($validated['payment_id'])->exists()) {
+            throw ValidationException::withMessages([
+                'payment_id' => 'Pembayaran tidak ditemukan pada pesanan ini.',
+            ]);
+        }
 
-        $order->update(['status' => 'refunded']);
+        $outcome = $validated['inventory_outcome'] ?? 'no_stock_return';
+        if ($outcome !== 'no_stock_return' && ! $orderItem) {
+            throw ValidationException::withMessages([
+                'order_item_id' => 'Pilih produk untuk mencatat salah produksi.',
+            ]);
+        }
+        $quantity = $validated['quantity'] ?? ($orderItem ? 1 : null);
+        if ($orderItem && $quantity > (int) $orderItem->qty) {
+            throw ValidationException::withMessages([
+                'quantity' => 'Jumlah refund melebihi jumlah produk pada pesanan.',
+            ]);
+        }
 
-        return response()->json(['message' => 'Refund recorded.', 'data' => $refund], 201);
+        $alreadyRefunded = (float) Refund::where('order_id', $order->id)
+            ->where('status', 'approved')
+            ->sum('amount');
+        $remaining = max((float) $order->total - $alreadyRefunded, 0);
+        if ((float) $validated['amount'] > $remaining) {
+            throw ValidationException::withMessages([
+                'amount' => 'Nominal refund melebihi sisa pembayaran yang dapat dikembalikan.',
+            ]);
+        }
+
+        [$refund, $incident] = DB::transaction(function () use (
+            $request,
+            $validated,
+            $order,
+            $orderItem,
+            $quantity,
+            $outcome,
+            $alreadyRefunded,
+        ) {
+            $refund = Refund::create([
+                'order_id' => $order->id,
+                'order_item_id' => $orderItem?->id,
+                'payment_id' => $validated['payment_id'] ?? null,
+                'user_id' => $request->user()?->id,
+                'quantity' => $quantity,
+                'amount' => $validated['amount'],
+                'type' => $validated['type'] ?? 'full',
+                'inventory_outcome' => $outcome,
+                'reason' => $validated['reason'],
+                'status' => 'approved',
+            ]);
+
+            $incident = null;
+            if ($orderItem && $outcome !== 'no_stock_return') {
+                $ticket = $outcome === 'wrong_remake'
+                    ? KitchenTicket::where('order_id', $order->id)
+                        ->whereHas('items', fn ($items) => $items->where('order_item_id', $orderItem->id))
+                        ->latest()
+                        ->first()
+                    : null;
+                $incident = $this->productionIncidentService->record(
+                    orderItem: $orderItem,
+                    quantity: $quantity ?? 1,
+                    resolution: $outcome === 'wrong_remake' ? 'remake' : 'discard',
+                    reason: $validated['reason'],
+                    user: $request->user(),
+                    ticket: $ticket,
+                );
+            }
+
+            $totalRefunded = $alreadyRefunded + (float) $validated['amount'];
+            $order->update([
+                'status' => $totalRefunded >= (float) $order->total
+                    ? 'refunded'
+                    : 'partially_refunded',
+            ]);
+
+            return [$refund, $incident];
+        });
+
+        return response()->json([
+            'message' => 'Refund recorded.',
+            'data' => $refund,
+            'production_incident' => $incident,
+        ], 201);
+    }
+
+    private function ensureOrderIsAccessible(Request $request, Order $order): void
+    {
+        $order->loadMissing('outlet');
+        $companyId = $request->user()?->company_id;
+        abort_if(
+            $companyId && (int) $order->outlet?->company_id !== (int) $companyId,
+            404,
+        );
     }
 }

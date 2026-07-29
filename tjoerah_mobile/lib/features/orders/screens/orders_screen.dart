@@ -1,7 +1,11 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/router/role_navigation.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_layout.dart';
 import '../../../core/utils/app_date_formatter.dart';
@@ -14,6 +18,7 @@ import '../../../shared/components/app_loading_state.dart';
 import '../../../shared/components/app_metric_card.dart';
 import '../../../shared/components/app_search_bar.dart';
 import '../../settings/providers/printer_provider.dart';
+import '../../auth/providers/auth_provider.dart';
 import '../models/order_history_model.dart';
 import '../providers/order_history_provider.dart';
 
@@ -29,6 +34,7 @@ class OrdersScreen extends ConsumerStatefulWidget {
 class _OrdersScreenState extends ConsumerState<OrdersScreen> {
   String _query = '';
   _OrderFilter _filter = _OrderFilter.all;
+  bool _isMutating = false;
 
   final _currency = NumberFormat.currency(
     locale: 'id_ID',
@@ -45,11 +51,19 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
         actions: [
           IconButton(
             tooltip: 'Muat ulang',
-            onPressed: () => ref.read(orderHistoryProvider.notifier).refresh(),
+            onPressed: _isMutating
+                ? null
+                : () => ref.read(orderHistoryProvider.notifier).refresh(),
             icon: const Icon(Icons.refresh_rounded),
           ),
           const SizedBox(width: 4),
         ],
+        bottom: _isMutating
+            ? const PreferredSize(
+                preferredSize: Size.fromHeight(3),
+                child: LinearProgressIndicator(minHeight: 3),
+              )
+            : null,
       ),
       body: orders.when(
         loading: () => const AppLoadingState(message: 'Memuat pesanan...'),
@@ -73,7 +87,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
     final pending = orders.where((order) => order.isPending).length;
     final revenue = todayOrders.fold<double>(
       0,
-      (sum, order) => sum + order.total,
+      (sum, order) => sum + order.total - order.refundedAmount,
     );
     final normalized = _query.trim().toLowerCase();
     final filtered = orders.where((order) {
@@ -162,6 +176,12 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
   }
 
   void _showDetail(OrderHistoryItem order) {
+    final canRefund =
+        canManageCatalogForUser(ref.read(authProvider).user) &&
+        !order.isPending &&
+        order.serverId != null &&
+        order.items.any((item) => item.id != null) &&
+        order.refundedAmount < order.total;
     AppBottomSheet.show<void>(
       context,
       title: order.receiptNumber,
@@ -179,6 +199,13 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
                   text: _orderTypeLabel(order.orderType),
                   icon: Icons.restaurant_outlined,
                 ),
+                if (order.isRefunded)
+                  const AppBadge(
+                    text: 'Refund',
+                    color: AppColors.errorSoft,
+                    textColor: AppColors.error,
+                    icon: Icons.currency_exchange_rounded,
+                  ),
                 AppBadge(
                   text: order.isPending ? 'Belum sinkron' : 'Tersimpan',
                   color: order.isPending
@@ -228,6 +255,19 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
               value: _currency.format(order.total),
               emphasized: true,
             ),
+            if (order.refundedAmount > 0) ...[
+              const SizedBox(height: 10),
+              _DetailLine(
+                label: 'Sudah direfund',
+                value: _currency.format(order.refundedAmount),
+              ),
+              const SizedBox(height: 10),
+              _DetailLine(
+                label: 'Penjualan bersih',
+                value: _currency.format(order.total - order.refundedAmount),
+                emphasized: true,
+              ),
+            ],
             if (order.note != null && order.note!.isNotEmpty) ...[
               const SizedBox(height: 18),
               Text('Catatan', style: Theme.of(context).textTheme.titleMedium),
@@ -246,8 +286,51 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
                 );
               },
             ),
+            if (canRefund) ...[
+              const Divider(height: 28),
+              FilledButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  Future<void>.delayed(const Duration(milliseconds: 180), () {
+                    if (mounted) _openRefund(order);
+                  });
+                },
+                icon: const Icon(Icons.currency_exchange_rounded),
+                label: const Text('Proses refund'),
+              ),
+            ],
           ],
         ),
+      ),
+    );
+  }
+
+  Future<void> _openRefund(OrderHistoryItem order) async {
+    final draft = await AppBottomSheet.show<_RefundDraft>(
+      context,
+      title: 'Refund pesanan',
+      subtitle: order.receiptNumber,
+      child: _RefundForm(order: order),
+    );
+    if (draft == null || !mounted) return;
+
+    setState(() => _isMutating = true);
+    final result = await ref
+        .read(orderHistoryProvider.notifier)
+        .refundOrder(
+          order: order,
+          item: draft.item,
+          quantity: draft.quantity,
+          amount: draft.amount,
+          inventoryOutcome: draft.inventoryOutcome,
+          reason: draft.reason,
+        );
+    if (!mounted) return;
+    setState(() => _isMutating = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(result.message),
+        backgroundColor: result.isSuccess ? null : AppColors.error,
       ),
     );
   }
@@ -269,6 +352,207 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
       context,
     ).showSnackBar(SnackBar(content: Text(result.message)));
   }
+}
+
+class _RefundForm extends StatefulWidget {
+  const _RefundForm({required this.order});
+
+  final OrderHistoryItem order;
+
+  @override
+  State<_RefundForm> createState() => _RefundFormState();
+}
+
+class _RefundFormState extends State<_RefundForm> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _amount;
+  final _reason = TextEditingController();
+  late OrderHistoryLine _item;
+  int _quantity = 1;
+  String _inventoryOutcome = 'no_stock_return';
+
+  double get _remaining => widget.order.total - widget.order.refundedAmount;
+
+  @override
+  void initState() {
+    super.initState();
+    _item = widget.order.items.firstWhere((item) => item.id != null);
+    _amount = TextEditingController();
+    _useSuggestedAmount();
+  }
+
+  @override
+  void dispose() {
+    _amount.dispose();
+    _reason.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final items = widget.order.items.where((item) => item.id != null).toList();
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            DropdownButtonFormField<String>(
+              initialValue: _item.id,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Produk',
+                prefixIcon: Icon(Icons.restaurant_menu_rounded),
+              ),
+              items: items
+                  .map(
+                    (item) => DropdownMenuItem(
+                      value: item.id,
+                      child: Text(item.name, overflow: TextOverflow.ellipsis),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (id) {
+                final selected = items
+                    .where((item) => item.id == id)
+                    .firstOrNull;
+                if (selected == null) return;
+                setState(() {
+                  _item = selected;
+                  _quantity = 1;
+                  _useSuggestedAmount();
+                });
+              },
+            ),
+            const SizedBox(height: 14),
+            DropdownButtonFormField<int>(
+              initialValue: _quantity,
+              decoration: const InputDecoration(
+                labelText: 'Jumlah',
+                prefixIcon: Icon(Icons.numbers_rounded),
+              ),
+              items: List.generate(
+                _item.quantity,
+                (index) => DropdownMenuItem(
+                  value: index + 1,
+                  child: Text('${index + 1} produk'),
+                ),
+              ),
+              onChanged: (value) {
+                setState(() {
+                  _quantity = value ?? _quantity;
+                  _useSuggestedAmount();
+                });
+              },
+            ),
+            const SizedBox(height: 14),
+            TextFormField(
+              controller: _amount,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: InputDecoration(
+                labelText: 'Nominal refund',
+                prefixText: 'Rp ',
+                helperText:
+                    'Sisa yang dapat direfund: ${NumberFormat.decimalPattern('id_ID').format(_remaining)}',
+              ),
+              validator: (value) {
+                final amount = double.tryParse(value ?? '') ?? 0;
+                if (amount <= 0) return 'Nominal harus lebih dari 0';
+                if (amount > _remaining) {
+                  return 'Nominal melebihi sisa refund';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 14),
+            DropdownButtonFormField<String>(
+              initialValue: _inventoryOutcome,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Dampak ke produksi',
+                prefixIcon: Icon(Icons.inventory_2_outlined),
+              ),
+              items: const [
+                DropdownMenuItem(
+                  value: 'no_stock_return',
+                  child: Text('Refund saja - stok tetap'),
+                ),
+                DropdownMenuItem(
+                  value: 'wrong_discard',
+                  child: Text('Salah produksi - dibuang'),
+                ),
+                DropdownMenuItem(
+                  value: 'wrong_remake',
+                  child: Text('Salah produksi - buat ulang'),
+                ),
+              ],
+              onChanged: (value) => setState(
+                () => _inventoryOutcome = value ?? _inventoryOutcome,
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextFormField(
+              controller: _reason,
+              minLines: 2,
+              maxLines: 4,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Alasan refund',
+                prefixIcon: Icon(Icons.notes_rounded),
+                alignLabelWithHint: true,
+              ),
+              validator: (value) =>
+                  (value ?? '').trim().isEmpty ? 'Alasan wajib diisi' : null,
+            ),
+            const SizedBox(height: 18),
+            FilledButton.icon(
+              onPressed: _submit,
+              icon: const Icon(Icons.currency_exchange_rounded),
+              label: const Text('Catat refund'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _useSuggestedAmount() {
+    final unitPrice = _item.quantity <= 0 ? 0 : _item.total / _item.quantity;
+    final suggested = math.min(unitPrice * _quantity, _remaining);
+    _amount.text = suggested.round().toString();
+  }
+
+  void _submit() {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    Navigator.pop(
+      context,
+      _RefundDraft(
+        item: _item,
+        quantity: _quantity,
+        amount: double.parse(_amount.text),
+        inventoryOutcome: _inventoryOutcome,
+        reason: _reason.text.trim(),
+      ),
+    );
+  }
+}
+
+class _RefundDraft {
+  const _RefundDraft({
+    required this.item,
+    required this.quantity,
+    required this.amount,
+    required this.inventoryOutcome,
+    required this.reason,
+  });
+
+  final OrderHistoryLine item;
+  final int quantity;
+  final double amount;
+  final String inventoryOutcome;
+  final String reason;
 }
 
 class _OrderPrintActions extends StatelessWidget {

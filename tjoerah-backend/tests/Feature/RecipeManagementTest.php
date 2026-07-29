@@ -1,0 +1,190 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Domains\Core\Models\Company;
+use App\Domains\Core\Models\User;
+use App\Domains\Inventory\Models\InventoryItem;
+use App\Domains\POS\Models\Product;
+use App\Domains\Recipe\Models\Recipe;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+class RecipeManagementTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_owner_can_create_and_version_recipe_using_server_inventory_cost(): void
+    {
+        [$company, $owner, $product, $ingredient] = $this->recipeContext();
+        $this->actingAs($owner, 'api');
+
+        $recipe = $this->postJson('/api/recipes', [
+            'company_id' => Company::create(['name' => 'Spoofed Company'])->id,
+            'product_id' => $product->id,
+            'name' => 'Kopi Susu',
+            'status' => 'active',
+            'yield_quantity' => 2,
+            'yield_unit' => 'porsi',
+            'items' => [
+                [
+                    'inventory_item_id' => $ingredient->id,
+                    'quantity' => 10,
+                    'waste_percent' => 5,
+                    'unit_cost' => 1,
+                ],
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('company_id', $company->id)
+            ->assertJsonPath('active_version', 1)
+            ->assertJsonPath('items.0.inventory_item_name', 'Biji Kopi')
+            ->assertJsonPath('items.0.unit_cost', '100.0000')
+            ->assertJsonPath('items.0.total_cost', '1050.0000')
+            ->assertJsonPath('current_cost', '525.0000')
+            ->json();
+
+        $this->patchJson("/api/recipes/{$recipe['id']}", [
+            'product_id' => $product->id,
+            'name' => 'Kopi Susu Signature',
+            'status' => 'active',
+            'yield_quantity' => 2,
+            'yield_unit' => 'porsi',
+            'items' => [
+                [
+                    'inventory_item_id' => $ingredient->id,
+                    'quantity' => 12,
+                    'waste_percent' => 0,
+                ],
+            ],
+        ])->assertOk()
+            ->assertJsonPath('name', 'Kopi Susu Signature')
+            ->assertJsonPath('active_version', 2)
+            ->assertJsonCount(1, 'items')
+            ->assertJsonCount(2, 'versions')
+            ->assertJsonPath('items.0.quantity', '12.0000')
+            ->assertJsonPath('current_cost', '600.0000');
+
+        $this->assertDatabaseCount('recipe_versions', 2);
+        $this->assertDatabaseCount('recipe_items', 2);
+    }
+
+    public function test_recipe_lists_and_mutations_are_scoped_to_user_company(): void
+    {
+        [$company, $owner, $product, $ingredient] = $this->recipeContext();
+        $otherCompany = Company::create(['name' => 'Other Company']);
+        $otherRecipe = Recipe::create([
+            'company_id' => $otherCompany->id,
+            'name' => 'Private Recipe',
+        ]);
+
+        $this->actingAs($owner, 'api')
+            ->postJson('/api/recipes', [
+                'product_id' => $product->id,
+                'name' => 'Visible Recipe',
+                'status' => 'draft',
+                'yield_quantity' => 1,
+                'yield_unit' => 'porsi',
+                'items' => [
+                    [
+                        'inventory_item_id' => $ingredient->id,
+                        'quantity' => 1,
+                        'waste_percent' => 0,
+                    ],
+                ],
+            ])
+            ->assertCreated();
+
+        $this->getJson('/api/recipes')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.company_id', $company->id);
+
+        $this->patchJson("/api/recipes/{$otherRecipe->id}", [
+            'name' => 'Changed',
+        ])->assertNotFound();
+        $this->deleteJson("/api/recipes/{$otherRecipe->id}")
+            ->assertNotFound();
+    }
+
+    public function test_cashier_cannot_mutate_recipes(): void
+    {
+        [$company, , $product, $ingredient] = $this->recipeContext();
+        $cashier = User::factory()->create([
+            'company_id' => $company->id,
+            'role' => 'cashier',
+        ]);
+        $recipe = Recipe::create([
+            'company_id' => $company->id,
+            'name' => 'Protected Recipe',
+        ]);
+        $payload = [
+            'product_id' => $product->id,
+            'name' => 'Forbidden Recipe',
+            'status' => 'draft',
+            'yield_quantity' => 1,
+            'yield_unit' => 'porsi',
+            'items' => [
+                [
+                    'inventory_item_id' => $ingredient->id,
+                    'quantity' => 1,
+                ],
+            ],
+        ];
+
+        $this->actingAs($cashier, 'api');
+        $this->postJson('/api/recipes', $payload)->assertForbidden();
+        $this->patchJson("/api/recipes/{$recipe->id}", $payload)
+            ->assertForbidden();
+        $this->deleteJson("/api/recipes/{$recipe->id}")
+            ->assertForbidden();
+    }
+
+    public function test_owner_can_soft_delete_recipe(): void
+    {
+        [, $owner, $product, $ingredient] = $this->recipeContext();
+        $this->actingAs($owner, 'api');
+
+        $recipeId = $this->postJson('/api/recipes', [
+            'product_id' => $product->id,
+            'name' => 'Temporary Recipe',
+            'status' => 'inactive',
+            'yield_quantity' => 1,
+            'yield_unit' => 'porsi',
+            'items' => [
+                [
+                    'inventory_item_id' => $ingredient->id,
+                    'quantity' => 1,
+                    'waste_percent' => 0,
+                ],
+            ],
+        ])->assertCreated()->json('id');
+
+        $this->deleteJson("/api/recipes/{$recipeId}")->assertNoContent();
+        $this->assertSoftDeleted('recipes', ['id' => $recipeId]);
+        $this->assertDatabaseHas('recipe_versions', ['recipe_id' => $recipeId]);
+    }
+
+    private function recipeContext(): array
+    {
+        $company = Company::create(['name' => 'Tjoerah']);
+        $owner = User::factory()->create([
+            'company_id' => $company->id,
+            'role' => 'owner',
+        ]);
+        $product = Product::create([
+            'company_id' => $company->id,
+            'name' => 'Kopi Susu',
+            'base_price' => 25000,
+        ]);
+        $ingredient = InventoryItem::create([
+            'company_id' => $company->id,
+            'name' => 'Biji Kopi',
+            'sku' => 'BEAN-01',
+            'unit' => 'g',
+            'weighted_average_cost' => 100,
+            'is_active' => true,
+        ]);
+
+        return [$company, $owner, $product, $ingredient];
+    }
+}

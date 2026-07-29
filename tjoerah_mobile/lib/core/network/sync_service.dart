@@ -97,9 +97,10 @@ class SyncService {
 
         await db.transaction((txn) async {
           // Clear old inventory/recipe data
-          await txn.delete('inventory_items');
-          await txn.delete('recipes');
           await txn.delete('recipe_items');
+          await txn.delete('recipe_versions');
+          await txn.delete('recipes');
+          await txn.delete('inventory_items');
 
           // Insert inventory items
           for (var item in items) {
@@ -123,6 +124,8 @@ class SyncService {
               'id': recipeId,
               'product_id': recipe['product_id']?.toString(),
               'name': recipe['name'],
+              'status': recipe['status'] ?? 'draft',
+              'active_version': recipe['active_version'] ?? 1,
               'current_cost': recipe['current_cost'] ?? 0.0,
               'yield_quantity': recipe['yield_quantity'] ?? 1.0,
               'yield_unit': recipe['yield_unit'],
@@ -141,6 +144,19 @@ class SyncService {
                 'waste_percent': rItem['waste_percent'] ?? 0.0,
                 'unit_cost': rItem['unit_cost'] ?? 0.0,
                 'total_cost': rItem['total_cost'] ?? 0.0,
+              });
+            }
+
+            final versions = recipe['versions'] as List? ?? [];
+            for (var version in versions) {
+              await txn.insert('recipe_versions', {
+                'id': version['id'].toString(),
+                'recipe_id': recipeId,
+                'version': version['version'] ?? 1,
+                'total_cost': version['total_cost'] ?? 0.0,
+                'status': version['status'] ?? 'draft',
+                'effective_at': version['effective_at']?.toString(),
+                'approved_by': version['approved_by']?.toString(),
               });
             }
           }

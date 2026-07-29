@@ -518,6 +518,12 @@ class _TicketCard extends ConsumerWidget {
                         ],
                       ),
                     ),
+                    IconButton(
+                      tooltip: 'Catat salah produksi',
+                      onPressed: () =>
+                          _showProductionIncident(context, ref, item),
+                      icon: const Icon(Icons.report_problem_outlined),
+                    ),
                   ],
                 ),
               ),
@@ -540,6 +546,187 @@ class _TicketCard extends ConsumerWidget {
       ),
     );
   }
+
+  Future<void> _showProductionIncident(
+    BuildContext context,
+    WidgetRef ref,
+    KitchenTicketItemModel item,
+  ) async {
+    final draft = await AppBottomSheet.show<_ProductionIncidentDraft>(
+      context,
+      title: 'Salah produksi',
+      subtitle: item.name,
+      child: _ProductionIncidentForm(item: item),
+    );
+    if (draft == null || !context.mounted) return;
+
+    final result = await ref
+        .read(kdsNotifierProvider.notifier)
+        .recordProductionIncident(
+          ticket: ticket,
+          item: item,
+          quantity: draft.quantity,
+          resolution: draft.resolution,
+          reason: draft.reason,
+        );
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(result.message),
+        backgroundColor: result.isSuccess ? null : AppColors.error,
+      ),
+    );
+  }
+}
+
+class _ProductionIncidentForm extends StatefulWidget {
+  const _ProductionIncidentForm({required this.item});
+
+  final KitchenTicketItemModel item;
+
+  @override
+  State<_ProductionIncidentForm> createState() =>
+      _ProductionIncidentFormState();
+}
+
+class _ProductionIncidentFormState extends State<_ProductionIncidentForm> {
+  final _formKey = GlobalKey<FormState>();
+  final _reason = TextEditingController();
+  int _quantity = 1;
+  String _resolution = 'discard';
+
+  @override
+  void dispose() {
+    _reason.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            DropdownButtonFormField<int>(
+              initialValue: _quantity,
+              decoration: const InputDecoration(
+                labelText: 'Jumlah produk',
+                prefixIcon: Icon(Icons.numbers_rounded),
+              ),
+              items: List.generate(
+                widget.item.qty,
+                (index) => DropdownMenuItem(
+                  value: index + 1,
+                  child: Text('${index + 1} produk'),
+                ),
+              ),
+              onChanged: (value) =>
+                  setState(() => _quantity = value ?? _quantity),
+            ),
+            const SizedBox(height: 18),
+            Text('Tindakan', style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 8),
+            SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(
+                  value: 'discard',
+                  icon: Icon(Icons.delete_outline_rounded),
+                  label: Text('Dibuang'),
+                ),
+                ButtonSegment(
+                  value: 'remake',
+                  icon: Icon(Icons.replay_rounded),
+                  label: Text('Buat ulang'),
+                ),
+              ],
+              selected: {_resolution},
+              showSelectedIcon: false,
+              onSelectionChanged: (selection) =>
+                  setState(() => _resolution = selection.first),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: _resolution == 'remake'
+                    ? AppColors.warningSoft
+                    : Theme.of(context).colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    _resolution == 'remake'
+                        ? Icons.inventory_2_outlined
+                        : Icons.info_outline_rounded,
+                    size: 20,
+                    color: _resolution == 'remake' ? AppColors.warning : null,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      _resolution == 'remake'
+                          ? 'Bahan untuk produk pengganti akan dikurangi dan tiket kembali ke tahap memasak.'
+                          : 'Produk salah dicatat sebagai waste tanpa mengurangi stok bahan dua kali.',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextFormField(
+              controller: _reason,
+              minLines: 2,
+              maxLines: 4,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Alasan',
+                hintText: 'Contoh: komposisi salah atau minuman tumpah',
+                prefixIcon: Icon(Icons.notes_rounded),
+                alignLabelWithHint: true,
+              ),
+              validator: (value) =>
+                  (value ?? '').trim().isEmpty ? 'Alasan wajib diisi' : null,
+            ),
+            const SizedBox(height: 18),
+            FilledButton.icon(
+              onPressed: _submit,
+              icon: const Icon(Icons.check_rounded),
+              label: const Text('Simpan insiden'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _submit() {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    Navigator.pop(
+      context,
+      _ProductionIncidentDraft(
+        quantity: _quantity,
+        resolution: _resolution,
+        reason: _reason.text.trim(),
+      ),
+    );
+  }
+}
+
+class _ProductionIncidentDraft {
+  const _ProductionIncidentDraft({
+    required this.quantity,
+    required this.resolution,
+    required this.reason,
+  });
+
+  final int quantity;
+  final String resolution;
+  final String reason;
 }
 
 _TicketAction? _nextAction(String status) => switch (status) {

@@ -37,7 +37,9 @@ class DeductInventoryOnOrderCompletion
                 continue;
             }
 
-            $recipe = Recipe::where('product_id', $orderItem->product_id)->first();
+            $recipe = Recipe::where('product_id', $orderItem->product_id)
+                ->where('status', 'active')
+                ->first();
             if (! $recipe) {
                 $orderItem->update(['cogs_total' => $cogsTotal]);
 
@@ -57,9 +59,10 @@ class DeductInventoryOnOrderCompletion
 
             // Get all items in this recipe version
             $recipeItems = RecipeItem::where('recipe_version_id', $version->id)->get();
+            $yieldQuantity = max((float) $recipe->yield_quantity, 0.0001);
             foreach ($recipeItems as $recipeItem) {
                 if ($recipeItem->inventory_item_id) {
-                    $qtyDeducted = (float) $recipeItem->quantity * $orderItem->qty;
+                    $qtyDeducted = ((float) $recipeItem->quantity / $yieldQuantity) * $orderItem->qty;
 
                     // Deduct stock (negative quantity)
                     InventoryService::recordMovement(
@@ -76,7 +79,7 @@ class DeductInventoryOnOrderCompletion
                     );
 
                     // Add up COGS contribution
-                    $cogsTotal += (float) $recipeItem->total_cost * $orderItem->qty;
+                    $cogsTotal += ((float) $recipeItem->total_cost / $yieldQuantity) * $orderItem->qty;
                 }
             }
 

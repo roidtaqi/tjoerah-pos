@@ -62,12 +62,14 @@ Route::middleware('auth:api')->group(function () {
         Route::delete('/products/{product}', [ProductCatalogController::class, 'destroyProduct']);
     });
 
+    Route::get('/orders', [OrderController::class, 'index']);
     Route::post('/orders', [OrderController::class, 'store']);
     Route::get('/orders/{order}', [OrderController::class, 'show']);
     Route::post('/orders/{order}/hold', [OrderController::class, 'hold']);
     Route::post('/orders/{order}/resume', [OrderController::class, 'resume']);
     Route::post('/orders/{order}/void', [OrderController::class, 'void']);
-    Route::post('/orders/{order}/refund', [OrderController::class, 'refund']);
+    Route::post('/orders/{order}/refund', [OrderController::class, 'refund'])
+        ->middleware('role:owner,admin');
     Route::post('/orders/{order}/complete', [OrderController::class, 'complete']);
     Route::post('/payments', [PaymentController::class, 'store']);
     Route::get('/receipts/{order}', [ReceiptController::class, 'show']);
@@ -95,12 +97,16 @@ Route::middleware('auth:api')->group(function () {
     Route::post('/inventory/opname', [InventoryController::class, 'opname']);
     Route::post('/inventory/transfers', [InventoryController::class, 'transfer']);
     Route::post('/inventory/wastage', [WastageController::class, 'store']);
+    Route::post('/inventory/production-incidents', [WastageController::class, 'productionIncident']);
 
     Route::get('/recipes', [RecipeController::class, 'index']);
-    Route::post('/recipes', [RecipeController::class, 'store']);
-    Route::put('/recipes/{recipe}', [RecipeController::class, 'update']);
-    Route::post('/recipes/version', [RecipeController::class, 'version']);
     Route::get('/recipes/costing', [RecipeController::class, 'costing']);
+    Route::middleware('role:owner,admin')->group(function () {
+        Route::post('/recipes', [RecipeController::class, 'store']);
+        Route::match(['put', 'patch'], '/recipes/{recipe}', [RecipeController::class, 'update']);
+        Route::delete('/recipes/{recipe}', [RecipeController::class, 'destroy']);
+        Route::post('/recipes/version', [RecipeController::class, 'version']);
+    });
 
     Route::get('/suppliers', [PurchaseController::class, 'suppliers']);
     Route::post('/suppliers', [PurchaseController::class, 'storeSupplier']);

@@ -3,9 +3,9 @@
 namespace App\Domains\Recipe\Services;
 
 use App\Domains\Inventory\Models\InventoryItem;
+use App\Domains\Recipe\Models\Recipe;
 use App\Domains\Recipe\Models\RecipeItem;
 use App\Domains\Recipe\Models\RecipeVersion;
-use App\Domains\Recipe\Models\Recipe;
 
 class RecipeService
 {
@@ -15,12 +15,21 @@ class RecipeService
     public static function recalculateRecipeCostsUsingItem(int $itemId): void
     {
         $item = InventoryItem::find($itemId);
-        if (!$item) {
+        if (! $item) {
             return;
         }
 
-        // Find all recipe items referencing this inventory item
-        $recipeItems = RecipeItem::where('inventory_item_id', $itemId)->get();
+        // Historical recipe versions are immutable cost snapshots. Only the
+        // ingredients belonging to each recipe's active version are refreshed.
+        $recipeItems = RecipeItem::query()
+            ->select('recipe_items.*')
+            ->join('recipe_versions', 'recipe_versions.id', '=', 'recipe_items.recipe_version_id')
+            ->join('recipes', 'recipes.id', '=', 'recipe_items.recipe_id')
+            ->where('recipe_items.inventory_item_id', $itemId)
+            ->whereNull('recipes.deleted_at')
+            ->whereColumn('recipe_versions.version', 'recipes.active_version')
+            ->get();
+        $affectedVersions = [];
 
         foreach ($recipeItems as $recipeItem) {
             $unitCost = (float) $item->weighted_average_cost;
@@ -32,10 +41,13 @@ class RecipeService
                 'total_cost' => $totalCost,
             ]);
 
-            // Update parent recipe version total cost
             if ($recipeItem->recipe_version_id) {
-                self::updateRecipeVersionTotalCost($recipeItem->recipe_version_id);
+                $affectedVersions[] = (int) $recipeItem->recipe_version_id;
             }
+        }
+
+        foreach (array_unique($affectedVersions) as $versionId) {
+            self::updateRecipeVersionTotalCost($versionId);
         }
     }
 
@@ -45,25 +57,23 @@ class RecipeService
     public static function updateRecipeVersionTotalCost(int $versionId): void
     {
         $version = RecipeVersion::find($versionId);
-        if (!$version) {
+        if (! $version) {
             return;
         }
 
-        // Sum the total cost of all recipe items under this version
         $totalItemsCost = (float) RecipeItem::where('recipe_version_id', $versionId)->sum('total_cost');
-        
+
         $version->update([
-            'total_cost' => $totalItemsCost
+            'total_cost' => $totalItemsCost,
         ]);
 
-        // Propagate cost to parent Recipe
         $recipe = Recipe::find($version->recipe_id);
-        if ($recipe && $recipe->active_version == $version->version) {
+        if ($recipe && $recipe->active_version === $version->version) {
             $yieldQty = (float) $recipe->yield_quantity ?: 1.0;
             $currentCostPerYield = $totalItemsCost / $yieldQty;
-            
+
             $recipe->update([
-                'current_cost' => $currentCostPerYield
+                'current_cost' => $currentCostPerYield,
             ]);
         }
     }

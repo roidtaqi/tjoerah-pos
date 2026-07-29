@@ -15,4 +15,9 @@ class OrderItem extends Model
     protected $casts = [
         'modifiers' => 'array',
     ];
+
+    public function order()
+    {
+        return $this->belongsTo(Order::class);
+    }
 }

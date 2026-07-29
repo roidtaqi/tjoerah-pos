@@ -11,4 +11,19 @@ class Refund extends Model
     use HasUuids, SoftDeletes;
 
     protected $guarded = [];
+
+    protected $casts = [
+        'quantity' => 'integer',
+        'amount' => 'decimal:2',
+    ];
+
+    public function order()
+    {
+        return $this->belongsTo(Order::class);
+    }
+
+    public function orderItem()
+    {
+        return $this->belongsTo(OrderItem::class);
+    }
 }

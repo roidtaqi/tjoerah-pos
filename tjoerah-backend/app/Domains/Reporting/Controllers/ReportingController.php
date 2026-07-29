@@ -15,18 +15,22 @@ class ReportingController extends Controller
 {
     public function sales(Request $request)
     {
+        $refunds = $this->refundAmountSql();
+
         return response()->json($this->baseOrderQuery($request)
-            ->selectRaw('DATE(created_at) as date, COUNT(*) as orders, SUM(total) as total_sales, SUM(cogs_total) as cogs, SUM((subtotal - discount_total) - cogs_total) as gross_profit')
-            ->groupBy(DB::raw('DATE(created_at)'))
+            ->selectRaw("DATE(orders.created_at) as date, COUNT(*) as orders, SUM(orders.total - {$refunds}) as total_sales, SUM({$refunds}) as refunds, SUM(orders.cogs_total) as cogs, SUM((orders.subtotal - orders.discount_total - {$refunds}) - orders.cogs_total) as gross_profit")
+            ->groupBy(DB::raw('DATE(orders.created_at)'))
             ->orderBy('date')
             ->get());
     }
 
     public function products(Request $request)
     {
+        $refunds = '(SELECT COALESCE(SUM(product_refunds.amount), 0) FROM refunds AS product_refunds WHERE product_refunds.order_item_id = order_items.id AND product_refunds.status = \'approved\' AND product_refunds.deleted_at IS NULL)';
+
         return DB::table('order_items')
             ->join('orders', 'orders.id', '=', 'order_items.order_id')
-            ->selectRaw('order_items.product_id, order_items.snapshot_name, SUM(order_items.qty) as qty, SUM(order_items.total) as revenue, SUM(order_items.cogs_total) as cogs')
+            ->selectRaw("order_items.product_id, order_items.snapshot_name, SUM(order_items.qty) as qty, SUM(order_items.total - {$refunds}) as revenue, SUM({$refunds}) as refunds, SUM(order_items.cogs_total) as cogs")
             ->when($request->integer('outlet_id'), fn ($query, $outletId) => $query->where('orders.outlet_id', $outletId))
             ->when($request->date('from'), fn ($query, $from) => $query->whereDate('orders.created_at', '>=', $from))
             ->when($request->date('to'), fn ($query, $to) => $query->whereDate('orders.created_at', '<=', $to))
@@ -55,9 +59,11 @@ class ReportingController extends Controller
 
     public function outlets(Request $request)
     {
+        $refunds = $this->refundAmountSql();
+
         return $this->baseOrderQuery($request)
-            ->selectRaw('outlet_id, COUNT(*) as orders, SUM(total) as revenue, SUM(cogs_total) as cogs, SUM((subtotal - discount_total) - cogs_total) as gross_profit')
-            ->groupBy('outlet_id')
+            ->selectRaw("orders.outlet_id, COUNT(*) as orders, SUM(orders.total - {$refunds}) as revenue, SUM({$refunds}) as refunds, SUM(orders.cogs_total) as cogs, SUM((orders.subtotal - orders.discount_total - {$refunds}) - orders.cogs_total) as gross_profit")
+            ->groupBy('orders.outlet_id')
             ->orderByDesc('revenue')
             ->get();
     }
@@ -77,5 +83,10 @@ class ReportingController extends Controller
             ->when($request->integer('outlet_id'), fn ($query, $outletId) => $query->where('outlet_id', $outletId))
             ->when($request->date('from'), fn ($query, $from) => $query->whereDate('created_at', '>=', $from))
             ->when($request->date('to'), fn ($query, $to) => $query->whereDate('created_at', '<=', $to));
+    }
+
+    private function refundAmountSql(): string
+    {
+        return "(SELECT COALESCE(SUM(order_refunds.amount), 0) FROM refunds AS order_refunds WHERE order_refunds.order_id = orders.id AND order_refunds.status = 'approved' AND order_refunds.deleted_at IS NULL)";
     }
 }

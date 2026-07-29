@@ -214,7 +214,10 @@ void main() {
       tester,
       size: const Size(1280, 800),
       screen: const RecipeScreen(),
-      overrides: [recipeProvider.overrideWith(_PreviewRecipeNotifier.new)],
+      overrides: [
+        authProvider.overrideWith(_PreviewOwnerAuthNotifier.new),
+        recipeProvider.overrideWith(_PreviewRecipeNotifier.new),
+      ],
     );
     expect(find.text('Kopi Susu Tjoerah'), findsWidgets);
     expect(tester.takeException(), isNull);
@@ -248,6 +251,37 @@ void main() {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.viewInsets = FakeViewPadding.zero;
     await tester.pump(const Duration(milliseconds: 250));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('owner can compose a recipe and see live HPP', (tester) async {
+    late _RecipeCrudPreviewNotifier notifier;
+    await _render(
+      tester,
+      size: const Size(800, 1000),
+      screen: const RecipeScreen(),
+      overrides: [
+        authProvider.overrideWith(_PreviewOwnerAuthNotifier.new),
+        recipeProvider.overrideWith(() {
+          notifier = _RecipeCrudPreviewNotifier();
+          return notifier;
+        }),
+      ],
+    );
+
+    await tester.tap(find.widgetWithText(FloatingActionButton, 'Tambah resep'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).first, 'Espresso Test');
+    await tester.tap(find.text('Tambah bahan'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Biji Kopi Test'), findsOneWidget);
+    expect(find.text('Rp 100'), findsWidgets);
+    await tester.tap(find.text('Simpan resep'));
+    await tester.pumpAndSettle();
+
+    expect(notifier.submitted?.name, 'Espresso Test');
+    expect(notifier.submitted?.items.single.inventoryItemId, '1');
     expect(tester.takeException(), isNull);
   });
 
@@ -364,7 +398,10 @@ void main() {
       (
         label: 'Recipe',
         screen: const RecipeScreen(),
-        overrides: [recipeProvider.overrideWith(_PreviewRecipeNotifier.new)],
+        overrides: [
+          authProvider.overrideWith(_PreviewOwnerAuthNotifier.new),
+          recipeProvider.overrideWith(_PreviewRecipeNotifier.new),
+        ],
       ),
       (
         label: 'Order type',
@@ -819,6 +856,38 @@ class _PreviewRecipeNotifier extends RecipeNotifier {
         ),
       ],
     );
+  }
+}
+
+class _RecipeCrudPreviewNotifier extends RecipeNotifier {
+  RecipeDraft? submitted;
+
+  @override
+  Future<List<RecipeModel>> build() async => [];
+
+  @override
+  Future<RecipeEditorOptions> loadEditorOptions() async {
+    return const RecipeEditorOptions(
+      products: [
+        RecipeProductOption(id: '1', name: 'Espresso', isActive: true),
+      ],
+      ingredients: [
+        RecipeIngredientOption(
+          id: '1',
+          name: 'Biji Kopi Test',
+          sku: 'BEAN-T',
+          unit: 'g',
+          unitCost: 100,
+          isActive: true,
+        ),
+      ],
+    );
+  }
+
+  @override
+  Future<RecipeMutationResult> createRecipe(RecipeDraft draft) async {
+    submitted = draft;
+    return const RecipeMutationResult.success('Resep tersimpan.');
   }
 }
 

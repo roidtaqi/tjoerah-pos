@@ -2,19 +2,27 @@
 
 namespace App\Domains\Inventory\Controllers;
 
-use App\Http\Controllers\Controller;
 use App\Domains\Inventory\Models\InventoryItem;
 use App\Domains\Inventory\Models\StockAdjustment;
 use App\Domains\Inventory\Models\StockMovement;
 use App\Domains\Inventory\Models\StockOpname;
 use App\Domains\Inventory\Models\Warehouse;
+use App\Domains\Inventory\Services\InventoryService;
+use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 
 class InventoryController extends Controller
 {
     public function index(Request $request)
     {
-        return InventoryItem::when($request->integer('company_id'), fn ($query, $companyId) => $query->where('company_id', $companyId))
+        return InventoryItem::when(
+            $request->user()?->company_id,
+            fn ($query, $companyId) => $query->where('company_id', $companyId),
+            fn ($query) => $query->when(
+                $request->integer('company_id'),
+                fn ($query, $companyId) => $query->where('company_id', $companyId),
+            ),
+        )
             ->when($request->string('item_type')->isNotEmpty(), fn ($query) => $query->where('item_type', request('item_type')))
             ->select('inventory_items.*')
             ->selectSub(function ($query) {
@@ -85,7 +93,7 @@ class InventoryController extends Controller
             'status' => 'approved',
         ]);
 
-        \App\Domains\Inventory\Services\InventoryService::recordMovement(
+        InventoryService::recordMovement(
             itemId: $validated['inventory_item_id'],
             warehouseId: $validated['warehouse_id'],
             quantity: (float) $validated['quantity'],
@@ -124,7 +132,7 @@ class InventoryController extends Controller
             'reason' => 'nullable|string',
         ]);
 
-        $out = \App\Domains\Inventory\Services\InventoryService::recordMovement(
+        $out = InventoryService::recordMovement(
             itemId: $validated['inventory_item_id'],
             warehouseId: $validated['from_warehouse_id'],
             quantity: -1 * abs((float) $validated['quantity']),
@@ -133,7 +141,7 @@ class InventoryController extends Controller
             userId: $request->user()?->id
         );
 
-        $in = \App\Domains\Inventory\Services\InventoryService::recordMovement(
+        $in = InventoryService::recordMovement(
             itemId: $validated['inventory_item_id'],
             warehouseId: $validated['to_warehouse_id'],
             quantity: abs((float) $validated['quantity']),

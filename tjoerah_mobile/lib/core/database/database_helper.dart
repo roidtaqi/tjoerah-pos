@@ -19,7 +19,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 7,
+      version: 8,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -33,6 +33,7 @@ class DatabaseHelper {
       await db.execute('DROP TABLE IF EXISTS floors');
       await db.execute('DROP TABLE IF EXISTS offline_inventory_incidents');
       await db.execute('DROP TABLE IF EXISTS recipe_items');
+      await db.execute('DROP TABLE IF EXISTS recipe_versions');
       await db.execute('DROP TABLE IF EXISTS recipes');
       await db.execute('DROP TABLE IF EXISTS inventory_items');
       await db.execute('DROP TABLE IF EXISTS offline_orders');
@@ -49,6 +50,7 @@ class DatabaseHelper {
     if (oldVersion < 5) await _upgradeProductsTable(db);
     if (oldVersion < 6) await _upgradeCategoriesTable(db);
     if (oldVersion < 7) await _createOfflineAttendanceTable(db);
+    if (oldVersion < 8) await _upgradeRecipesTable(db);
   }
 
   Future<void> _createDB(Database db, int version) async {
@@ -112,12 +114,16 @@ class DatabaseHelper {
         id TEXT PRIMARY KEY,
         product_id TEXT,
         name TEXT NOT NULL,
+        status TEXT DEFAULT 'draft',
+        active_version INTEGER DEFAULT 1,
         current_cost REAL DEFAULT 0,
         yield_quantity REAL DEFAULT 1,
         yield_unit TEXT,
         is_synced INTEGER DEFAULT 1
       )
     ''');
+
+    await _createRecipeVersionsTable(db);
 
     // Recipe Items Table
     await db.execute('''
@@ -254,13 +260,39 @@ class DatabaseHelper {
     ''');
   }
 
+  Future<void> _upgradeRecipesTable(Database db) async {
+    await db.execute(
+      "ALTER TABLE recipes ADD COLUMN status TEXT DEFAULT 'draft'",
+    );
+    await db.execute(
+      'ALTER TABLE recipes ADD COLUMN active_version INTEGER DEFAULT 1',
+    );
+    await _createRecipeVersionsTable(db);
+  }
+
+  Future<void> _createRecipeVersionsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS recipe_versions (
+        id TEXT PRIMARY KEY,
+        recipe_id TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        total_cost REAL DEFAULT 0,
+        status TEXT DEFAULT 'draft',
+        effective_at TEXT,
+        approved_by TEXT,
+        FOREIGN KEY (recipe_id) REFERENCES recipes (id) ON DELETE CASCADE
+      )
+    ''');
+  }
+
   Future<void> clearCatalog() async {
     final db = await instance.database;
+    await db.delete('recipe_items');
+    await db.delete('recipe_versions');
+    await db.delete('recipes');
+    await db.delete('inventory_items');
     await db.delete('products');
     await db.delete('categories');
-    await db.delete('inventory_items');
-    await db.delete('recipes');
-    await db.delete('recipe_items');
     await db.delete('floors');
     await db.delete('dining_tables');
     await db.delete('table_sessions');
