@@ -108,9 +108,11 @@ class SyncService {
               'id': item['id'].toString(),
               'name': item['name'],
               'sku': item['sku'],
+              'item_type': item['item_type'] ?? 'raw_material',
               'unit': item['unit'],
               'current_stock': item['current_stock'] ?? 0.0,
               'weighted_average_cost': item['weighted_average_cost'] ?? 0.0,
+              'minimum_stock': item['minimum_stock'] ?? 0.0,
               'is_active': (item['is_active'] == 1 || item['is_active'] == true)
                   ? 1
                   : 0,

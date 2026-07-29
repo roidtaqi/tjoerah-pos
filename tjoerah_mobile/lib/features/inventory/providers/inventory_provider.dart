@@ -1,8 +1,24 @@
 import 'dart:convert';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sqflite/sqflite.dart';
+
 import '../../../core/database/database_helper.dart';
 import '../../../core/network/api_client.dart';
+import '../../../core/network/sync_service.dart';
 import '../models/inventory_models.dart';
+
+class InventoryMutationResult {
+  const InventoryMutationResult._(this.isSuccess, this.message);
+
+  const InventoryMutationResult.success(String message) : this._(true, message);
+
+  const InventoryMutationResult.failure(String message)
+    : this._(false, message);
+
+  final bool isSuccess;
+  final String message;
+}
 
 class InventoryState {
   final List<InventoryItemModel> items;
@@ -19,19 +35,23 @@ class InventoryNotifier extends AsyncNotifier<InventoryState> {
 
   Future<InventoryState> _loadData() async {
     final db = await DatabaseHelper.instance.database;
-    final itemsList = await db.query('inventory_items');
+    final itemsList = await db.query(
+      'inventory_items',
+      orderBy: 'name COLLATE NOCASE',
+    );
 
     final items = itemsList.map((row) {
       return InventoryItemModel(
         id: int.parse(row['id'].toString()),
         name: row['name'].toString(),
         sku: row['sku']?.toString() ?? '',
-        itemType: 'raw_material', // default
+        itemType: row['item_type']?.toString() ?? 'raw_material',
         unit: row['unit']?.toString() ?? 'pcs',
         weightedAverageCost:
             double.tryParse(row['weighted_average_cost'].toString()) ?? 0.0,
-        minimumStock: 10.0, // default dummy
+        minimumStock: double.tryParse(row['minimum_stock'].toString()) ?? 0.0,
         currentStock: double.tryParse(row['current_stock'].toString()) ?? 0.0,
+        isActive: row['is_active'] == null || row['is_active'] == 1,
       );
     }).toList();
 
@@ -55,8 +75,60 @@ class InventoryNotifier extends AsyncNotifier<InventoryState> {
   }
 
   Future<void> refresh() async {
+    final previous = state.asData?.value;
     state = const AsyncValue.loading();
+    final synced = await SyncService.syncInventory();
+    if (!synced && previous != null) {
+      state = AsyncValue.data(previous);
+      return;
+    }
     state = await AsyncValue.guard(() => _loadData());
+  }
+
+  Future<InventoryMutationResult> createItem(InventoryItemDraft draft) async {
+    try {
+      final response = await ApiClient.post('/inventory/items', draft.toJson());
+      if (response.statusCode != 201) {
+        return InventoryMutationResult.failure(_responseMessage(response.body));
+      }
+      await _cacheItem(response.body);
+      final synced = await _syncAfterMutation();
+      return InventoryMutationResult.success(
+        synced
+            ? '${draft.name.trim()} berhasil ditambahkan.'
+            : '${draft.name.trim()} tersimpan dan siap dipakai pada resep.',
+      );
+    } catch (_) {
+      return const InventoryMutationResult.failure(
+        'Bahan belum dapat ditambahkan. Periksa koneksi lalu coba lagi.',
+      );
+    }
+  }
+
+  Future<InventoryMutationResult> updateItem(
+    InventoryItemModel item,
+    InventoryItemDraft draft,
+  ) async {
+    try {
+      final response = await ApiClient.patch(
+        '/inventory/items/${item.id}',
+        draft.toJson(),
+      );
+      if (response.statusCode != 200) {
+        return InventoryMutationResult.failure(_responseMessage(response.body));
+      }
+      await _cacheItem(response.body);
+      final synced = await _syncAfterMutation();
+      return InventoryMutationResult.success(
+        synced
+            ? '${draft.name.trim()} berhasil diperbarui.'
+            : '${draft.name.trim()} diperbarui pada perangkat ini.',
+      );
+    } catch (_) {
+      return const InventoryMutationResult.failure(
+        'Perubahan bahan belum dapat disimpan. Periksa koneksi lalu coba lagi.',
+      );
+    }
   }
 
   Future<bool> adjustStock({
@@ -139,6 +211,59 @@ class InventoryNotifier extends AsyncNotifier<InventoryState> {
   }
 
   Future<void> syncPendingIncidents() => _syncOfflineIncidents();
+
+  Future<void> _cacheItem(String responseBody) async {
+    final item = Map<String, dynamic>.from(jsonDecode(responseBody) as Map);
+    final db = await DatabaseHelper.instance.database;
+    final existing = await db.query(
+      'inventory_items',
+      columns: ['current_stock'],
+      where: 'id = ?',
+      whereArgs: [item['id'].toString()],
+      limit: 1,
+    );
+    await db.insert('inventory_items', {
+      'id': item['id'].toString(),
+      'name': item['name'],
+      'sku': item['sku'],
+      'item_type': item['item_type'] ?? 'raw_material',
+      'unit': item['unit'] ?? 'pcs',
+      'current_stock':
+          item['current_stock'] ??
+          (existing.isEmpty ? 0.0 : existing.first['current_stock']),
+      'weighted_average_cost': item['weighted_average_cost'] ?? 0.0,
+      'minimum_stock': item['minimum_stock'] ?? 0.0,
+      'is_active': item['is_active'] == false || item['is_active'] == 0 ? 0 : 1,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<bool> _syncAfterMutation() async {
+    final synced = await SyncService.syncInventory();
+    state = AsyncValue.data(await _loadData());
+    return synced;
+  }
+
+  String _responseMessage(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map) {
+        final errors = decoded['errors'];
+        if (errors is Map) {
+          for (final messages in errors.values) {
+            if (messages is List && messages.isNotEmpty) {
+              return messages.first.toString();
+            }
+          }
+        }
+        if (decoded['message'] != null) {
+          return decoded['message'].toString();
+        }
+      }
+    } catch (_) {
+      // The fallback below is clearer than a malformed server response.
+    }
+    return 'Permintaan belum dapat diproses. Coba lagi.';
+  }
 }
 
 final inventoryProvider =

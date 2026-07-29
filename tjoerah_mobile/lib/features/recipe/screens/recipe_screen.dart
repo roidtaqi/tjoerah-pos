@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/router/role_navigation.dart';
@@ -160,6 +161,13 @@ class _RecipeScreenState extends ConsumerState<RecipeScreen> {
                   spacing: 8,
                   runSpacing: 8,
                   children: [
+                    OutlinedButton.icon(
+                      onPressed: _isMutating
+                          ? null
+                          : () => context.go('/inventory'),
+                      icon: const Icon(Icons.inventory_2_outlined),
+                      label: const Text('Persediaan'),
+                    ),
                     OutlinedButton.icon(
                       onPressed: _isMutating ? null : _downloadTemplate,
                       icon: const Icon(Icons.download_outlined),
@@ -401,6 +409,8 @@ class _RecipeScreenState extends ConsumerState<RecipeScreen> {
       _showMessage(
         'Tambahkan bahan aktif di Persediaan sebelum membuat resep.',
         error: true,
+        actionLabel: 'Buka Persediaan',
+        onAction: () => context.go('/inventory'),
       );
       return;
     }
@@ -526,11 +536,19 @@ class _RecipeScreenState extends ConsumerState<RecipeScreen> {
     _showMessage(result.message, error: !result.isSuccess);
   }
 
-  void _showMessage(String message, {bool error = false}) {
+  void _showMessage(
+    String message, {
+    bool error = false,
+    String? actionLabel,
+    VoidCallback? onAction,
+  }) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
         backgroundColor: error ? AppColors.error : null,
+        action: actionLabel == null || onAction == null
+            ? null
+            : SnackBarAction(label: actionLabel, onPressed: onAction),
       ),
     );
   }

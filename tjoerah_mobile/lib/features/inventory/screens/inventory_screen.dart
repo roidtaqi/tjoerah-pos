@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/router/role_navigation.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_layout.dart';
 import '../../../core/utils/app_date_formatter.dart';
@@ -16,6 +17,7 @@ import '../../../shared/components/app_error_state.dart';
 import '../../../shared/components/app_loading_state.dart';
 import '../../../shared/components/app_metric_card.dart';
 import '../../../shared/components/app_search_bar.dart';
+import '../../auth/providers/auth_provider.dart';
 import '../models/inventory_models.dart';
 import '../providers/inventory_provider.dart';
 
@@ -32,6 +34,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen>
   final _searchController = TextEditingController();
   String _query = '';
   bool _lowStockOnly = false;
+  bool _isMutating = false;
 
   @override
   void initState() {
@@ -49,54 +52,52 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen>
   @override
   Widget build(BuildContext context) {
     final inventory = ref.watch(inventoryProvider);
-    final items = inventory.value?.items ?? const <InventoryItemModel>[];
+    final canManage = canManageCatalogForUser(ref.watch(authProvider).user);
     final showTextActions = MediaQuery.sizeOf(context).width >= 760;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Inventori'),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'Stok saat ini'),
-            Tab(text: 'Riwayat pergerakan'),
-          ],
-        ),
+        title: const Text('Persediaan'),
         actions: [
           IconButton(
             tooltip: 'Muat ulang inventori',
-            onPressed: () => ref.read(inventoryProvider.notifier).refresh(),
+            onPressed: _isMutating
+                ? null
+                : () => ref.read(inventoryProvider.notifier).refresh(),
             icon: const Icon(Icons.refresh_rounded),
           ),
           if (showTextActions)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: OutlinedButton.icon(
-                onPressed: () => context.push('/recipes'),
+                onPressed: _isMutating ? null : () => context.push('/recipes'),
                 icon: const Icon(Icons.menu_book_outlined, size: 19),
                 label: const Text('Resep'),
               ),
             ),
-          const SizedBox(width: 8),
-          if (showTextActions)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: FilledButton.icon(
-                onPressed: items.isEmpty
-                    ? null
-                    : () => _showIncidentSheet(items),
-                icon: const Icon(Icons.add_rounded, size: 19),
-                label: const Text('Catat stok'),
-              ),
-            )
-          else
-            IconButton.filled(
-              tooltip: 'Catat perubahan stok',
-              onPressed: items.isEmpty ? null : () => _showIncidentSheet(items),
-              icon: const Icon(Icons.add_rounded),
+          if (!showTextActions)
+            IconButton(
+              tooltip: 'Buka resep dan HPP',
+              onPressed: _isMutating ? null : () => context.push('/recipes'),
+              icon: const Icon(Icons.menu_book_outlined),
             ),
           const SizedBox(width: 8),
         ],
+        bottom: PreferredSize(
+          preferredSize: Size.fromHeight(_isMutating ? 51 : 48),
+          child: Column(
+            children: [
+              TabBar(
+                controller: _tabController,
+                tabs: const [
+                  Tab(text: 'Stok saat ini'),
+                  Tab(text: 'Riwayat pergerakan'),
+                ],
+              ),
+              if (_isMutating) const LinearProgressIndicator(minHeight: 3),
+            ],
+          ),
+        ),
       ),
       body: inventory.when(
         loading: () =>
@@ -108,7 +109,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen>
         data: (state) => TabBarView(
           controller: _tabController,
           children: [
-            _buildStockTab(state.items),
+            _buildStockTab(state.items, canManage: canManage),
             _buildMovementsTab(state.movements),
           ],
         ),
@@ -116,8 +117,12 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen>
     );
   }
 
-  Widget _buildStockTab(List<InventoryItemModel> items) {
+  Widget _buildStockTab(
+    List<InventoryItemModel> items, {
+    required bool canManage,
+  }) {
     final query = _query.trim().toLowerCase();
+    final activeItems = items.where((item) => item.isActive).toList();
     final visibleItems = items.where((item) {
       final matchesQuery =
           query.isEmpty ||
@@ -125,6 +130,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen>
           item.sku.toLowerCase().contains(query);
       return matchesQuery && (!_lowStockOnly || item.isLowStock);
     }).toList();
+    final activeCount = items.where((item) => item.isActive).length;
     final lowStockCount = items.where((item) => item.isLowStock).length;
     final inventoryValue = items.fold<double>(
       0,
@@ -138,6 +144,27 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Wrap(
+              alignment: WrapAlignment.end,
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: activeItems.isEmpty || _isMutating
+                      ? null
+                      : () => _showIncidentSheet(activeItems),
+                  icon: const Icon(Icons.playlist_add_rounded),
+                  label: const Text('Catat stok'),
+                ),
+                if (canManage)
+                  FilledButton.icon(
+                    onPressed: _isMutating ? null : () => _openItemForm(),
+                    icon: const Icon(Icons.add_rounded),
+                    label: const Text('Tambah bahan'),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
             LayoutBuilder(
               builder: (context, constraints) {
                 final itemWidth = constraints.maxWidth >= 800
@@ -152,7 +179,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen>
                       height: 116,
                       child: AppMetricCard(
                         title: 'Item aktif',
-                        value: '${items.length}',
+                        value: '$activeCount',
                         icon: Icons.inventory_2_outlined,
                       ),
                     ),
@@ -211,13 +238,24 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen>
                           ? 'Belum ada item inventori'
                           : 'Item tidak ditemukan',
                       message: items.isEmpty
-                          ? 'Sinkronkan data outlet untuk melihat saldo stok.'
+                          ? canManage
+                                ? 'Tambahkan bahan baku pertama agar dapat digunakan pada resep.'
+                                : 'Belum ada bahan persediaan yang tersedia.'
                           : 'Coba kata kunci atau filter lain.',
                       icon: items.isEmpty
                           ? Icons.inventory_2_outlined
                           : Icons.search_off_rounded,
+                      onAction: items.isEmpty && canManage
+                          ? () => _openItemForm()
+                          : null,
+                      actionLabel: items.isEmpty && canManage
+                          ? 'Tambah bahan'
+                          : null,
                     )
-                  : _InventoryTable(items: visibleItems),
+                  : _InventoryTable(
+                      items: visibleItems,
+                      onEdit: canManage ? _openItemForm : null,
+                    ),
             ),
           ],
         ),
@@ -245,6 +283,36 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen>
                       _MovementRow(movement: movements[index]),
                 ),
               ),
+      ),
+    );
+  }
+
+  Future<void> _openItemForm([InventoryItemModel? item]) async {
+    final draft = await AppBottomSheet.show<InventoryItemDraft>(
+      context,
+      title: item == null ? 'Bahan baru' : 'Edit bahan',
+      subtitle: 'Bahan aktif dapat dipilih saat menyusun resep',
+      child: _InventoryItemForm(item: item),
+    );
+    if (draft == null || !mounted) return;
+
+    setState(() => _isMutating = true);
+    final notifier = ref.read(inventoryProvider.notifier);
+    final result = item == null
+        ? await notifier.createItem(draft)
+        : await notifier.updateItem(item, draft);
+    if (!mounted) return;
+    setState(() => _isMutating = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(result.message),
+        backgroundColor: result.isSuccess ? null : AppColors.error,
+        action: result.isSuccess
+            ? SnackBarAction(
+                label: 'Buka resep',
+                onPressed: () => context.push('/recipes'),
+              )
+            : null,
       ),
     );
   }
@@ -392,10 +460,226 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen>
   }
 }
 
+class _InventoryItemForm extends StatefulWidget {
+  const _InventoryItemForm({this.item});
+
+  final InventoryItemModel? item;
+
+  @override
+  State<_InventoryItemForm> createState() => _InventoryItemFormState();
+}
+
+class _InventoryItemFormState extends State<_InventoryItemForm> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _name;
+  late final TextEditingController _sku;
+  late final TextEditingController _unit;
+  late final TextEditingController _cost;
+  late final TextEditingController _minimumStock;
+  late String _itemType;
+  late bool _isActive;
+
+  @override
+  void initState() {
+    super.initState();
+    final item = widget.item;
+    _name = TextEditingController(text: item?.name);
+    _sku = TextEditingController(text: item?.sku);
+    _unit = TextEditingController(text: item?.unit ?? 'g');
+    _cost = TextEditingController(
+      text: _editableNumber(item?.weightedAverageCost ?? 0),
+    );
+    _minimumStock = TextEditingController(
+      text: _editableNumber(item?.minimumStock ?? 0),
+    );
+    _itemType = item?.itemType ?? 'raw_material';
+    _isActive = item?.isActive ?? true;
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _sku.dispose();
+    _unit.dispose();
+    _cost.dispose();
+    _minimumStock.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final numberFormatter = FilteringTextInputFormatter.allow(
+      RegExp(r'[0-9.,]'),
+    );
+    final unitLabel = _unit.text.trim().isEmpty ? 'satuan' : _unit.text.trim();
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+      child: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextFormField(
+              controller: _name,
+              autofocus: true,
+              textCapitalization: TextCapitalization.words,
+              textInputAction: TextInputAction.next,
+              decoration: const InputDecoration(
+                labelText: 'Nama bahan',
+                hintText: 'Contoh: Biji Kopi House Blend',
+                prefixIcon: Icon(Icons.inventory_2_outlined),
+              ),
+              validator: (value) => (value ?? '').trim().isEmpty
+                  ? 'Nama bahan wajib diisi'
+                  : null,
+            ),
+            const SizedBox(height: 14),
+            TextFormField(
+              controller: _sku,
+              textCapitalization: TextCapitalization.characters,
+              textInputAction: TextInputAction.next,
+              decoration: const InputDecoration(
+                labelText: 'SKU bahan',
+                hintText: 'Contoh: BEAN-01',
+                prefixIcon: Icon(Icons.sell_outlined),
+              ),
+            ),
+            const SizedBox(height: 14),
+            DropdownButtonFormField<String>(
+              initialValue: _itemType,
+              decoration: const InputDecoration(
+                labelText: 'Jenis bahan',
+                prefixIcon: Icon(Icons.category_outlined),
+              ),
+              items: const [
+                DropdownMenuItem(
+                  value: 'raw_material',
+                  child: Text('Bahan baku'),
+                ),
+                DropdownMenuItem(
+                  value: 'semi_finished',
+                  child: Text('Bahan setengah jadi'),
+                ),
+                DropdownMenuItem(value: 'packaging', child: Text('Kemasan')),
+                DropdownMenuItem(value: 'other', child: Text('Lainnya')),
+              ],
+              onChanged: (value) =>
+                  setState(() => _itemType = value ?? 'raw_material'),
+            ),
+            const SizedBox(height: 14),
+            TextFormField(
+              controller: _unit,
+              textInputAction: TextInputAction.next,
+              textCapitalization: TextCapitalization.none,
+              decoration: const InputDecoration(
+                labelText: 'Satuan dasar',
+                hintText: 'g, kg, ml, liter, pcs',
+                prefixIcon: Icon(Icons.scale_outlined),
+              ),
+              onChanged: (_) => setState(() {}),
+              validator: (value) =>
+                  (value ?? '').trim().isEmpty ? 'Satuan wajib diisi' : null,
+            ),
+            const SizedBox(height: 14),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final cost = TextFormField(
+                  controller: _cost,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  inputFormatters: [numberFormatter],
+                  decoration: InputDecoration(
+                    labelText: 'Biaya rata-rata',
+                    prefixText: 'Rp ',
+                    suffixText: '/$unitLabel',
+                    prefixIcon: const Icon(Icons.payments_outlined),
+                  ),
+                  validator: _nonNegativeNumberValidator,
+                );
+                final minimum = TextFormField(
+                  controller: _minimumStock,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  inputFormatters: [numberFormatter],
+                  decoration: InputDecoration(
+                    labelText: 'Batas stok minimum',
+                    suffixText: unitLabel,
+                    prefixIcon: const Icon(Icons.warning_amber_rounded),
+                  ),
+                  validator: _nonNegativeNumberValidator,
+                );
+                if (constraints.maxWidth < 520) {
+                  return Column(
+                    children: [cost, const SizedBox(height: 14), minimum],
+                  );
+                }
+                return Row(
+                  children: [
+                    Expanded(child: cost),
+                    const SizedBox(width: 12),
+                    Expanded(child: minimum),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 8),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Bahan aktif'),
+              subtitle: const Text('Bahan aktif tersedia saat membuat resep'),
+              value: _isActive,
+              onChanged: (value) => setState(() => _isActive = value),
+            ),
+            if (widget.item != null) ...[
+              const Divider(height: 24),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.warehouse_outlined),
+                title: const Text('Saldo stok saat ini'),
+                trailing: Text(
+                  '${widget.item!.currentStock.toStringAsFixed(1)} ${widget.item!.unit}',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
+            AppButton(
+              text: widget.item == null ? 'Tambah bahan' : 'Simpan perubahan',
+              icon: Icons.check_rounded,
+              onPressed: _submit,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _submit() {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    Navigator.pop(
+      context,
+      InventoryItemDraft(
+        name: _name.text,
+        sku: _sku.text,
+        itemType: _itemType,
+        unit: _unit.text,
+        weightedAverageCost: _parseNumber(_cost.text),
+        minimumStock: _parseNumber(_minimumStock.text),
+        isActive: _isActive,
+      ),
+    );
+  }
+}
+
 class _InventoryTable extends StatelessWidget {
-  const _InventoryTable({required this.items});
+  const _InventoryTable({required this.items, this.onEdit});
 
   final List<InventoryItemModel> items;
+  final ValueChanged<InventoryItemModel>? onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -422,6 +706,7 @@ class _InventoryTable extends StatelessWidget {
                       child: Text('SALDO'),
                     ),
                   ),
+                  SizedBox(width: 48),
                 ],
               ),
             ),
@@ -429,8 +714,11 @@ class _InventoryTable extends StatelessWidget {
             child: ListView.separated(
               itemCount: items.length,
               separatorBuilder: (_, _) => const Divider(),
-              itemBuilder: (context, index) =>
-                  _InventoryRow(item: items[index], wide: wide),
+              itemBuilder: (context, index) => _InventoryRow(
+                item: items[index],
+                wide: wide,
+                onEdit: onEdit == null ? null : () => onEdit!(items[index]),
+              ),
             ),
           ),
         ],
@@ -440,10 +728,11 @@ class _InventoryTable extends StatelessWidget {
 }
 
 class _InventoryRow extends StatelessWidget {
-  const _InventoryRow({required this.item, required this.wide});
+  const _InventoryRow({required this.item, required this.wide, this.onEdit});
 
   final InventoryItemModel item;
   final bool wide;
+  final VoidCallback? onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -476,11 +765,25 @@ class _InventoryRow extends StatelessWidget {
                     ),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: Text(
-                        item.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleMedium,
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              item.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.titleMedium,
+                            ),
+                          ),
+                          if (!item.isActive) ...[
+                            const SizedBox(width: 8),
+                            const AppBadge(
+                              text: 'Nonaktif',
+                              color: Color(0xFFE5E7EB),
+                              textColor: AppColors.textSecondary,
+                            ),
+                          ],
+                        ],
                       ),
                     ),
                   ],
@@ -499,6 +802,16 @@ class _InventoryRow extends StatelessWidget {
                     ),
                   ),
                 ),
+              ),
+              SizedBox(
+                width: 48,
+                child: onEdit == null
+                    ? null
+                    : IconButton(
+                        tooltip: 'Edit bahan',
+                        onPressed: onEdit,
+                        icon: const Icon(Icons.edit_outlined),
+                      ),
               ),
             ],
           ),
@@ -533,14 +846,33 @@ class _InventoryRow extends StatelessWidget {
               color: Color(0xFFFEF3C7),
               textColor: AppColors.warning,
             ),
+          if (!item.isActive)
+            const AppBadge(
+              text: 'Nonaktif',
+              color: Color(0xFFE5E7EB),
+              textColor: AppColors.textSecondary,
+            ),
         ],
       ),
       subtitle: Text(
         '${item.sku.isEmpty ? 'Tanpa SKU' : item.sku} - $cost/${item.unit}',
       ),
-      trailing: Text(
-        stock,
-        style: theme.textTheme.titleMedium?.copyWith(color: stockColor),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            stock,
+            style: theme.textTheme.titleMedium?.copyWith(color: stockColor),
+          ),
+          if (onEdit != null) ...[
+            const SizedBox(width: 4),
+            IconButton(
+              tooltip: 'Edit bahan',
+              onPressed: onEdit,
+              icon: const Icon(Icons.edit_outlined),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -597,3 +929,16 @@ String _movementLabel(String type) => switch (type) {
 
 NumberFormat _currency() =>
     NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
+
+String? _nonNegativeNumberValidator(String? value) {
+  final number = double.tryParse((value ?? '').replaceAll(',', '.'));
+  return number == null || number < 0 ? 'Masukkan angka 0 atau lebih' : null;
+}
+
+double _parseNumber(String value) =>
+    double.tryParse(value.replaceAll(',', '.')) ?? 0;
+
+String _editableNumber(double value) {
+  if (value == value.roundToDouble()) return value.toInt().toString();
+  return value.toString();
+}

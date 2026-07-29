@@ -19,7 +19,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 8,
+      version: 9,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -51,6 +51,7 @@ class DatabaseHelper {
     if (oldVersion < 6) await _upgradeCategoriesTable(db);
     if (oldVersion < 7) await _createOfflineAttendanceTable(db);
     if (oldVersion < 8) await _upgradeRecipesTable(db);
+    if (oldVersion < 9) await _upgradeInventoryItemsTable(db);
   }
 
   Future<void> _createDB(Database db, int version) async {
@@ -101,9 +102,11 @@ class DatabaseHelper {
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         sku TEXT,
+        item_type TEXT DEFAULT 'raw_material',
         unit TEXT,
         current_stock REAL DEFAULT 0,
         weighted_average_cost REAL DEFAULT 0,
+        minimum_stock REAL DEFAULT 0,
         is_active INTEGER DEFAULT 1
       )
     ''');
@@ -268,6 +271,15 @@ class DatabaseHelper {
       'ALTER TABLE recipes ADD COLUMN active_version INTEGER DEFAULT 1',
     );
     await _createRecipeVersionsTable(db);
+  }
+
+  Future<void> _upgradeInventoryItemsTable(Database db) async {
+    await db.execute(
+      "ALTER TABLE inventory_items ADD COLUMN item_type TEXT DEFAULT 'raw_material'",
+    );
+    await db.execute(
+      'ALTER TABLE inventory_items ADD COLUMN minimum_stock REAL DEFAULT 0',
+    );
   }
 
   Future<void> _createRecipeVersionsTable(Database db) async {

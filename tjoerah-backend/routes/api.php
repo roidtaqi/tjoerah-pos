@@ -89,7 +89,10 @@ Route::middleware('auth:api')->group(function () {
     Route::post('/kds/tickets/{ticket}/status', [KdsController::class, 'updateStatus']);
 
     Route::get('/inventory', [InventoryController::class, 'index']);
-    Route::post('/inventory/items', [InventoryController::class, 'storeItem']);
+    Route::middleware('role:owner,admin')->group(function () {
+        Route::post('/inventory/items', [InventoryController::class, 'storeItem']);
+        Route::match(['put', 'patch'], '/inventory/items/{inventoryItem}', [InventoryController::class, 'updateItem']);
+    });
     Route::get('/inventory/warehouses', [InventoryController::class, 'warehouses']);
     Route::post('/inventory/warehouses', [InventoryController::class, 'storeWarehouse']);
     Route::get('/inventory/movements', [InventoryController::class, 'movements']);

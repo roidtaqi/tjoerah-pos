@@ -10,6 +10,7 @@ use App\Domains\Inventory\Models\Warehouse;
 use App\Domains\Inventory\Services\InventoryService;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class InventoryController extends Controller
 {
@@ -35,18 +36,29 @@ class InventoryController extends Controller
 
     public function storeItem(Request $request)
     {
-        $item = InventoryItem::create($request->validate([
-            'company_id' => 'nullable|integer|exists:companies,id',
-            'name' => 'required|string|max:255',
-            'sku' => 'nullable|string|max:100',
-            'item_type' => 'nullable|string|max:100',
-            'unit' => 'nullable|string|max:50',
-            'weighted_average_cost' => 'nullable|numeric',
-            'minimum_stock' => 'nullable|numeric',
-            'is_active' => 'boolean',
-        ]));
+        $this->normalizeNullableItemFields($request);
+        $validated = $request->validate($this->itemRules($request));
+        if ($request->user()?->company_id) {
+            $validated['company_id'] = $request->user()->company_id;
+        }
+        $item = InventoryItem::create($validated);
 
         return response()->json($item, 201);
+    }
+
+    public function updateItem(Request $request, InventoryItem $inventoryItem)
+    {
+        $this->ensureItemIsAccessible($request, $inventoryItem);
+        $this->normalizeNullableItemFields($request);
+        $validated = $request->validate(
+            $this->itemRules($request, $inventoryItem),
+        );
+        if ($request->user()?->company_id) {
+            $validated['company_id'] = $request->user()->company_id;
+        }
+        $inventoryItem->update($validated);
+
+        return response()->json($inventoryItem->fresh());
     }
 
     public function warehouses(Request $request)
@@ -153,5 +165,64 @@ class InventoryController extends Controller
         );
 
         return response()->json(['out' => $out, 'in' => $in], 201);
+    }
+
+    private function itemRules(
+        Request $request,
+        ?InventoryItem $inventoryItem = null,
+    ): array {
+        $presence = $inventoryItem ? 'sometimes' : 'required';
+        $companyId = $request->user()?->company_id
+            ?? $request->integer('company_id');
+
+        return [
+            'company_id' => 'nullable|integer|exists:companies,id',
+            'name' => [$presence, 'string', 'max:255'],
+            'sku' => [
+                'nullable',
+                'string',
+                'max:100',
+                Rule::unique('inventory_items', 'sku')
+                    ->where(fn ($query) => $query->where('company_id', $companyId))
+                    ->ignore($inventoryItem),
+            ],
+            'item_type' => [
+                'nullable',
+                Rule::in([
+                    'raw_material',
+                    'semi_finished',
+                    'packaging',
+                    'other',
+                ]),
+            ],
+            'unit' => [$presence, 'string', 'max:50'],
+            'weighted_average_cost' => 'nullable|numeric|min:0',
+            'minimum_stock' => 'nullable|numeric|min:0',
+            'is_active' => 'boolean',
+        ];
+    }
+
+    private function ensureItemIsAccessible(
+        Request $request,
+        InventoryItem $inventoryItem,
+    ): void {
+        $companyId = $request->user()?->company_id;
+        abort_if(
+            $companyId
+                && (int) $inventoryItem->company_id !== (int) $companyId,
+            404,
+        );
+    }
+
+    private function normalizeNullableItemFields(Request $request): void
+    {
+        foreach (['company_id', 'sku'] as $field) {
+            if (
+                $request->exists($field)
+                && trim((string) $request->input($field)) === ''
+            ) {
+                $request->merge([$field => null]);
+            }
+        }
     }
 }

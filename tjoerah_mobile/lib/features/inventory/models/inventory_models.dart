@@ -7,6 +7,7 @@ class InventoryItemModel {
   final double weightedAverageCost;
   final double minimumStock;
   final double currentStock;
+  final bool isActive;
 
   InventoryItemModel({
     required this.id,
@@ -17,9 +18,10 @@ class InventoryItemModel {
     required this.weightedAverageCost,
     required this.minimumStock,
     required this.currentStock,
+    this.isActive = true,
   });
 
-  bool get isLowStock => currentStock < minimumStock;
+  bool get isLowStock => isActive && currentStock < minimumStock;
 
   factory InventoryItemModel.fromJson(Map<String, dynamic> json) {
     return InventoryItemModel(
@@ -33,8 +35,53 @@ class InventoryItemModel {
       ),
       minimumStock: double.parse((json['minimum_stock'] ?? 0).toString()),
       currentStock: double.parse((json['current_stock'] ?? 0).toString()),
+      isActive: json['is_active'] == null
+          ? true
+          : json['is_active'] == true || json['is_active'] == 1,
     );
   }
+}
+
+class InventoryItemDraft {
+  const InventoryItemDraft({
+    required this.name,
+    required this.sku,
+    required this.itemType,
+    required this.unit,
+    required this.weightedAverageCost,
+    required this.minimumStock,
+    required this.isActive,
+  });
+
+  factory InventoryItemDraft.fromItem(InventoryItemModel item) {
+    return InventoryItemDraft(
+      name: item.name,
+      sku: item.sku,
+      itemType: item.itemType,
+      unit: item.unit,
+      weightedAverageCost: item.weightedAverageCost,
+      minimumStock: item.minimumStock,
+      isActive: item.isActive,
+    );
+  }
+
+  final String name;
+  final String sku;
+  final String itemType;
+  final String unit;
+  final double weightedAverageCost;
+  final double minimumStock;
+  final bool isActive;
+
+  Map<String, dynamic> toJson() => {
+    'name': name.trim(),
+    'sku': sku.trim().isEmpty ? null : sku.trim(),
+    'item_type': itemType,
+    'unit': unit.trim(),
+    'weighted_average_cost': weightedAverageCost,
+    'minimum_stock': minimumStock,
+    'is_active': isActive,
+  };
 }
 
 class StockMovementModel {

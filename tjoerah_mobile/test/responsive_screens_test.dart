@@ -163,10 +163,12 @@ void main() {
       size: const Size(390, 844),
       screen: const InventoryScreen(),
       overrides: [
+        authProvider.overrideWith(_PreviewOwnerAuthNotifier.new),
         inventoryProvider.overrideWith(_PreviewInventoryNotifier.new),
       ],
     );
     expect(find.text('Stok menipis'), findsWidgets);
+    expect(find.text('Tambah bahan'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await _render(
