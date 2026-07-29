@@ -18,6 +18,7 @@ class OrderHistoryItem {
     this.tax = 0,
     this.amountReceived,
     this.change = 0,
+    this.customerId,
     this.customerName,
     this.tableId,
     this.tableName,
@@ -38,6 +39,7 @@ class OrderHistoryItem {
   final double tax;
   final double? amountReceived;
   final double change;
+  final String? customerId;
   final String? customerName;
   final String? tableId;
   final String? tableName;
@@ -133,6 +135,9 @@ class OrderHistoryItem {
           DateTime.tryParse(row['created_at']?.toString() ?? '') ??
           DateTime.now(),
       syncStatus: row['status']?.toString() ?? 'pending',
+      customerId:
+          payload['customer_id']?.toString() ??
+          meta['customer_local_id']?.toString(),
       customerName: meta['customer_name']?.toString(),
       tableId: payload['table_id']?.toString(),
       tableName: meta['table_name']?.toString(),
@@ -141,6 +146,58 @@ class OrderHistoryItem {
       paymentBreakdown: rawPayments.map(
         (key, value) => MapEntry(key, _number(value)),
       ),
+    );
+  }
+
+  factory OrderHistoryItem.fromApi(Map<String, dynamic> json) {
+    final meta = json['meta'] is Map
+        ? Map<String, dynamic>.from(json['meta'] as Map)
+        : <String, dynamic>{};
+    final rawItems = json['items'] is List ? json['items'] as List : [];
+    final rawPayments = json['payments'] is List
+        ? json['payments'] as List
+        : [];
+    final payments = <String, double>{};
+    for (final rawPayment in rawPayments.whereType<Map>()) {
+      final payment = Map<String, dynamic>.from(rawPayment);
+      final method = payment['method']?.toString() ?? 'unknown';
+      payments[method] = (payments[method] ?? 0) + _number(payment['amount']);
+    }
+    final items = rawItems.whereType<Map>().map((rawItem) {
+      final item = Map<String, dynamic>.from(rawItem);
+      return OrderHistoryLine(
+        name: item['snapshot_name']?.toString() ?? 'Produk',
+        quantity: _integer(item['qty']),
+        price: _number(item['snapshot_price']),
+        total: _number(item['total']),
+        station: item['station']?.toString(),
+      );
+    }).toList();
+
+    return OrderHistoryItem(
+      id: json['id']?.toString() ?? '',
+      receiptNumber: json['receipt_number']?.toString() ?? '-',
+      orderType: json['order_type']?.toString() ?? 'take_away',
+      paymentMethod: payments.keys.firstOrNull ?? 'unknown',
+      total: _number(json['total']),
+      subtotal: _number(json['subtotal']),
+      discount: _number(json['discount_total']),
+      tax: _number(json['tax']),
+      amountReceived: meta['amount_received'] == null
+          ? null
+          : _number(meta['amount_received']),
+      change: _number(meta['change']),
+      createdAt:
+          DateTime.tryParse(json['created_at']?.toString() ?? '') ??
+          DateTime.now(),
+      syncStatus: 'synced',
+      customerId: json['customer_id']?.toString(),
+      customerName: meta['customer_name']?.toString(),
+      tableId: json['table_id']?.toString(),
+      tableName: meta['table_name']?.toString(),
+      note: meta['note']?.toString(),
+      items: items,
+      paymentBreakdown: payments,
     );
   }
 

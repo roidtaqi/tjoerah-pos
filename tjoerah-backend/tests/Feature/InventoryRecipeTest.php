@@ -2,21 +2,25 @@
 
 namespace Tests\Feature;
 
-use App\Domains\Core\Models\Company;
 use App\Domains\Core\Models\Brand;
+use App\Domains\Core\Models\Company;
 use App\Domains\Core\Models\Outlet;
 use App\Domains\Core\Models\User;
-use App\Domains\Inventory\Models\InventoryItem;
-use App\Domains\Inventory\Models\Warehouse;
 use App\Domains\Inventory\Models\GoodsReceipt;
-use App\Domains\Recipe\Models\Recipe;
-use App\Domains\Recipe\Models\RecipeVersion;
-use App\Domains\Recipe\Models\RecipeItem;
-use App\Domains\POS\Models\Product;
+use App\Domains\Inventory\Models\InventoryItem;
+use App\Domains\Inventory\Models\StockMovement;
+use App\Domains\Inventory\Models\Warehouse;
+use App\Domains\Inventory\Services\InventoryService;
 use App\Domains\POS\Models\Category;
 use App\Domains\POS\Models\Order;
-use App\Domains\Sales\Services\OrderService;
+use App\Domains\POS\Models\Product;
+use App\Domains\Recipe\Models\Recipe;
+use App\Domains\Recipe\Models\RecipeItem;
+use App\Domains\Recipe\Models\RecipeVersion;
+use App\Domains\Recipe\Services\RecipeService;
+use App\Domains\Reporting\Models\SystemAlert;
 use App\Domains\Sales\DTOs\OrderData;
+use App\Domains\Sales\Services\OrderService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -63,7 +67,7 @@ class InventoryRecipeTest extends TestCase
             'user_id' => $user->id,
         ]);
 
-        \App\Domains\Inventory\Services\InventoryService::recordMovement(
+        InventoryService::recordMovement(
             itemId: $coffeeBeans->id,
             warehouseId: $warehouse->id,
             quantity: 1000,
@@ -117,7 +121,7 @@ class InventoryRecipeTest extends TestCase
         ]);
 
         // Propagate / calculate version cost
-        \App\Domains\Recipe\Services\RecipeService::updateRecipeVersionTotalCost($version->id);
+        RecipeService::updateRecipeVersionTotalCost($version->id);
 
         $recipe->refresh();
         $this->assertEquals(15 * 120, (float) $recipe->current_cost);
@@ -134,7 +138,7 @@ class InventoryRecipeTest extends TestCase
                     'snapshot_price' => 20000,
                     'qty' => 2, // 2x Single Espresso = uses 30g beans
                     'total' => 40000,
-                ]
+                ],
             ],
             subtotal: 40000,
             tax: 0,
@@ -147,7 +151,7 @@ class InventoryRecipeTest extends TestCase
 
         // 6. Verify stock deduction
         // 1000g - (15g * 2) = 970g remaining.
-        $totalStock = \App\Domains\Inventory\Models\StockMovement::where('inventory_item_id', $coffeeBeans->id)
+        $totalStock = StockMovement::where('inventory_item_id', $coffeeBeans->id)
             ->where('warehouse_id', $warehouse->id)
             ->sum('quantity');
 
@@ -156,6 +160,10 @@ class InventoryRecipeTest extends TestCase
         // Verify that the order item COGS was written
         $orderItem = $order->items->first();
         $this->assertEquals(15 * 120 * 2, (float) $orderItem->cogs_total);
+
+        $this->actingAs($user, 'api');
+        $response = $this->getJson('/api/reports/products')->assertOk();
+        $this->assertEquals(15 * 120 * 2, (float) $response->json('0.cogs'));
     }
 
     public function test_wastage_exceeding_threshold_triggers_system_alert(): void
@@ -214,7 +222,7 @@ class InventoryRecipeTest extends TestCase
         $response->assertStatus(201);
 
         // Verify SystemAlert was logged
-        $alert = \App\Domains\Reporting\Models\SystemAlert::where('outlet_id', $outlet->id)
+        $alert = SystemAlert::where('outlet_id', $outlet->id)
             ->where('alert_type', 'excessive_waste')
             ->first();
 

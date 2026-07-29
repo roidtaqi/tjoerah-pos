@@ -29,4 +29,18 @@ void main() {
     expect(delivery.tableName, isNull);
     expect(delivery.orderTypeLabel, 'Pesan antar');
   });
+
+  test('cart keeps the selected customer identity until it is cleared', () {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    final cart = container.read(cartProvider.notifier);
+
+    cart.setCustomer('Ayu', id: '42');
+    expect(container.read(cartProvider).customerId, '42');
+    expect(container.read(cartProvider).customerName, 'Ayu');
+
+    cart.setCustomer(null);
+    expect(container.read(cartProvider).customerId, isNull);
+    expect(container.read(cartProvider).customerName, isNull);
+  });
 }

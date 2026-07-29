@@ -36,6 +36,7 @@ class CartState {
     this.tableName,
     this.discountPercent = 0,
     this.note = '',
+    this.customerId,
     this.customerName,
   });
 
@@ -45,6 +46,7 @@ class CartState {
   final String? tableName;
   final double discountPercent;
   final String note;
+  final String? customerId;
   final String? customerName;
 
   double get subtotal => items.fold(0, (sum, item) => sum + item.total);
@@ -68,8 +70,10 @@ class CartState {
     bool clearTable = false,
     double? discountPercent,
     String? note,
+    String? customerId,
     String? customerName,
     bool clearCustomer = false,
+    bool clearCustomerId = false,
   }) {
     return CartState(
       items: items ?? this.items,
@@ -78,6 +82,9 @@ class CartState {
       tableName: clearTable ? null : (tableName ?? this.tableName),
       discountPercent: discountPercent ?? this.discountPercent,
       note: note ?? this.note,
+      customerId: clearCustomer || clearCustomerId
+          ? null
+          : (customerId ?? this.customerId),
       customerName: clearCustomer ? null : (customerName ?? this.customerName),
     );
   }
@@ -105,10 +112,14 @@ class CartNotifier extends Notifier<CartState> {
 
   void setNote(String note) => state = state.copyWith(note: note.trim());
 
-  void setCustomer(String? name) {
+  void setCustomer(String? name, {String? id}) {
     state = name == null || name.trim().isEmpty
         ? state.copyWith(clearCustomer: true)
-        : state.copyWith(customerName: name.trim());
+        : state.copyWith(
+            customerId: id,
+            customerName: name.trim(),
+            clearCustomerId: id == null,
+          );
   }
 
   void addItem(String productId, String name, double price, {String? station}) {

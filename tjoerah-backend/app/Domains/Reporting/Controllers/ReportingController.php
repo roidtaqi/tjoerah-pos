@@ -2,11 +2,12 @@
 
 namespace App\Domains\Reporting\Controllers;
 
-use App\Http\Controllers\Controller;
 use App\Domains\Inventory\Models\InventoryItem;
+use App\Domains\Inventory\Models\StockMovement;
 use App\Domains\POS\Models\Order;
 use App\Domains\Reporting\Models\ProfitabilitySnapshot;
-use App\Domains\Inventory\Models\StockMovement;
+use App\Domains\Reporting\Models\SystemAlert;
+use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -15,7 +16,7 @@ class ReportingController extends Controller
     public function sales(Request $request)
     {
         return response()->json($this->baseOrderQuery($request)
-            ->selectRaw('DATE(created_at) as date, COUNT(*) as orders, SUM(total) as total_sales, SUM(cogs_total) as cogs, SUM(gross_profit) as gross_profit')
+            ->selectRaw('DATE(created_at) as date, COUNT(*) as orders, SUM(total) as total_sales, SUM(cogs_total) as cogs, SUM((subtotal - discount_total) - cogs_total) as gross_profit')
             ->groupBy(DB::raw('DATE(created_at)'))
             ->orderBy('date')
             ->get());
@@ -25,8 +26,10 @@ class ReportingController extends Controller
     {
         return DB::table('order_items')
             ->join('orders', 'orders.id', '=', 'order_items.order_id')
-            ->selectRaw('order_items.product_id, order_items.snapshot_name, SUM(order_items.qty) as qty, SUM(order_items.total) as revenue')
+            ->selectRaw('order_items.product_id, order_items.snapshot_name, SUM(order_items.qty) as qty, SUM(order_items.total) as revenue, SUM(order_items.cogs_total) as cogs')
             ->when($request->integer('outlet_id'), fn ($query, $outletId) => $query->where('orders.outlet_id', $outletId))
+            ->when($request->date('from'), fn ($query, $from) => $query->whereDate('orders.created_at', '>=', $from))
+            ->when($request->date('to'), fn ($query, $to) => $query->whereDate('orders.created_at', '<=', $to))
             ->groupBy('order_items.product_id', 'order_items.snapshot_name')
             ->orderByDesc('revenue')
             ->limit(50)
@@ -53,7 +56,7 @@ class ReportingController extends Controller
     public function outlets(Request $request)
     {
         return $this->baseOrderQuery($request)
-            ->selectRaw('outlet_id, COUNT(*) as orders, SUM(total) as revenue, SUM(cogs_total) as cogs, SUM(gross_profit) as gross_profit')
+            ->selectRaw('outlet_id, COUNT(*) as orders, SUM(total) as revenue, SUM(cogs_total) as cogs, SUM((subtotal - discount_total) - cogs_total) as gross_profit')
             ->groupBy('outlet_id')
             ->orderByDesc('revenue')
             ->get();
@@ -62,7 +65,7 @@ class ReportingController extends Controller
     public function alerts(Request $request)
     {
         return response()->json(
-            \App\Domains\Reporting\Models\SystemAlert::whereNull('resolved_at')
+            SystemAlert::whereNull('resolved_at')
                 ->latest()
                 ->get()
         );

@@ -91,11 +91,60 @@ void main() {
     expect(find.text('Kebijakan'), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('attendance screens fit the SM T220 landscape viewport', (
+    tester,
+  ) async {
+    await _render(
+      tester,
+      ProviderScope(
+        overrides: [
+          attendanceProvider.overrideWith(_PreviewAttendanceNotifier.new),
+        ],
+        child: const AttendanceScreen(),
+      ),
+      size: const Size(1007, 553),
+    );
+    expect(find.text('Absen masuk'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await _render(
+      tester,
+      ProviderScope(
+        overrides: [
+          authProvider.overrideWith(() => _AttendanceAuthNotifier('owner')),
+          attendanceAdminProvider.overrideWith(
+            _PreviewAttendanceAdminNotifier.new,
+          ),
+        ],
+        child: const AttendanceAdminScreen(),
+      ),
+      size: const Size(1007, 553),
+    );
+    expect(find.text('Manajemen absensi'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    for (final tab in ['Jadwal', 'Shift', 'Kebijakan']) {
+      await tester.tap(find.text(tab));
+      await tester.pumpAndSettle();
+      expect(
+        tester.takeException(),
+        isNull,
+        reason: 'Attendance tab $tab overflowed on the SM T220.',
+      );
+    }
+  });
 }
 
-Future<void> _render(WidgetTester tester, Widget child) async {
+Future<void> _render(
+  WidgetTester tester,
+  Widget child, {
+  Size size = const Size(390, 844),
+}) async {
+  await tester.pumpWidget(const SizedBox.shrink());
+  await tester.pump();
   tester.view.devicePixelRatio = 1;
-  tester.view.physicalSize = const Size(390, 844);
+  tester.view.physicalSize = size;
   addTearDown(() {
     tester.view.resetDevicePixelRatio();
     tester.view.resetPhysicalSize();

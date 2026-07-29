@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../shared/components/app_badge.dart';
 import '../../../shared/components/app_bottom_sheet.dart';
 import '../../../shared/components/app_button.dart';
+import '../../customers/providers/customer_provider.dart';
 import '../providers/cart_provider.dart';
 import '../screens/payment_screen.dart';
 
@@ -18,6 +20,7 @@ class OrderCart extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final cart = ref.watch(cartProvider);
     final theme = Theme.of(context);
+    final useFlexibleFooter = MediaQuery.textScalerOf(context).scale(16) > 18;
 
     return Column(
       children: [
@@ -91,24 +94,40 @@ class OrderCart extends ConsumerWidget {
               ),
             ),
           )
-        else ...[
+        else if (useFlexibleFooter) ...[
+          Expanded(flex: 2, child: _buildItemList(cart, theme)),
+          Divider(color: theme.colorScheme.outline),
           Expanded(
-            child: ListView.separated(
-              controller: scrollController,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              itemCount: cart.items.length,
-              separatorBuilder: (_, _) =>
-                  Divider(height: 17, color: theme.colorScheme.outlineVariant),
-              itemBuilder: (context, index) =>
-                  _CartItemRow(item: cart.items[index]),
+            flex: 3,
+            child: SingleChildScrollView(
+              child: Column(
+                children: [
+                  _OrderActions(cart: cart),
+                  Divider(color: theme.colorScheme.outline),
+                  _OrderTotals(cart: cart),
+                ],
+              ),
             ),
           ),
+        ] else ...[
+          Expanded(child: _buildItemList(cart, theme)),
           Divider(color: theme.colorScheme.outline),
           _OrderActions(cart: cart),
           Divider(color: theme.colorScheme.outline),
           _OrderTotals(cart: cart),
         ],
       ],
+    );
+  }
+
+  Widget _buildItemList(CartState cart, ThemeData theme) {
+    return ListView.separated(
+      controller: scrollController,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      itemCount: cart.items.length,
+      separatorBuilder: (_, _) =>
+          Divider(height: 17, color: theme.colorScheme.outlineVariant),
+      itemBuilder: (context, index) => _CartItemRow(item: cart.items[index]),
     );
   }
 
@@ -240,15 +259,33 @@ class _OrderActions extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final customerName = cart.customerName?.trim();
+    final hasCustomer = customerName != null && customerName.isNotEmpty;
+    final customerButton = hasCustomer
+        ? FilledButton.tonalIcon(
+            onPressed: () => _showCustomer(context, ref),
+            icon: const Icon(Icons.person_rounded, size: 19),
+            label: Text(
+              customerName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          )
+        : TextButton.icon(
+            onPressed: () => _showCustomer(context, ref),
+            icon: const Icon(Icons.person_add_alt_1_outlined, size: 19),
+            label: const Text('Pilih pelanggan'),
+          );
+
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Row(
         children: [
-          TextButton.icon(
-            onPressed: () => _showCustomer(context, ref),
-            icon: const Icon(Icons.person_add_alt_1_outlined, size: 19),
-            label: Text(cart.customerName ?? 'Pelanggan'),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 220),
+            child: customerButton,
           ),
           TextButton.icon(
             onPressed: () => _showDiscount(context, ref),
@@ -306,37 +343,109 @@ class _OrderActions extends ConsumerWidget {
   }
 
   Future<void> _showCustomer(BuildContext context, WidgetRef ref) async {
-    final controller = TextEditingController(text: cart.customerName);
     await AppBottomSheet.show<void>(
       context,
-      title: 'Pelanggan',
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: controller,
-              autofocus: true,
-              textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(
-                labelText: 'Nama pelanggan',
-                prefixIcon: Icon(Icons.person_outline_rounded),
-              ),
-            ),
-            const SizedBox(height: 16),
-            AppButton(
-              text: 'Simpan pelanggan',
-              onPressed: () {
-                ref.read(cartProvider.notifier).setCustomer(controller.text);
-                Navigator.pop(context);
-              },
-            ),
-          ],
+      title: 'Pilih pelanggan',
+      subtitle: 'Transaksi akan masuk ke riwayat pelanggan.',
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 460),
+        child: Consumer(
+          builder: (context, ref, _) {
+            final customers = ref.watch(customerProvider);
+            return Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.person_off_outlined),
+                  title: const Text('Pelanggan umum'),
+                  trailing: cart.customerId == null
+                      ? const Icon(Icons.check_circle_rounded)
+                      : null,
+                  onTap: () {
+                    ref.read(cartProvider.notifier).setCustomer(null);
+                    Navigator.pop(context);
+                  },
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: customers.when(
+                    loading: () => const Center(
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    error: (_, _) => Center(
+                      child: TextButton.icon(
+                        onPressed: () =>
+                            ref.read(customerProvider.notifier).refresh(),
+                        icon: const Icon(Icons.refresh_rounded),
+                        label: const Text('Muat ulang pelanggan'),
+                      ),
+                    ),
+                    data: (items) => items.isEmpty
+                        ? const Center(
+                            child: Text('Belum ada pelanggan tersimpan.'),
+                          )
+                        : ListView.separated(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            itemCount: items.length,
+                            separatorBuilder: (_, _) =>
+                                const Divider(height: 1),
+                            itemBuilder: (context, index) {
+                              final customer = items[index];
+                              return ListTile(
+                                leading: CircleAvatar(
+                                  child: Text(
+                                    customer.name
+                                        .trim()
+                                        .characters
+                                        .first
+                                        .toUpperCase(),
+                                  ),
+                                ),
+                                title: Text(
+                                  customer.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                subtitle: Text(
+                                  customer.phone ??
+                                      customer.email ??
+                                      'Tanpa kontak',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                trailing: cart.customerId == customer.id
+                                    ? const Icon(Icons.check_circle_rounded)
+                                    : null,
+                                onTap: () {
+                                  ref
+                                      .read(cartProvider.notifier)
+                                      .setCustomer(
+                                        customer.name,
+                                        id: customer.id,
+                                      );
+                                  Navigator.pop(context);
+                                },
+                              );
+                            },
+                          ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
+                  child: TextButton.icon(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      context.push('/customers');
+                    },
+                    icon: const Icon(Icons.person_add_alt_1_outlined),
+                    label: const Text('Kelola pelanggan'),
+                  ),
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
-    controller.dispose();
   }
 
   Future<void> _showNote(BuildContext context, WidgetRef ref) async {

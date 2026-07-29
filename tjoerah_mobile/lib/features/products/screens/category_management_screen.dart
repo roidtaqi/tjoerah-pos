@@ -536,11 +536,10 @@ class _CategoryFormState extends State<_CategoryForm> {
 
   @override
   Widget build(BuildContext context) {
-    final blockedIds =
-        widget.category == null
-              ? <String>{}
-              : _descendantIds(widget.categories, widget.category!.id)
-          ..add(widget.category!.id);
+    final category = widget.category;
+    final blockedIds = category == null
+        ? <String>{}
+        : (_descendantIds(widget.categories, category.id)..add(category.id));
     final parentOptions =
         widget.categories
             .where((category) => !blockedIds.contains(category.id))

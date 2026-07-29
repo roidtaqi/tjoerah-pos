@@ -27,6 +27,7 @@ class ShellLayout extends ConsumerWidget {
 
     if (showRail) {
       return Scaffold(
+        resizeToAvoidBottomInset: false,
         body: Row(
           children: [
             DecoratedBox(
@@ -66,6 +67,7 @@ class ShellLayout extends ConsumerWidget {
     }
 
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       body: child,
       bottomNavigationBar: DecoratedBox(
         decoration: BoxDecoration(

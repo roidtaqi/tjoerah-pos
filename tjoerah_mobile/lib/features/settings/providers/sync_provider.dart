@@ -87,6 +87,7 @@ class SyncNotifier extends Notifier<SyncState> {
 
     String? error;
     try {
+      await ref.read(customerProvider.notifier).refresh();
       final orderResult = await OrderRepository().syncOfflineOrders();
       await ref.read(inventoryProvider.notifier).syncPendingIncidents();
       final referenceResults = await Future.wait([

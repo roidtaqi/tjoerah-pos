@@ -153,7 +153,7 @@ class _TableManagementScreenState extends ConsumerState<TableManagementScreen> {
                 builder: (context, constraints) => _FloorCanvas(
                   tables: tables,
                   width: math.max(640, constraints.maxWidth),
-                  height: math.max(460, constraints.maxHeight),
+                  height: constraints.maxHeight,
                   positions: _draftPositions,
                   savingPositions: _savingPositions,
                   onMove: _moveTable,
@@ -172,13 +172,17 @@ class _TableManagementScreenState extends ConsumerState<TableManagementScreen> {
     );
   }
 
-  void _moveTable(DiningTableModel table, Offset delta, Size canvasSize) {
-    final current =
-        _draftPositions[table.id] ?? Offset(table.positionX, table.positionY);
+  void _moveTable(
+    DiningTableModel table,
+    Offset visiblePosition,
+    Offset delta,
+    Size canvasSize,
+  ) {
+    final current = _draftPositions[table.id] ?? visiblePosition;
     setState(() {
       _draftPositions[table.id] = Offset(
-        (current.dx + delta.dx).clamp(0, canvasSize.width - 112),
-        (current.dy + delta.dy).clamp(0, canvasSize.height - 76),
+        (current.dx + delta.dx).clamp(0, math.max(0, canvasSize.width - 112)),
+        (current.dy + delta.dy).clamp(0, math.max(0, canvasSize.height - 76)),
       );
     });
   }
@@ -314,7 +318,7 @@ class _FloorCanvas extends StatelessWidget {
   final double height;
   final Map<String, Offset> positions;
   final Set<String> savingPositions;
-  final void Function(DiningTableModel, Offset, Size) onMove;
+  final void Function(DiningTableModel, Offset, Offset, Size) onMove;
   final ValueChanged<DiningTableModel> onMoveEnd;
   final ValueChanged<DiningTableModel> onEdit;
 
@@ -349,34 +353,65 @@ class _FloorCanvas extends StatelessWidget {
                         icon: Icons.add_box_outlined,
                       ),
                     )
-                  : Stack(
-                      children: tables.map((table) {
-                        final raw =
-                            positions[table.id] ??
-                            Offset(table.positionX, table.positionY);
-                        final position = Offset(
-                          raw.dx.clamp(0, width - 112),
-                          raw.dy.clamp(0, height - 76),
-                        );
-                        return Positioned(
-                          left: position.dx,
-                          top: position.dy,
-                          child: _EditableTable(
-                            table: table,
-                            saving: savingPositions.contains(table.id),
-                            onPanUpdate: (delta) =>
-                                onMove(table, delta, canvasSize),
-                            onPanEnd: () => onMoveEnd(table),
-                            onTap: () => onEdit(table),
-                          ),
-                        );
-                      }).toList(),
-                    ),
+                  : Stack(children: _tableWidgets(canvasSize)),
             ),
           ),
         ),
       ),
     );
+  }
+
+  List<Widget> _tableWidgets(Size canvasSize) {
+    final occupied = <Rect>[];
+    final widgets = <Widget>[];
+    for (final table in tables) {
+      final raw =
+          positions[table.id] ?? Offset(table.positionX, table.positionY);
+      final position = _availablePosition(raw, canvasSize, occupied);
+      occupied.add(Rect.fromLTWH(position.dx, position.dy, 112, 76));
+      widgets.add(
+        Positioned(
+          left: position.dx,
+          top: position.dy,
+          child: _EditableTable(
+            table: table,
+            saving: savingPositions.contains(table.id),
+            onPanUpdate: (delta) => onMove(table, position, delta, canvasSize),
+            onPanEnd: () => onMoveEnd(table),
+            onTap: () => onEdit(table),
+          ),
+        ),
+      );
+    }
+    return widgets;
+  }
+
+  Offset _availablePosition(
+    Offset preferred,
+    Size canvasSize,
+    List<Rect> occupied,
+  ) {
+    final maxX = math.max(0.0, canvasSize.width - 112);
+    final maxY = math.max(0.0, canvasSize.height - 76);
+    Offset clamp(Offset value) =>
+        Offset(value.dx.clamp(0, maxX), value.dy.clamp(0, maxY));
+    bool isFree(Offset value) {
+      final candidate = Rect.fromLTWH(value.dx, value.dy, 112, 76).inflate(6);
+      return occupied.every((rect) => !candidate.overlaps(rect));
+    }
+
+    final clamped = clamp(preferred);
+    if (isFree(clamped)) return clamped;
+
+    final columns = math.max(1, ((canvasSize.width - 24) / 128).floor());
+    final rows = math.max(1, ((canvasSize.height - 24) / 96).ceil());
+    for (var index = 0; index < columns * rows; index++) {
+      final candidate = clamp(
+        Offset(24 + (index % columns) * 128, 24 + (index ~/ columns) * 96),
+      );
+      if (isFree(candidate)) return candidate;
+    }
+    return clamped;
   }
 }
 
@@ -398,6 +433,7 @@ class _EditableTable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = _statusColor(table.status);
+    final compact = MediaQuery.textScalerOf(context).scale(14) > 16;
     return Semantics(
       button: true,
       label: '${table.name}, ${table.capacity} kursi',
@@ -421,33 +457,61 @@ class _EditableTable extends StatelessWidget {
               ),
             ],
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Stack(
             children: [
-              Row(
+              Column(
+                mainAxisAlignment: compact
+                    ? MainAxisAlignment.center
+                    : MainAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.table_restaurant_outlined, size: 18, color: color),
-                  const Spacer(),
-                  if (saving)
-                    const SizedBox.square(
-                      dimension: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  else
-                    Icon(Icons.drag_indicator_rounded, size: 17, color: color),
+                  if (!compact) ...[
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.table_restaurant_outlined,
+                          size: 18,
+                          color: color,
+                        ),
+                        const Spacer(),
+                        if (saving)
+                          const SizedBox.square(
+                            dimension: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        else
+                          Icon(
+                            Icons.drag_indicator_rounded,
+                            size: 17,
+                            color: color,
+                          ),
+                      ],
+                    ),
+                    const Spacer(),
+                  ],
+                  Text(
+                    table.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  Text(
+                    '${table.capacity} kursi',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                 ],
               ),
-              const Spacer(),
-              Text(
-                table.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleSmall,
-              ),
-              Text(
-                '${table.capacity} kursi',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
+              if (compact && saving)
+                const Positioned(
+                  top: 0,
+                  right: 0,
+                  child: SizedBox.square(
+                    dimension: 12,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
             ],
           ),
         ),

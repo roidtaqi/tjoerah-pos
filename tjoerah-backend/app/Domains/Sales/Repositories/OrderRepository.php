@@ -2,8 +2,9 @@
 
 namespace App\Domains\Sales\Repositories;
 
-use App\Domains\POS\Models\Order;
 use App\Domains\Core\Models\Outlet;
+use App\Domains\CRM\Models\Customer;
+use App\Domains\POS\Models\Order;
 use App\Domains\Sales\DTOs\OrderData;
 
 class OrderRepository
@@ -53,6 +54,16 @@ class OrderRepository
             'status' => 'completed',
             'paid_at' => now(),
         ]);
+
+        if ($data->customerId) {
+            $customer = Customer::lockForUpdate()->find($data->customerId);
+            if ($customer) {
+                $customer->total_spent = (float) $customer->total_spent + $data->total;
+                $customer->visit_count = (int) $customer->visit_count + 1;
+                $customer->last_purchase_at = now();
+                $customer->save();
+            }
+        }
 
         return $order->load(['items', 'payments']);
     }

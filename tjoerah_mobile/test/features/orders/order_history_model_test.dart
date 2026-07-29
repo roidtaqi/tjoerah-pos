@@ -11,6 +11,7 @@ void main() {
       'status': 'synced',
       'payload': jsonEncode({
         'receipt_number': 'TJ-260719-001',
+        'customer_id': 42,
         'order_type': 'dine_in',
         'table_id': 4,
         'subtotal': 60000,
@@ -54,6 +55,7 @@ void main() {
     expect(printData.itemsByStation.keys, containsAll(['kitchen', 'bar']));
     expect(printData.subtotal, 60000);
     expect(printData.tax, 6050);
+    expect(order.customerId, '42');
   });
 
   test('old orders without station fall back to the kitchen printer', () {
@@ -79,5 +81,40 @@ void main() {
     expect(printData.itemsByStation.keys, ['kitchen']);
     expect(printData.isSynced, isFalse);
     expect(printData.subtotal, 20000);
+  });
+
+  test('parses customer order history returned by the API', () {
+    final order = OrderHistoryItem.fromApi({
+      'id': 'remote-order',
+      'customer_id': 42,
+      'receipt_number': 'TJ-REMOTE-001',
+      'order_type': 'take_away',
+      'subtotal': '35000.00',
+      'discount_total': '0.00',
+      'tax': '3850.00',
+      'total': '38850.00',
+      'created_at': '2026-07-29T11:21:00.000000Z',
+      'items': [
+        {
+          'snapshot_name': 'Kopi Tjoerah',
+          'snapshot_price': '35000.00',
+          'qty': 1,
+          'total': '35000.00',
+          'station': 'bar',
+        },
+      ],
+      'payments': [
+        {'method': 'cash', 'amount': '38850.00'},
+      ],
+      'meta': {'customer_name': 'Ayu'},
+    });
+
+    expect(order.customerId, '42');
+    expect(order.customerName, 'Ayu');
+    expect(order.receiptNumber, 'TJ-REMOTE-001');
+    expect(order.paymentMethod, 'cash');
+    expect(order.paymentBreakdown, {'cash': 38850});
+    expect(order.items.single.name, 'Kopi Tjoerah');
+    expect(order.isPending, isFalse);
   });
 }

@@ -27,6 +27,7 @@ import 'package:tjoerah_mobile/features/pos/models/table_models.dart';
 import 'package:tjoerah_mobile/features/pos/providers/cart_provider.dart';
 import 'package:tjoerah_mobile/features/pos/providers/catalog_provider.dart';
 import 'package:tjoerah_mobile/features/pos/providers/table_provider.dart';
+import 'package:tjoerah_mobile/features/pos/screens/order_type_screen.dart';
 import 'package:tjoerah_mobile/features/pos/screens/payment_screen.dart';
 import 'package:tjoerah_mobile/features/pos/screens/pos_screen.dart';
 import 'package:tjoerah_mobile/features/pos/screens/table_selection_screen.dart';
@@ -37,6 +38,7 @@ import 'package:tjoerah_mobile/features/recipe/screens/recipe_screen.dart';
 import 'package:tjoerah_mobile/features/reports/models/report_models.dart';
 import 'package:tjoerah_mobile/features/reports/providers/reports_provider.dart';
 import 'package:tjoerah_mobile/features/reports/screens/reports_screen.dart';
+import 'package:tjoerah_mobile/features/reports/screens/shift_report_screen.dart';
 import 'package:tjoerah_mobile/features/settings/providers/printer_provider.dart';
 import 'package:tjoerah_mobile/features/settings/providers/sync_provider.dart';
 import 'package:tjoerah_mobile/features/settings/screens/settings_screen.dart';
@@ -54,6 +56,8 @@ void main() {
       overrides: _posOverrides(),
     );
     expect(find.text('Pesanan baru'), findsOneWidget);
+    final customerName = tester.widget<Text>(find.text('Ayu'));
+    expect(customerName.style?.fontWeight, FontWeight.w700);
     expect(tester.takeException(), isNull);
 
     await _render(
@@ -63,6 +67,10 @@ void main() {
       overrides: _posOverrides(),
     );
     expect(find.text('Pesanan saat ini'), findsOneWidget);
+    expect(
+      find.ancestor(of: find.text('Ayu'), matching: find.byType(FilledButton)),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -88,6 +96,43 @@ void main() {
     await tester.tap(find.byTooltip('Tutup'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('empty catalog fits the short SM T220 landscape viewport', (
+    tester,
+  ) async {
+    await _render(
+      tester,
+      size: const Size(1007, 553),
+      screen: const PosScreen(),
+      overrides: [
+        catalogProvider.overrideWith(_EmptyCatalogNotifier.new),
+        cartProvider.overrideWith(_PreviewCartNotifier.new),
+      ],
+    );
+
+    expect(find.text('Katalog masih kosong'), findsOneWidget);
+    expect(find.text('Sinkronkan katalog'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('POS supports larger text on the SM T220 landscape viewport', (
+    tester,
+  ) async {
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    await _render(
+      tester,
+      size: const Size(1007, 553),
+      screen: const PosScreen(),
+      overrides: _posOverrides(),
+      textScaleFactor: 1.3,
+    );
+
+    final exception = tester.takeException();
+    if (exception is FlutterError) {
+      printOnFailure(exception.toDiagnosticsNode().toStringDeep());
+    }
+    expect(exception, isNull);
   });
 
   testWidgets('KDS board adapts between phone and tablet', (tester) async {
@@ -149,12 +194,20 @@ void main() {
 
     await _render(
       tester,
-      size: const Size(1280, 800),
+      size: const Size(1007, 553),
       screen: const TableManagementScreen(),
       overrides: [tableProvider.overrideWith(_PreviewTableNotifier.new)],
     );
     expect(find.text('Atur meja & area'), findsOneWidget);
     expect(find.text('Tambah meja'), findsOneWidget);
+    expect(
+      tester.getBottomRight(find.text('Meja 01')).dy,
+      lessThanOrEqualTo(553),
+    );
+    expect(
+      tester.getCenter(find.text('Meja 01')),
+      isNot(tester.getCenter(find.text('Meja 02'))),
+    );
     expect(tester.takeException(), isNull);
 
     await _render(
@@ -247,6 +300,9 @@ void main() {
       size: const Size(1280, 800),
       screen: const OperationsScreen(),
       overrides: [
+        kdsOverviewProvider.overrideWith(
+          (ref) async => const <KitchenTicketModel>[],
+        ),
         kdsNotifierProvider.overrideWith(_PreviewKdsNotifier.new),
         inventoryProvider.overrideWith(_PreviewInventoryNotifier.new),
         tableProvider.overrideWith(_PreviewTableNotifier.new),
@@ -271,6 +327,184 @@ void main() {
     expect(find.text('Produk teratas'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('core screens fit the SM T220 landscape viewport', (
+    tester,
+  ) async {
+    const size = Size(1007, 553);
+    final scenarios = <({String label, Widget screen, dynamic overrides})>[
+      (label: 'POS', screen: const PosScreen(), overrides: _posOverrides()),
+      (
+        label: 'KDS',
+        screen: const KdsScreen(),
+        overrides: [kdsNotifierProvider.overrideWith(_PreviewKdsNotifier.new)],
+      ),
+      (
+        label: 'Inventory',
+        screen: const InventoryScreen(),
+        overrides: [
+          inventoryProvider.overrideWith(_PreviewInventoryNotifier.new),
+        ],
+      ),
+      (
+        label: 'Reports',
+        screen: const ReportsScreen(),
+        overrides: [reportsProvider.overrideWith(_PreviewReportsNotifier.new)],
+      ),
+      (
+        label: 'Table selection',
+        screen: const TableSelectionScreen(),
+        overrides: [tableProvider.overrideWith(_PreviewTableNotifier.new)],
+      ),
+      (
+        label: 'Table management',
+        screen: const TableManagementScreen(),
+        overrides: [tableProvider.overrideWith(_PreviewTableNotifier.new)],
+      ),
+      (
+        label: 'Recipe',
+        screen: const RecipeScreen(),
+        overrides: [recipeProvider.overrideWith(_PreviewRecipeNotifier.new)],
+      ),
+      (
+        label: 'Order type',
+        screen: const OrderTypeScreen(),
+        overrides: [cartProvider.overrideWith(_PreviewCartNotifier.new)],
+      ),
+      (
+        label: 'Payment',
+        screen: const PaymentScreen(),
+        overrides: [cartProvider.overrideWith(_PreviewCartNotifier.new)],
+      ),
+      (
+        label: 'Shift report',
+        screen: const ShiftReportScreen(),
+        overrides: [
+          reportsProvider.overrideWith(_PreviewReportsNotifier.new),
+          printerProvider.overrideWith(_PreviewPrinterNotifier.new),
+        ],
+      ),
+      (
+        label: 'Settings',
+        screen: const SettingsScreen(),
+        overrides: [
+          authProvider.overrideWith(_PreviewAuthNotifier.new),
+          syncProvider.overrideWith(_PreviewSyncNotifier.new),
+          printerProvider.overrideWith(_PreviewPrinterNotifier.new),
+          themeModeProvider.overrideWith(_PreviewThemeNotifier.new),
+        ],
+      ),
+      (
+        label: 'Orders',
+        screen: const OrdersScreen(),
+        overrides: [
+          orderHistoryProvider.overrideWith(_PreviewOrderHistoryNotifier.new),
+          printerProvider.overrideWith(_PreviewPrinterNotifier.new),
+        ],
+      ),
+      (
+        label: 'Customers',
+        screen: const CustomersScreen(),
+        overrides: [
+          customerProvider.overrideWith(_PreviewCustomerNotifier.new),
+        ],
+      ),
+      (
+        label: 'Outlets',
+        screen: const OutletsScreen(),
+        overrides: [outletProvider.overrideWith(_PreviewOutletNotifier.new)],
+      ),
+      (
+        label: 'Operations',
+        screen: const OperationsScreen(),
+        overrides: [
+          kdsOverviewProvider.overrideWith(
+            (ref) async => const <KitchenTicketModel>[],
+          ),
+          kdsNotifierProvider.overrideWith(_PreviewKdsNotifier.new),
+          inventoryProvider.overrideWith(_PreviewInventoryNotifier.new),
+          tableProvider.overrideWith(_PreviewTableNotifier.new),
+        ],
+      ),
+      (
+        label: 'Dashboard',
+        screen: const DashboardScreen(),
+        overrides: [
+          authProvider.overrideWith(_PreviewOwnerAuthNotifier.new),
+          reportsProvider.overrideWith(_PreviewReportsNotifier.new),
+          inventoryProvider.overrideWith(_PreviewInventoryNotifier.new),
+          outletProvider.overrideWith(_PreviewOutletNotifier.new),
+        ],
+      ),
+    ];
+    final failures = <String>[];
+
+    for (final scenario in scenarios) {
+      await _render(
+        tester,
+        size: size,
+        screen: scenario.screen,
+        overrides: scenario.overrides,
+      );
+      final exception = tester.takeException();
+      if (exception != null) failures.add('${scenario.label}: $exception');
+    }
+
+    expect(failures, isEmpty, reason: failures.join('\n'));
+  });
+
+  testWidgets('transaction screens support larger text on the SM T220', (
+    tester,
+  ) async {
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    const size = Size(1007, 553);
+    final scenarios = <({String label, Widget screen, dynamic overrides})>[
+      (label: 'POS', screen: const PosScreen(), overrides: _posOverrides()),
+      (
+        label: 'Payment',
+        screen: const PaymentScreen(),
+        overrides: [cartProvider.overrideWith(_PreviewCartNotifier.new)],
+      ),
+      (
+        label: 'Orders',
+        screen: const OrdersScreen(),
+        overrides: [
+          orderHistoryProvider.overrideWith(_PreviewOrderHistoryNotifier.new),
+          printerProvider.overrideWith(_PreviewPrinterNotifier.new),
+        ],
+      ),
+      (
+        label: 'Table management',
+        screen: const TableManagementScreen(),
+        overrides: [tableProvider.overrideWith(_PreviewTableNotifier.new)],
+      ),
+      (
+        label: 'Settings',
+        screen: const SettingsScreen(),
+        overrides: [
+          authProvider.overrideWith(_PreviewAuthNotifier.new),
+          syncProvider.overrideWith(_PreviewSyncNotifier.new),
+          printerProvider.overrideWith(_PreviewPrinterNotifier.new),
+          themeModeProvider.overrideWith(_PreviewThemeNotifier.new),
+        ],
+      ),
+    ];
+    final failures = <String>[];
+
+    for (final scenario in scenarios) {
+      await _render(
+        tester,
+        size: size,
+        screen: scenario.screen,
+        overrides: scenario.overrides,
+        textScaleFactor: 1.3,
+      );
+      final exception = tester.takeException();
+      if (exception != null) failures.add('${scenario.label}: $exception');
+    }
+
+    expect(failures, isEmpty, reason: failures.join('\n'));
+  });
 }
 
 Future<void> _render(
@@ -278,9 +512,11 @@ Future<void> _render(
   required Size size,
   required Widget screen,
   required dynamic overrides,
+  double textScaleFactor = 1,
 }) async {
   await tester.pumpWidget(const SizedBox.shrink());
   await tester.pump();
+  tester.platformDispatcher.textScaleFactorTestValue = textScaleFactor;
   tester.view.devicePixelRatio = 1;
   tester.view.physicalSize = size;
   await tester.pumpWidget(
@@ -334,6 +570,11 @@ class _PreviewCatalogNotifier extends CatalogNotifier {
       }),
     );
   }
+}
+
+class _EmptyCatalogNotifier extends CatalogNotifier {
+  @override
+  Future<CatalogState> build() async => const CatalogState();
 }
 
 class _PreviewCartNotifier extends CartNotifier {
@@ -531,7 +772,7 @@ class _PreviewTableNotifier extends TableNotifier {
             ? 'occupied'
             : 'available',
         positionX: 0,
-        positionY: 0,
+        positionY: index == 0 ? 999 : 0,
       ),
     ),
   );

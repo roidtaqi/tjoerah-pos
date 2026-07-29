@@ -52,6 +52,7 @@ class OrderRepository {
     String? tableId,
     String? tableName,
     String? note,
+    String? customerId,
     String? customerName,
     double? amountReceived,
     double change = 0,
@@ -78,9 +79,11 @@ class OrderRepository {
         )
         .toList();
 
+    final parsedCustomerId = int.tryParse(customerId ?? '');
     final payload = <String, dynamic>{
       'outlet_id': await _resolveOutletId(),
       'order_type': orderType,
+      'customer_id': ?parsedCustomerId,
       if (tableId != null) 'table_id': int.tryParse(tableId),
       'subtotal': subtotal,
       'discount_total': discount,
@@ -97,6 +100,8 @@ class OrderRepository {
         if (note != null && note.isNotEmpty) 'note': note,
         if (customerName != null && customerName.isNotEmpty)
           'customer_name': customerName,
+        if (customerId != null && customerId.isNotEmpty)
+          'customer_local_id': customerId,
         if (tableName != null && tableName.isNotEmpty) 'table_name': tableName,
         'amount_received': ?amountReceived,
         if (change > 0) 'change': change,
@@ -108,6 +113,7 @@ class OrderRepository {
       final response = await ApiClient.post('/orders', payload);
       if (response.statusCode == 200 || response.statusCode == 201) {
         await _saveLocal(orderId, payload, timestamp, 'synced');
+        await _recordLocalCustomerVisit(customerId, total, timestamp);
         return CreatedOrder(
           id: orderId,
           receiptNumber: receiptNumber,
@@ -124,12 +130,38 @@ class OrderRepository {
     }
 
     await _saveLocal(orderId, payload, timestamp, 'pending');
+    await _recordLocalCustomerVisit(customerId, total, timestamp);
     return CreatedOrder(
       id: orderId,
       receiptNumber: receiptNumber,
       createdAt: now,
       isSynced: false,
     );
+  }
+
+  Future<void> _recordLocalCustomerVisit(
+    String? customerId,
+    double total,
+    String timestamp,
+  ) async {
+    if (customerId == null || customerId.isEmpty) return;
+
+    try {
+      final database = await DatabaseHelper.instance.database;
+      await database.rawUpdate(
+        '''
+        UPDATE customers
+        SET total_spent = total_spent + ?,
+            visit_count = visit_count + 1,
+            last_purchase_at = ?,
+            updated_at = ?
+        WHERE id = ?
+        ''',
+        [total, timestamp, timestamp, customerId],
+      );
+    } catch (error) {
+      debugPrint('Local customer statistics could not be updated: $error');
+    }
   }
 
   Future<void> _saveLocal(

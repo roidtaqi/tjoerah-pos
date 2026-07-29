@@ -11,6 +11,7 @@ import '../../../core/theme/app_layout.dart';
 import '../../../shared/components/app_bottom_sheet.dart';
 import '../../../shared/components/app_button.dart';
 import '../../../shared/components/app_card.dart';
+import '../../customers/providers/customer_provider.dart';
 import '../../orders/providers/order_history_provider.dart';
 import '../../settings/providers/printer_provider.dart';
 import '../providers/cart_provider.dart';
@@ -106,9 +107,15 @@ class _PaymentPanelState extends ConsumerState<_PaymentPanel> {
           return Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(child: _OrderSummary(cart: cart)),
+              Expanded(
+                child: SingleChildScrollView(child: _OrderSummary(cart: cart)),
+              ),
               const SizedBox(width: 24),
-              Expanded(child: _buildPaymentForm(cart, total)),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: _buildPaymentForm(cart, total),
+                ),
+              ),
             ],
           );
         }
@@ -359,6 +366,7 @@ class _PaymentPanelState extends ConsumerState<_PaymentPanel> {
         tableId: cart.tableId,
         tableName: cart.tableName,
         note: cart.note,
+        customerId: cart.customerId,
         customerName: cart.customerName,
         amountReceived: amountReceived,
         change: change,
@@ -394,6 +402,11 @@ class _PaymentPanelState extends ConsumerState<_PaymentPanel> {
         isSynced: createdOrder.isSynced,
       );
       ref.invalidate(orderHistoryProvider);
+      if (createdOrder.isSynced) {
+        ref.invalidate(customerProvider);
+      } else {
+        await ref.read(customerProvider.notifier).reloadLocal();
+      }
       ref.read(cartProvider.notifier).clearCart();
       if (mounted) await widget.onCompleted(printData);
     } catch (error) {

@@ -2,11 +2,10 @@
 
 namespace App\Domains\CRM\Listeners;
 
-use App\Domains\Sales\Events\OrderCompleted;
 use App\Domains\CRM\Services\LoyaltyService;
-use Illuminate\Contracts\Queue\ShouldQueue;
+use App\Domains\Sales\Events\OrderCompleted;
 
-class AwardLoyaltyPointsListener implements ShouldQueue
+class AwardLoyaltyPointsListener
 {
     /**
      * Handle the event.
@@ -15,7 +14,7 @@ class AwardLoyaltyPointsListener implements ShouldQueue
     {
         $order = $event->order;
 
-        if (!$order->customer_id) {
+        if (! $order->customer_id) {
             return; // No customer associated with the order
         }
 

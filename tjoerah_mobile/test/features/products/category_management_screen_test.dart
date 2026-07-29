@@ -21,6 +21,14 @@ void main() {
     expect(find.text('Tambah kategori'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
+    await tester.tap(find.text('Tambah kategori'));
+    await tester.pumpAndSettle();
+    expect(find.text('Kategori baru'), findsOneWidget);
+    expect(find.text('Nama kategori'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.byTooltip('Tutup'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Kopi'));
     await tester.pumpAndSettle();
     expect(find.text('Edit kategori'), findsOneWidget);
@@ -37,11 +45,29 @@ void main() {
     expect(find.text('Tambah kategori'), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('category management fits the SM T220 landscape viewport', (
+    tester,
+  ) async {
+    await _render(tester, role: 'owner', size: const Size(1007, 553));
+
+    expect(find.text('Kopi'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.text('Kopi'));
+    await tester.pumpAndSettle();
+    expect(find.text('Edit kategori'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }
 
-Future<void> _render(WidgetTester tester, {required String role}) async {
+Future<void> _render(
+  WidgetTester tester, {
+  required String role,
+  Size size = const Size(390, 844),
+}) async {
   tester.view.devicePixelRatio = 1;
-  tester.view.physicalSize = const Size(390, 844);
+  tester.view.physicalSize = size;
   addTearDown(() {
     tester.view.resetDevicePixelRatio();
     tester.view.resetPhysicalSize();

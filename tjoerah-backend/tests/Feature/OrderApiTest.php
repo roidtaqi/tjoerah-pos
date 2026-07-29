@@ -6,7 +6,9 @@ use App\Domains\Core\Models\Brand;
 use App\Domains\Core\Models\Company;
 use App\Domains\Core\Models\Outlet;
 use App\Domains\Core\Models\User;
+use App\Domains\CRM\Models\Customer;
 use App\Domains\POS\Models\Category;
+use App\Domains\POS\Models\Order;
 use App\Domains\POS\Models\Product;
 use App\Domains\Sales\Events\OrderCreated;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -70,6 +72,16 @@ class OrderApiTest extends TestCase
         $this->assertDatabaseHas('payments', ['method' => 'cash', 'amount' => 35000]);
         $this->assertDatabaseHas('kitchen_tickets', ['station' => 'bar', 'status' => 'pending']);
         $this->assertDatabaseHas('kitchen_ticket_items', ['name' => 'Latte', 'qty' => 1]);
+        $this->assertDatabaseHas('orders', [
+            'receipt_number' => 'RCP-001',
+            'cogs_total' => 0,
+            'gross_profit' => 35000,
+        ]);
+
+        Order::where('receipt_number', 'RCP-001')->update(['gross_profit' => 0]);
+        $this->getJson('/api/reports/sales')
+            ->assertOk()
+            ->assertJsonPath('0.gross_profit', 35000);
     }
 
     public function test_realtime_failure_does_not_reject_or_roll_back_order(): void
@@ -136,6 +148,37 @@ class OrderApiTest extends TestCase
             ->assertJsonValidationErrors('receipt_number');
 
         $this->assertDatabaseCount('orders', 1);
+    }
+
+    public function test_customer_statistics_and_history_are_updated_once(): void
+    {
+        [$user, $outlet, $product] = $this->createOrderContext();
+        $customer = Customer::create([
+            'company_id' => $user->company_id,
+            'name' => 'Ayu',
+        ]);
+        $this->actingAs($user, 'api');
+        $payload = $this->orderPayload(
+            $outlet->id,
+            $product->id,
+            'RCP-CUSTOMER',
+            'client-customer',
+        );
+        $payload['customer_id'] = $customer->id;
+
+        $this->postJson('/api/orders', $payload)->assertCreated();
+        $this->postJson('/api/orders', $payload)->assertOk();
+
+        $customer->refresh();
+        $this->assertSame(1, $customer->visit_count);
+        $this->assertSame(35000.0, (float) $customer->total_spent);
+        $this->assertNotNull($customer->last_purchase_at);
+
+        $this->getJson("/api/customers/{$customer->id}/orders")
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.receipt_number', 'RCP-CUSTOMER')
+            ->assertJsonPath('data.0.items.0.snapshot_name', 'Latte');
     }
 
     private function createOrderContext(): array

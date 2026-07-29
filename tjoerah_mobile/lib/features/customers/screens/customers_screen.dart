@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_layout.dart';
+import '../../../core/utils/app_date_formatter.dart';
 import '../../../shared/components/app_badge.dart';
 import '../../../shared/components/app_bottom_sheet.dart';
 import '../../../shared/components/app_button.dart';
@@ -14,6 +15,8 @@ import '../../../shared/components/app_error_state.dart';
 import '../../../shared/components/app_loading_state.dart';
 import '../../../shared/components/app_metric_card.dart';
 import '../../../shared/components/app_search_bar.dart';
+import '../../orders/models/order_history_model.dart';
+import '../../orders/providers/order_history_provider.dart';
 import '../../pos/providers/cart_provider.dart';
 import '../models/customer_model.dart';
 import '../providers/customer_provider.dart';
@@ -190,53 +193,178 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
       context,
       title: customer.name,
       subtitle: customer.phone ?? customer.email ?? 'Tanpa kontak',
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (!customer.isSynced)
-              const Align(
-                alignment: Alignment.centerLeft,
-                child: AppBadge(
-                  text: 'Menunggu sinkron',
-                  color: AppColors.warningSoft,
-                  textColor: AppColors.warning,
-                  icon: Icons.cloud_upload_outlined,
+      child: _CustomerDetails(customer: customer),
+    );
+  }
+}
+
+class _CustomerDetails extends ConsumerWidget {
+  const _CustomerDetails({required this.customer});
+
+  final CustomerModel customer;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final history = ref.watch(customerOrderHistoryProvider(customer.id));
+    final orders = history.asData?.value ?? const <OrderHistoryItem>[];
+    final historyTotal = orders.fold<double>(
+      0,
+      (total, order) => total + order.total,
+    );
+    final visitCount = orders.length > customer.visitCount
+        ? orders.length
+        : customer.visitCount;
+    final totalSpent = historyTotal > customer.totalSpent
+        ? historyTotal
+        : customer.totalSpent;
+    final currency = NumberFormat.currency(
+      locale: 'id_ID',
+      symbol: 'Rp ',
+      decimalDigits: 0,
+    );
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (!customer.isSynced)
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: AppBadge(
+                text: 'Menunggu sinkron',
+                color: AppColors.warningSoft,
+                textColor: AppColors.warning,
+                icon: Icons.cloud_upload_outlined,
+              ),
+            ),
+          const SizedBox(height: 14),
+          _CustomerDetail(label: 'Total kunjungan', value: '$visitCount'),
+          const SizedBox(height: 12),
+          _CustomerDetail(
+            label: 'Total belanja',
+            value: currency.format(totalSpent),
+          ),
+          if (customer.email != null) ...[
+            const SizedBox(height: 12),
+            _CustomerDetail(label: 'Email', value: customer.email!),
+          ],
+          if (customer.notes != null) ...[
+            const SizedBox(height: 18),
+            Text('Catatan', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 6),
+            Text(customer.notes!),
+          ],
+          const SizedBox(height: 22),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Riwayat transaksi',
+                  style: Theme.of(context).textTheme.titleMedium,
                 ),
               ),
-            const SizedBox(height: 14),
-            _CustomerDetail(
-              label: 'Total kunjungan',
-              value: '${customer.visitCount}',
-            ),
-            const SizedBox(height: 12),
-            _CustomerDetail(
-              label: 'Total belanja',
-              value: _currency.format(customer.totalSpent),
-            ),
-            if (customer.email != null) ...[
-              const SizedBox(height: 12),
-              _CustomerDetail(label: 'Email', value: customer.email!),
+              if (history.isLoading)
+                const SizedBox.square(
+                  dimension: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
             ],
-            if (customer.notes != null) ...[
-              const SizedBox(height: 18),
-              Text('Catatan', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 6),
-              Text(customer.notes!),
-            ],
-            const SizedBox(height: 24),
-            AppButton(
-              text: 'Gunakan untuk pesanan',
-              icon: Icons.add_shopping_cart_rounded,
-              onPressed: () {
-                ref.read(cartProvider.notifier).setCustomer(customer.name);
-                Navigator.pop(context);
-                context.go('/pos');
-              },
+          ),
+          const SizedBox(height: 10),
+          history.when(
+            loading: () => const SizedBox(height: 48),
+            error: (_, _) => const Text(
+              'Riwayat belum dapat dimuat. Tarik sinkronisasi lalu coba lagi.',
             ),
-          ],
+            data: (items) => items.isEmpty
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 18),
+                    child: Text('Belum ada transaksi untuk pelanggan ini.'),
+                  )
+                : Column(
+                    children: [
+                      for (final order in items)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: _CustomerOrderRow(
+                            order: order,
+                            formattedTotal: currency.format(order.total),
+                          ),
+                        ),
+                    ],
+                  ),
+          ),
+          const SizedBox(height: 16),
+          AppButton(
+            text: 'Gunakan untuk pesanan',
+            icon: Icons.add_shopping_cart_rounded,
+            onPressed: () {
+              ref
+                  .read(cartProvider.notifier)
+                  .setCustomer(customer.name, id: customer.id);
+              Navigator.pop(context);
+              context.go('/pos');
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CustomerOrderRow extends StatelessWidget {
+  const _CustomerOrderRow({required this.order, required this.formattedTotal});
+
+  final OrderHistoryItem order;
+  final String formattedTotal;
+
+  @override
+  Widget build(BuildContext context) {
+    final date = AppDateFormatter.longDateTime(order.createdAt);
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: Theme.of(context).colorScheme.outline),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: ExpansionTile(
+        leading: const Icon(Icons.receipt_long_outlined),
+        title: Text(
+          order.receiptNumber,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
+        subtitle: Text('$date · ${order.itemCount} item'),
+        trailing: Text(
+          formattedTotal,
+          style: Theme.of(context).textTheme.titleSmall,
+        ),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        children: [
+          for (final item in order.items)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '${item.quantity}x ${item.name}',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    NumberFormat.currency(
+                      locale: 'id_ID',
+                      symbol: 'Rp ',
+                      decimalDigits: 0,
+                    ).format(item.total),
+                  ),
+                ],
+              ),
+            ),
+        ],
       ),
     );
   }

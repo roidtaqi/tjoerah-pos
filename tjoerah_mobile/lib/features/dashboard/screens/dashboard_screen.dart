@@ -69,7 +69,8 @@ class DashboardScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              AppDateFormatter.longDate(DateTime.now()),
+              'Periode ${AppDateFormatter.shortDate(reports.startDate)} - '
+              '${AppDateFormatter.shortDate(reports.endDate)}',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             if (reports.error != null) ...[

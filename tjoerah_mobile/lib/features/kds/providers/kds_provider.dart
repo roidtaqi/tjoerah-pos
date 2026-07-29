@@ -22,8 +22,19 @@ final kdsNotifierProvider =
       return KdsNotifier();
     });
 
+final kdsOverviewProvider = FutureProvider<List<KitchenTicketModel>>((
+  ref,
+) async {
+  final response = await ApiClient.get('/kds/tickets');
+  if (response.statusCode != 200) {
+    throw Exception('Failed to load ticket overview: ${response.statusCode}');
+  }
+  return _decodeTickets(response.body);
+});
+
 class KdsNotifier extends AsyncNotifier<List<KitchenTicketModel>> {
   PusherChannelsFlutter pusher = PusherChannelsFlutter.getInstance();
+  bool _pusherInitialized = false;
 
   @override
   FutureOr<List<KitchenTicketModel>> build() async {
@@ -36,6 +47,8 @@ class KdsNotifier extends AsyncNotifier<List<KitchenTicketModel>> {
   }
 
   Future<void> _initPusher() async {
+    if (_pusherInitialized) return;
+    _pusherInitialized = true;
     try {
       await pusher.init(
         apiKey: "tjoerah-reverb-key",
@@ -49,12 +62,14 @@ class KdsNotifier extends AsyncNotifier<List<KitchenTicketModel>> {
       await pusher.subscribe(channelName: "kds.tickets");
       await pusher.connect();
     } catch (e) {
+      _pusherInitialized = false;
       debugPrint("Pusher Init Error: $e");
     }
   }
 
   void _onPusherEvent(PusherEvent event) {
     debugPrint("Pusher Event Received: ${event.eventName}");
+    ref.invalidate(kdsOverviewProvider);
 
     if (event.eventName == 'App\\Domains\\Sales\\Events\\OrderCreated') {
       final data = jsonDecode(event.data);
@@ -98,13 +113,7 @@ class KdsNotifier extends AsyncNotifier<List<KitchenTicketModel>> {
   Future<List<KitchenTicketModel>> _fetchTickets(String station) async {
     final response = await ApiClient.get('/kds/tickets?station=$station');
     if (response.statusCode == 200) {
-      final Map<String, dynamic> data = jsonDecode(response.body);
-      final List<dynamic> ticketsList = data['data'] ?? [];
-      return ticketsList
-          .map(
-            (json) => KitchenTicketModel.fromJson(json as Map<String, dynamic>),
-          )
-          .toList();
+      return _decodeTickets(response.body);
     } else {
       throw Exception('Failed to load tickets: ${response.statusCode}');
     }
@@ -135,10 +144,20 @@ class KdsNotifier extends AsyncNotifier<List<KitchenTicketModel>> {
       if (response.statusCode != 200) {
         // Rollback on failure
         state = previousState;
+      } else {
+        ref.invalidate(kdsOverviewProvider);
       }
     } catch (e) {
       // Rollback on failure
       state = previousState;
     }
   }
+}
+
+List<KitchenTicketModel> _decodeTickets(String body) {
+  final data = jsonDecode(body) as Map<String, dynamic>;
+  final tickets = data['data'] as List<dynamic>? ?? const [];
+  return tickets
+      .map((json) => KitchenTicketModel.fromJson(json as Map<String, dynamic>))
+      .toList();
 }

@@ -159,17 +159,44 @@ class _OrderContextBar extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final cart = ref.watch(cartProvider);
     final theme = Theme.of(context);
+    final customerName = cart.customerName?.trim();
+    final hasCustomer = customerName != null && customerName.isNotEmpty;
 
     final heading = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Pesanan baru', style: theme.textTheme.titleLarge),
-        const SizedBox(height: 2),
-        Text(
-          cart.customerName ?? 'Pelanggan umum',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.bodySmall,
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            Icon(
+              hasCustomer ? Icons.person_rounded : Icons.person_outline_rounded,
+              size: 18,
+              color: hasCustomer
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                hasCustomer ? customerName : 'Pelanggan umum',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style:
+                    (hasCustomer
+                            ? theme.textTheme.titleSmall
+                            : theme.textTheme.bodyMedium)
+                        ?.copyWith(
+                          color: hasCustomer
+                              ? theme.colorScheme.primary
+                              : theme.colorScheme.onSurfaceVariant,
+                          fontWeight: hasCustomer
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                        ),
+              ),
+            ),
+          ],
         ),
       ],
     );

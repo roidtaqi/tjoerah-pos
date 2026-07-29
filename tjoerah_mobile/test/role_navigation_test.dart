@@ -81,16 +81,70 @@ void main() {
     expect(find.text('Stok'), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('every role shell fits the SM T220 landscape viewport', (
+    tester,
+  ) async {
+    const roles = [
+      ('owner', '/dashboard'),
+      ('area_manager', '/dashboard'),
+      ('outlet_manager', '/pos'),
+      ('cashier', '/pos'),
+      ('barista', '/kds'),
+    ];
+
+    for (final (role, location) in roles) {
+      await _renderShell(
+        tester,
+        role: role,
+        location: location,
+        size: const Size(1007, 553),
+      );
+      expect(
+        tester.takeException(),
+        isNull,
+        reason: '$role navigation overflowed on the SM T220.',
+      );
+    }
+  });
+
+  testWidgets('cashier shell stays stable behind the landscape keyboard', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1007, 553);
+    tester.view.viewInsets = const FakeViewPadding(bottom: 370);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          authProvider.overrideWith(() => _RoleAuthNotifier('cashier')),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.lightTheme,
+          home: const ShellLayout(
+            currentLocation: '/customers',
+            child: ColoredBox(color: Colors.white),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(NavigationRail), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }
 
 Future<void> _renderShell(
   WidgetTester tester, {
   required String role,
   required String location,
+  Size size = const Size(390, 844),
 }) async {
   await tester.pumpWidget(const SizedBox.shrink());
   tester.view.devicePixelRatio = 1;
-  tester.view.physicalSize = const Size(390, 844);
+  tester.view.physicalSize = size;
   await tester.pumpWidget(
     ProviderScope(
       overrides: [authProvider.overrideWith(() => _RoleAuthNotifier(role))],

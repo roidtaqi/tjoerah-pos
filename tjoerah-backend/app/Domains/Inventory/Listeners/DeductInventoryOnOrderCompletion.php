@@ -2,16 +2,15 @@
 
 namespace App\Domains\Inventory\Listeners;
 
-use App\Domains\Sales\Events\OrderCompleted;
 use App\Domains\Inventory\Models\Warehouse;
 use App\Domains\Inventory\Services\InventoryService;
 use App\Domains\Recipe\Models\Recipe;
 use App\Domains\Recipe\Models\RecipeItem;
 use App\Domains\Recipe\Models\RecipeVersion;
-use Illuminate\Contracts\Queue\ShouldQueue;
+use App\Domains\Sales\Events\OrderCompleted;
 use Illuminate\Support\Facades\Log;
 
-class DeductInventoryOnOrderCompletion implements ShouldQueue
+class DeductInventoryOnOrderCompletion
 {
     /**
      * Handle the event.
@@ -25,15 +24,23 @@ class DeductInventoryOnOrderCompletion implements ShouldQueue
             ->where('is_active', true)
             ->first();
 
-        if (!$warehouse) {
+        if (! $warehouse) {
             Log::warning("No active warehouse found for outlet ID: {$order->outlet_id}. Skipping inventory deduction.");
-            return;
         }
 
         // 2. Loop over order items to find recipes and deduct raw materials
         foreach ($order->items as $orderItem) {
+            $cogsTotal = 0.0;
+            if (! $warehouse) {
+                $orderItem->update(['cogs_total' => $cogsTotal]);
+
+                continue;
+            }
+
             $recipe = Recipe::where('product_id', $orderItem->product_id)->first();
-            if (!$recipe) {
+            if (! $recipe) {
+                $orderItem->update(['cogs_total' => $cogsTotal]);
+
                 continue; // No recipe defined for this product
             }
 
@@ -42,18 +49,18 @@ class DeductInventoryOnOrderCompletion implements ShouldQueue
                 ->where('version', $recipe->active_version)
                 ->first();
 
-            if (!$version) {
+            if (! $version) {
+                $orderItem->update(['cogs_total' => $cogsTotal]);
+
                 continue; // No active version found
             }
 
             // Get all items in this recipe version
             $recipeItems = RecipeItem::where('recipe_version_id', $version->id)->get();
-            $cogsTotal = 0.0;
-
             foreach ($recipeItems as $recipeItem) {
                 if ($recipeItem->inventory_item_id) {
                     $qtyDeducted = (float) $recipeItem->quantity * $orderItem->qty;
-                    
+
                     // Deduct stock (negative quantity)
                     InventoryService::recordMovement(
                         itemId: $recipeItem->inventory_item_id,
@@ -75,7 +82,7 @@ class DeductInventoryOnOrderCompletion implements ShouldQueue
 
             // Write final computed COGS to the order item
             $orderItem->update([
-                'cogs_total' => $cogsTotal
+                'cogs_total' => $cogsTotal,
             ]);
         }
 

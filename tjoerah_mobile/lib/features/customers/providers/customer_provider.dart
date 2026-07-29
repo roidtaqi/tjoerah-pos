@@ -28,7 +28,62 @@ class CustomerNotifier extends AsyncNotifier<List<CustomerModel>> {
       'customers',
       orderBy: 'name COLLATE NOCASE ASC',
     );
-    return rows.map(CustomerModel.fromRow).toList();
+    final customers = rows.map(CustomerModel.fromRow).toList();
+    final orders = await database.query(
+      'offline_orders',
+      columns: ['payload', 'created_at'],
+    );
+    final stats = <String, _LocalCustomerStats>{};
+    final idsByName = {
+      for (final customer in customers)
+        customer.name.trim().toLowerCase(): customer.id,
+    };
+    for (final row in orders) {
+      final payload = Map<String, dynamic>.from(
+        jsonDecode(row['payload']?.toString() ?? '{}') as Map,
+      );
+      final meta = payload['meta'] is Map
+          ? Map<String, dynamic>.from(payload['meta'] as Map)
+          : <String, dynamic>{};
+      final id =
+          payload['customer_id']?.toString() ??
+          meta['customer_local_id']?.toString() ??
+          idsByName[meta['customer_name']?.toString().trim().toLowerCase()];
+      if (id == null || id.isEmpty) continue;
+
+      final current = stats[id] ?? const _LocalCustomerStats();
+      final purchasedAt = DateTime.tryParse(
+        row['created_at']?.toString() ?? '',
+      );
+      stats[id] = _LocalCustomerStats(
+        totalSpent:
+            current.totalSpent +
+            (payload['total'] is num
+                ? (payload['total'] as num).toDouble()
+                : double.tryParse(payload['total']?.toString() ?? '') ?? 0),
+        visitCount: current.visitCount + 1,
+        lastPurchaseAt:
+            purchasedAt != null &&
+                (current.lastPurchaseAt == null ||
+                    purchasedAt.isAfter(current.lastPurchaseAt!))
+            ? purchasedAt
+            : current.lastPurchaseAt,
+      );
+    }
+
+    return customers.map((customer) {
+      final local = stats[customer.id];
+      if (local == null) return customer;
+      return customer.copyWithStatistics(
+        totalSpent: local.totalSpent > customer.totalSpent
+            ? local.totalSpent
+            : customer.totalSpent,
+        visitCount: local.visitCount > customer.visitCount
+            ? local.visitCount
+            : customer.visitCount,
+        lastPurchaseAt: local.lastPurchaseAt ?? customer.lastPurchaseAt,
+      );
+    }).toList();
   }
 
   Future<List<CustomerModel>> _pullRemote() async {
@@ -83,6 +138,7 @@ class CustomerNotifier extends AsyncNotifier<List<CustomerModel>> {
         Map<String, dynamic>.from(jsonDecode(response.body) as Map),
       );
       await database.transaction((transaction) async {
+        await _replacePendingOrderCustomer(transaction, temporary.id, remote);
         await transaction.delete(
           'customers',
           where: 'id = ?',
@@ -111,6 +167,10 @@ class CustomerNotifier extends AsyncNotifier<List<CustomerModel>> {
     }
   }
 
+  Future<void> reloadLocal() async {
+    state = AsyncValue.data(await _loadLocal());
+  }
+
   Future<void> _syncPending() async {
     final database = await DatabaseHelper.instance.database;
     final pending = await database.query(
@@ -131,6 +191,11 @@ class CustomerNotifier extends AsyncNotifier<List<CustomerModel>> {
         Map<String, dynamic>.from(jsonDecode(response.body) as Map),
       );
       await database.transaction((transaction) async {
+        await _replacePendingOrderCustomer(
+          transaction,
+          row['id']?.toString() ?? '',
+          remote,
+        );
         await transaction.delete(
           'customers',
           where: 'id = ?',
@@ -144,9 +209,57 @@ class CustomerNotifier extends AsyncNotifier<List<CustomerModel>> {
       });
     }
   }
+
+  Future<void> _replacePendingOrderCustomer(
+    DatabaseExecutor database,
+    String localId,
+    CustomerModel remote,
+  ) async {
+    final remoteId = int.tryParse(remote.id);
+    if (localId.isEmpty || remoteId == null) return;
+
+    final orders = await database.query(
+      'offline_orders',
+      columns: ['id', 'payload'],
+      where: 'status = ?',
+      whereArgs: ['pending'],
+    );
+    for (final order in orders) {
+      final payload = Map<String, dynamic>.from(
+        jsonDecode(order['payload']?.toString() ?? '{}') as Map,
+      );
+      final meta = payload['meta'] is Map
+          ? Map<String, dynamic>.from(payload['meta'] as Map)
+          : <String, dynamic>{};
+      if (meta['customer_local_id']?.toString() != localId) continue;
+
+      payload['customer_id'] = remoteId;
+      meta['customer_local_id'] = remote.id;
+      meta['customer_name'] = remote.name;
+      payload['meta'] = meta;
+      await database.update(
+        'offline_orders',
+        {'payload': jsonEncode(payload)},
+        where: 'id = ?',
+        whereArgs: [order['id']],
+      );
+    }
+  }
 }
 
 final customerProvider =
     AsyncNotifierProvider<CustomerNotifier, List<CustomerModel>>(
       CustomerNotifier.new,
     );
+
+class _LocalCustomerStats {
+  const _LocalCustomerStats({
+    this.totalSpent = 0,
+    this.visitCount = 0,
+    this.lastPurchaseAt,
+  });
+
+  final double totalSpent;
+  final int visitCount;
+  final DateTime? lastPurchaseAt;
+}

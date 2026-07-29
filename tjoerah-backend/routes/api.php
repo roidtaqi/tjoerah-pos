@@ -110,6 +110,7 @@ Route::middleware('auth:api')->group(function () {
 
     Route::get('/customers', [CustomerController::class, 'index']);
     Route::post('/customers', [CustomerController::class, 'store']);
+    Route::get('/customers/{customer}/orders', [CustomerController::class, 'orders']);
     Route::post('/loyalty/earn', [CustomerController::class, 'earn']);
     Route::post('/loyalty/redeem', [CustomerController::class, 'redeem']);
     Route::post('/vouchers/validate', [CustomerController::class, 'validateVoucher']);

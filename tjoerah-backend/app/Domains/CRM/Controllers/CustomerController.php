@@ -2,10 +2,10 @@
 
 namespace App\Domains\CRM\Controllers;
 
-use App\Http\Controllers\Controller;
 use App\Domains\CRM\Models\Customer;
-use App\Domains\CRM\Models\LoyaltyPoint;
 use App\Domains\CRM\Models\Voucher;
+use App\Domains\CRM\Services\LoyaltyService;
+use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 
 class CustomerController extends Controller
@@ -37,6 +37,16 @@ class CustomerController extends Controller
         return response()->json($customer, 201);
     }
 
+    public function orders(Request $request, Customer $customer)
+    {
+        $perPage = min(max($request->integer('per_page', 50), 1), 100);
+
+        return $customer->orders()
+            ->with(['items', 'payments'])
+            ->latest()
+            ->paginate($perPage);
+    }
+
     public function earn(Request $request)
     {
         $validated = $request->validate([
@@ -48,7 +58,7 @@ class CustomerController extends Controller
             'notes' => 'nullable|string',
         ]);
 
-        $points = \App\Domains\CRM\Services\LoyaltyService::earnPoints(
+        $points = LoyaltyService::earnPoints(
             customerId: $validated['customer_id'],
             points: $validated['points'],
             refType: $validated['reference_type'] ?? null,
@@ -71,7 +81,7 @@ class CustomerController extends Controller
             'notes' => 'nullable|string',
         ]);
 
-        $points = \App\Domains\CRM\Services\LoyaltyService::redeemPoints(
+        $points = LoyaltyService::redeemPoints(
             customerId: $validated['customer_id'],
             points: $validated['points'],
             refType: $validated['reference_type'] ?? null,
@@ -80,7 +90,7 @@ class CustomerController extends Controller
             notes: $validated['notes'] ?? null
         );
 
-        if (!$points) {
+        if (! $points) {
             return response()->json(['message' => 'Insufficient points balance'], 422);
         }
 

@@ -18,7 +18,7 @@ class OperationsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final tickets = ref.watch(kdsNotifierProvider).value ?? [];
+    final tickets = ref.watch(kdsOverviewProvider).value ?? [];
     final tableState = ref.watch(tableProvider).value;
     final inventory = ref.watch(inventoryProvider).value;
     final user = ref.watch(authProvider).user;
@@ -40,6 +40,7 @@ class OperationsScreen extends ConsumerWidget {
           IconButton(
             tooltip: 'Muat ulang',
             onPressed: () {
+              ref.invalidate(kdsOverviewProvider);
               ref.invalidate(kdsNotifierProvider);
               ref.read(tableProvider.notifier).refresh();
               ref.read(inventoryProvider.notifier).refresh();

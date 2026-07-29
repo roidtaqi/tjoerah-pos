@@ -23,6 +23,25 @@ class CustomerModel {
   final DateTime? lastPurchaseAt;
   final bool isSynced;
 
+  CustomerModel copyWithStatistics({
+    required double totalSpent,
+    required int visitCount,
+    DateTime? lastPurchaseAt,
+  }) {
+    return CustomerModel(
+      id: id,
+      name: name,
+      phone: phone,
+      email: email,
+      birthday: birthday,
+      notes: notes,
+      totalSpent: totalSpent,
+      visitCount: visitCount,
+      lastPurchaseAt: lastPurchaseAt ?? this.lastPurchaseAt,
+      isSynced: isSynced,
+    );
+  }
+
   factory CustomerModel.fromJson(
     Map<String, dynamic> json, {
     bool isSynced = true,
