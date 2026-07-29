@@ -29,7 +29,25 @@ class PrinterService {
   Future<List<BluetoothDevice>> getDevices() async {
     await _prepareBluetooth();
     try {
-      return await _printer.getBondedDevices();
+      final bondedDevices = await _printer.getBondedDevices();
+      final devicesByAddress = <String, BluetoothDevice>{};
+      for (final device in bondedDevices) {
+        final address = normalizePrinterAddress(device.address);
+        if (address.isEmpty) continue;
+        devicesByAddress[address] = BluetoothDevice(device.name, address);
+      }
+      final devices = devicesByAddress.values.toList()
+        ..sort((left, right) {
+          final leftName = left.name?.trim().toLowerCase() ?? '';
+          final rightName = right.name?.trim().toLowerCase() ?? '';
+          final byName = leftName.compareTo(rightName);
+          return byName != 0
+              ? byName
+              : normalizePrinterAddress(
+                  left.address,
+                ).compareTo(normalizePrinterAddress(right.address));
+        });
+      return devices;
     } catch (error) {
       throw PrinterException('Perangkat Bluetooth tidak dapat dibaca: $error');
     }
@@ -214,6 +232,12 @@ class PrinterService {
       await _printer.printCustom('TJOERAH POS', 2, 1);
       await _printer.printCustom('PRINTER SIAP', 1, 1);
       await _printer.printCustom(profile.destination.title, 1, 1);
+      if (profile.deviceName != null) {
+        await _printer.printCustom(profile.deviceName!, 0, 1);
+      }
+      if (profile.deviceAddress != null) {
+        await _printer.printCustom('MAC ${profile.deviceAddress}', 0, 1);
+      }
       await _printer.printCustom(
         'Kertas ${profile.paperWidth.label} - ${profile.copies} salinan',
         0,

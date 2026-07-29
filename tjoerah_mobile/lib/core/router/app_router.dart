@@ -23,6 +23,7 @@ import '../../features/recipe/screens/recipe_screen.dart';
 import '../../features/reports/screens/reports_screen.dart';
 import '../../features/reports/screens/shift_report_screen.dart';
 import '../../features/settings/screens/settings_screen.dart';
+import '../../features/settings/screens/printer_settings_screen.dart';
 import 'shell_layout.dart';
 
 final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>();
@@ -123,6 +124,11 @@ final GoRouter appRouter = GoRouter(
       path: '/shift-report',
       parentNavigatorKey: _rootNavigatorKey,
       builder: (context, state) => const ShiftReportScreen(),
+    ),
+    GoRoute(
+      path: '/printer-settings',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (context, state) => const PrinterSettingsScreen(),
     ),
     GoRoute(
       path: '/order-type',

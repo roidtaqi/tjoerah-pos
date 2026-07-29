@@ -62,7 +62,7 @@ class PrinterProfile {
   ) {
     return PrinterProfile(
       destination: destination,
-      deviceAddress: json['device_address']?.toString(),
+      deviceAddress: _nullablePrinterAddress(json['device_address']),
       deviceName: json['device_name']?.toString(),
       paperWidth: PrinterPaperWidth.values.firstWhere(
         (width) => width.name == json['paper_width'],
@@ -96,7 +96,11 @@ class PrinterProfile {
   }) {
     return PrinterProfile(
       destination: destination,
-      deviceAddress: clearDevice ? null : (deviceAddress ?? this.deviceAddress),
+      deviceAddress: clearDevice
+          ? null
+          : deviceAddress == null
+          ? this.deviceAddress
+          : _nullablePrinterAddress(deviceAddress),
       deviceName: clearDevice ? null : (deviceName ?? this.deviceName),
       paperWidth: paperWidth ?? this.paperWidth,
       copies: (copies ?? this.copies).clamp(1, 3),
@@ -113,4 +117,12 @@ class PrinterProfile {
     'auto_print': autoPrint,
     'cut_paper': cutPaper,
   };
+}
+
+String normalizePrinterAddress(String? address) =>
+    address?.trim().toUpperCase() ?? '';
+
+String? _nullablePrinterAddress(Object? address) {
+  final normalized = normalizePrinterAddress(address?.toString());
+  return normalized.isEmpty ? null : normalized;
 }

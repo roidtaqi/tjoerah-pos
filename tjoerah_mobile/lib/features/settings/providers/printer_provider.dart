@@ -188,7 +188,8 @@ class PrinterNotifier extends Notifier<PrinterState> {
         );
     await _updateProfile(
       profile,
-      notice: '${profile.destination.title} menggunakan ${profile.deviceName}.',
+      notice:
+          '${profile.destination.title}: ${profile.deviceName} (${profile.deviceAddress}).',
     );
   }
 

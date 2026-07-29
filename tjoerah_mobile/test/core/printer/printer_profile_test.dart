@@ -20,11 +20,21 @@ void main() {
 
     expect(restored.isConfigured, isTrue);
     expect(restored.deviceName, 'Kitchen-01');
+    expect(restored.deviceAddress, 'AA:BB:CC:DD');
     expect(restored.paperWidth, PrinterPaperWidth.mm80);
     expect(restored.paperWidth.characters, 48);
     expect(restored.copies, 2);
     expect(restored.autoPrint, isFalse);
     expect(restored.cutPaper, isFalse);
+  });
+
+  test('printer MAC address is normalized for stable device matching', () {
+    final profile = PrinterProfile.defaults(
+      PrinterDestination.cashier,
+    ).copyWith(deviceAddress: ' aa:bb:cc:dd ', deviceName: 'MTP-II');
+
+    expect(profile.deviceAddress, 'AA:BB:CC:DD');
+    expect(normalizePrinterAddress('aa:01:bb:02'), 'AA:01:BB:02');
   });
 
   test('copy count stays within the supported range', () {
