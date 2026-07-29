@@ -38,6 +38,8 @@ class CartState {
     this.note = '',
     this.customerId,
     this.customerName,
+    this.taxEnabled = true,
+    this.taxRate = 11,
   });
 
   final List<CartItem> items;
@@ -48,11 +50,15 @@ class CartState {
   final String note;
   final String? customerId;
   final String? customerName;
+  final bool taxEnabled;
+  final double taxRate;
 
   double get subtotal => items.fold(0, (sum, item) => sum + item.total);
   double get discount => subtotal * (discountPercent / 100);
   double get taxableAmount => subtotal - discount;
-  double get tax => taxableAmount * 0.11;
+  double get tax => taxEnabled
+      ? (taxableAmount * (taxRate / 100) * 100).roundToDouble() / 100
+      : 0;
   double get total => taxableAmount + tax;
   int get itemCount => items.fold(0, (sum, item) => sum + item.quantity);
 
@@ -74,6 +80,8 @@ class CartState {
     String? customerName,
     bool clearCustomer = false,
     bool clearCustomerId = false,
+    bool? taxEnabled,
+    double? taxRate,
   }) {
     return CartState(
       items: items ?? this.items,
@@ -86,6 +94,8 @@ class CartState {
           ? null
           : (customerId ?? this.customerId),
       customerName: clearCustomer ? null : (customerName ?? this.customerName),
+      taxEnabled: taxEnabled ?? this.taxEnabled,
+      taxRate: taxRate ?? this.taxRate,
     );
   }
 }
@@ -111,6 +121,10 @@ class CartNotifier extends Notifier<CartState> {
   }
 
   void setNote(String note) => state = state.copyWith(note: note.trim());
+
+  void setTaxSettings({required bool enabled, required double rate}) {
+    state = state.copyWith(taxEnabled: enabled, taxRate: rate.clamp(0, 100));
+  }
 
   void setCustomer(String? name, {String? id}) {
     state = name == null || name.trim().isEmpty
@@ -170,7 +184,11 @@ class CartNotifier extends Notifier<CartState> {
   }
 
   void clearCart() {
-    state = CartState(orderType: state.orderType);
+    state = CartState(
+      orderType: state.orderType,
+      taxEnabled: state.taxEnabled,
+      taxRate: state.taxRate,
+    );
   }
 }
 

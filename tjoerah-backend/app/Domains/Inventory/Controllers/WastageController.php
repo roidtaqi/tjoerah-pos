@@ -64,6 +64,7 @@ class WastageController extends Controller
             // Check if daily waste exceeds 3% of daily revenue
             $today = now()->startOfDay();
             $dailyRevenue = (float) Order::where('outlet_id', $validated['outlet_id'])
+                ->whereIn('status', ['paid', 'completed', 'partially_refunded', 'refunded'])
                 ->where('created_at', '>=', $today)
                 ->sum('total');
 

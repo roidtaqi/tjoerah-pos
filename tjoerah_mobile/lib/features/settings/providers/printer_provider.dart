@@ -279,6 +279,22 @@ class PrinterNotifier extends Notifier<PrinterState> {
     return _execute(tasks, initialFailures: production.failures);
   }
 
+  Future<PrinterJobResult> autoPrintReceipt(TransactionPrintData order) {
+    final cashier = state.profile(PrinterDestination.cashier);
+    if (!cashier.isConfigured || !cashier.autoPrint) {
+      return Future.value(const PrinterJobResult());
+    }
+    return _execute([_receiptTask(order, cashier)]);
+  }
+
+  Future<PrinterJobResult> autoPrintKitchenTickets(TransactionPrintData order) {
+    final production = _productionPlan(order, automatic: true);
+    if (production.tasks.isEmpty && production.failures.isEmpty) {
+      return Future.value(const PrinterJobResult());
+    }
+    return _execute(production.tasks, initialFailures: production.failures);
+  }
+
   Future<PrinterJobResult> printShiftReport(Map<String, dynamic> report) {
     final profile = state.profile(PrinterDestination.cashier);
     if (!profile.isConfigured) {

@@ -52,11 +52,24 @@ class OrderHistoryItem {
   final double refundedAmount;
 
   bool get isPending => syncStatus == 'pending';
+  bool get isOpenBill => orderStatus == 'open' || orderStatus == 'held';
+  bool get isPaid => const {
+    'paid',
+    'completed',
+    'partially_refunded',
+    'refunded',
+  }.contains(orderStatus);
   bool get isRefunded =>
       orderStatus == 'refunded' || orderStatus == 'partially_refunded';
   int get itemCount => items.fold(0, (sum, item) => sum + item.quantity);
 
-  TransactionPrintData toPrintData() {
+  TransactionPrintData toPrintData({
+    String? paymentMethod,
+    Map<String, double>? paymentBreakdown,
+    double? amountReceived,
+    double? change,
+    bool isReprint = true,
+  }) {
     final calculatedSubtotal = subtotal > 0
         ? subtotal
         : items.fold<double>(0, (sum, item) => sum + item.total);
@@ -69,8 +82,8 @@ class OrderHistoryItem {
         'delivery' => 'Pesan antar',
         _ => 'Bawa pulang',
       },
-      paymentMethod: paymentMethod,
-      paymentBreakdown: paymentBreakdown,
+      paymentMethod: paymentMethod ?? this.paymentMethod,
+      paymentBreakdown: paymentBreakdown ?? this.paymentBreakdown,
       items: items
           .map(
             (item) => PrintOrderItem(
@@ -86,12 +99,12 @@ class OrderHistoryItem {
       tax: tax,
       total: total,
       isSynced: !isPending,
-      isReprint: true,
+      isReprint: isReprint,
       tableName: tableName ?? (tableId == null ? null : 'Meja $tableId'),
       customerName: customerName,
       note: note,
-      amountReceived: amountReceived,
-      change: change,
+      amountReceived: amountReceived ?? this.amountReceived,
+      change: change ?? this.change,
     );
   }
 
@@ -113,6 +126,7 @@ class OrderHistoryItem {
         .map(
           (item) => OrderHistoryLine(
             id: item['server_order_item_id']?.toString(),
+            productId: item['product_id']?.toString(),
             name: item['snapshot_name']?.toString() ?? 'Produk',
             quantity: _integer(item['qty']),
             price: _number(item['snapshot_price']),
@@ -132,7 +146,7 @@ class OrderHistoryItem {
       paymentMethod:
           payload['payment_method']?.toString() ??
           payload['paymentMethod']?.toString() ??
-          'unknown',
+          (payload['is_open_bill'] == true ? 'open_bill' : 'unknown'),
       total: _number(payload['total']),
       subtotal: _number(payload['subtotal']),
       discount: _number(payload['discount_total']),
@@ -152,7 +166,9 @@ class OrderHistoryItem {
       tableId: payload['table_id']?.toString(),
       tableName: meta['table_name']?.toString(),
       note: meta['note']?.toString(),
-      orderStatus: meta['server_order_status']?.toString() ?? 'completed',
+      orderStatus:
+          meta['server_order_status']?.toString() ??
+          (payload['is_open_bill'] == true ? 'open' : 'completed'),
       refundedAmount: _number(meta['refunded_amount']),
       items: items,
       paymentBreakdown: rawPayments.map(
@@ -179,6 +195,7 @@ class OrderHistoryItem {
       final item = Map<String, dynamic>.from(rawItem);
       return OrderHistoryLine(
         id: item['id']?.toString(),
+        productId: item['product_id']?.toString(),
         name: item['snapshot_name']?.toString() ?? 'Produk',
         quantity: _integer(item['qty']),
         price: _number(item['snapshot_price']),
@@ -197,7 +214,9 @@ class OrderHistoryItem {
       serverId: json['id']?.toString(),
       receiptNumber: json['receipt_number']?.toString() ?? '-',
       orderType: json['order_type']?.toString() ?? 'take_away',
-      paymentMethod: payments.keys.firstOrNull ?? 'unknown',
+      paymentMethod:
+          payments.keys.firstOrNull ??
+          (json['status']?.toString() == 'open' ? 'open_bill' : 'unknown'),
       total: _number(json['total']),
       subtotal: _number(json['subtotal']),
       discount: _number(json['discount_total']),
@@ -232,6 +251,7 @@ class OrderHistoryItem {
 class OrderHistoryLine {
   const OrderHistoryLine({
     this.id,
+    this.productId,
     required this.name,
     required this.quantity,
     required this.price,
@@ -240,6 +260,7 @@ class OrderHistoryLine {
   });
 
   final String? id;
+  final String? productId;
   final String name;
   final int quantity;
   final double price;

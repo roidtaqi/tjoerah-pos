@@ -16,6 +16,9 @@ class Order extends Model
 
     protected $casts = [
         'meta' => 'array',
+        'tax_rate' => 'float',
+        'submitted_at' => 'datetime',
+        'inventory_deducted_at' => 'datetime',
         'completed_at' => 'datetime',
     ];
 

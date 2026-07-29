@@ -29,12 +29,16 @@ class CreatedOrder {
     required this.receiptNumber,
     required this.createdAt,
     required this.isSynced,
+    this.serverId,
+    this.status = 'paid',
   });
 
   final String id;
   final String receiptNumber;
   final DateTime createdAt;
   final bool isSynced;
+  final String? serverId;
+  final String status;
 }
 
 class OrderRepository {
@@ -56,6 +60,7 @@ class OrderRepository {
     String? customerName,
     double? amountReceived,
     double change = 0,
+    bool isOpenBill = false,
   }) async {
     final orderId = _uuid.v4();
     final now = DateTime.now();
@@ -90,13 +95,15 @@ class OrderRepository {
       'tax': tax,
       'service_charge': 0,
       'total': total,
-      'payment_method': paymentMethod,
-      'paymentMethod': paymentMethod,
+      'is_open_bill': isOpenBill,
+      if (!isOpenBill) 'payment_method': paymentMethod,
+      if (!isOpenBill) 'paymentMethod': paymentMethod,
       'receipt_number': receiptNumber,
       'items': itemPayloads,
       'meta': {
         'client_order_id': orderId,
-        'payment_breakdown': paymentBreakdown,
+        if (!isOpenBill) 'payment_breakdown': paymentBreakdown,
+        if (isOpenBill) 'server_order_status': 'open',
         if (note != null && note.isNotEmpty) 'note': note,
         if (customerName != null && customerName.isNotEmpty)
           'customer_name': customerName,
@@ -112,13 +119,28 @@ class OrderRepository {
     try {
       final response = await ApiClient.post('/orders', payload);
       if (response.statusCode == 200 || response.statusCode == 201) {
+        final body = Map<String, dynamic>.from(
+          jsonDecode(response.body) as Map,
+        );
+        final serverOrder = body['data'] is Map
+            ? Map<String, dynamic>.from(body['data'] as Map)
+            : <String, dynamic>{};
+        final meta = Map<String, dynamic>.from(payload['meta'] as Map);
+        meta['server_order_id'] = serverOrder['id']?.toString();
+        meta['server_order_status'] =
+            serverOrder['status']?.toString() ?? (isOpenBill ? 'open' : 'paid');
+        payload['meta'] = meta;
         await _saveLocal(orderId, payload, timestamp, 'synced');
-        await _recordLocalCustomerVisit(customerId, total, timestamp);
+        if (!isOpenBill) {
+          await _recordLocalCustomerVisit(customerId, total, timestamp);
+        }
         return CreatedOrder(
           id: orderId,
           receiptNumber: receiptNumber,
           createdAt: now,
           isSynced: true,
+          serverId: serverOrder['id']?.toString(),
+          status: serverOrder['status']?.toString() ?? 'paid',
         );
       }
       debugPrint(
@@ -130,12 +152,73 @@ class OrderRepository {
     }
 
     await _saveLocal(orderId, payload, timestamp, 'pending');
-    await _recordLocalCustomerVisit(customerId, total, timestamp);
+    if (!isOpenBill) {
+      await _recordLocalCustomerVisit(customerId, total, timestamp);
+    }
     return CreatedOrder(
       id: orderId,
       receiptNumber: receiptNumber,
       createdAt: now,
       isSynced: false,
+      status: isOpenBill ? 'open' : 'paid',
+    );
+  }
+
+  Future<CreatedOrder> createOpenBill({
+    required List<CartItem> items,
+    required double subtotal,
+    required double discount,
+    required double tax,
+    required double total,
+    required String orderType,
+    String? tableId,
+    String? tableName,
+    String? note,
+    String? customerId,
+    String? customerName,
+  }) {
+    return createOrder(
+      items: items,
+      subtotal: subtotal,
+      discount: discount,
+      tax: tax,
+      total: total,
+      orderType: orderType,
+      tableId: tableId,
+      tableName: tableName,
+      note: note,
+      customerId: customerId,
+      customerName: customerName,
+      paymentMethod: 'open_bill',
+      paymentBreakdown: const {},
+      isOpenBill: true,
+    );
+  }
+
+  Future<void> payOpenBill({
+    required String serverId,
+    required String receiptNumber,
+    required String method,
+    required Map<String, double> paymentBreakdown,
+    double? amountReceived,
+    double change = 0,
+  }) async {
+    final response = await ApiClient.post('/orders/$serverId/pay', {
+      'method': method,
+      'payment_breakdown': paymentBreakdown,
+      'amount_received': amountReceived,
+      'change': change,
+    });
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      throw StateError(_responseMessage(response.statusCode, response.body));
+    }
+
+    await _markLocalOrderPaid(
+      receiptNumber: receiptNumber,
+      method: method,
+      paymentBreakdown: paymentBreakdown,
+      amountReceived: amountReceived,
+      change: change,
     );
   }
 
@@ -179,6 +262,41 @@ class OrderRepository {
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
+  Future<void> _markLocalOrderPaid({
+    required String receiptNumber,
+    required String method,
+    required Map<String, double> paymentBreakdown,
+    required double? amountReceived,
+    required double change,
+  }) async {
+    final database = await DatabaseHelper.instance.database;
+    final rows = await database.query('offline_orders');
+    for (final row in rows) {
+      final payload = Map<String, dynamic>.from(
+        jsonDecode(row['payload']?.toString() ?? '{}') as Map,
+      );
+      if (payload['receipt_number']?.toString() != receiptNumber) continue;
+      final meta = payload['meta'] is Map
+          ? Map<String, dynamic>.from(payload['meta'] as Map)
+          : <String, dynamic>{};
+      meta['server_order_status'] = 'paid';
+      meta['payment_breakdown'] = paymentBreakdown;
+      meta['amount_received'] = amountReceived;
+      meta['change'] = change;
+      payload['meta'] = meta;
+      payload['payment_method'] = method;
+      payload['paymentMethod'] = method;
+      payload['is_open_bill'] = false;
+      await database.update(
+        'offline_orders',
+        {'payload': jsonEncode(payload), 'status': 'synced'},
+        where: 'id = ?',
+        whereArgs: [row['id']],
+      );
+      return;
+    }
+  }
+
   Future<OrderSyncResult> syncOfflineOrders() async {
     final database = await DatabaseHelper.instance.database;
     final rows = await database.query(
@@ -196,9 +314,23 @@ class OrderRepository {
       try {
         final response = await ApiClient.post('/orders', payload);
         if (response.statusCode == 200 || response.statusCode == 201) {
+          final body = Map<String, dynamic>.from(
+            jsonDecode(response.body) as Map,
+          );
+          final serverOrder = body['data'] is Map
+              ? Map<String, dynamic>.from(body['data'] as Map)
+              : <String, dynamic>{};
+          final updatedPayload = Map<String, dynamic>.from(payload as Map);
+          final meta = updatedPayload['meta'] is Map
+              ? Map<String, dynamic>.from(updatedPayload['meta'] as Map)
+              : <String, dynamic>{};
+          meta['server_order_id'] = serverOrder['id']?.toString();
+          meta['server_order_status'] =
+              serverOrder['status']?.toString() ?? 'paid';
+          updatedPayload['meta'] = meta;
           await database.update(
             'offline_orders',
-            {'status': 'synced'},
+            {'status': 'synced', 'payload': jsonEncode(updatedPayload)},
             where: 'id = ?',
             whereArgs: [orderId],
           );

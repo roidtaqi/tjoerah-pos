@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/database/database_helper.dart';
 import '../../../core/network/api_client.dart';
+import '../../pos/repositories/order_repository.dart';
 import '../models/order_history_model.dart';
 
 class OrderHistoryMutationResult {
@@ -88,6 +89,46 @@ class OrderHistoryNotifier extends AsyncNotifier<List<OrderHistoryItem>> {
       return const OrderHistoryMutationResult(
         isSuccess: false,
         message: 'Refund belum dapat diproses. Periksa koneksi lalu coba lagi.',
+      );
+    }
+  }
+
+  Future<OrderHistoryMutationResult> payOpenBill({
+    required OrderHistoryItem order,
+    required String method,
+    required Map<String, double> paymentBreakdown,
+    double? amountReceived,
+    double change = 0,
+  }) async {
+    if (order.serverId == null || order.isPending) {
+      return const OrderHistoryMutationResult(
+        isSuccess: false,
+        message:
+            'Sinkronkan open bill terlebih dahulu sebelum menerima pembayaran.',
+      );
+    }
+
+    try {
+      await OrderRepository().payOpenBill(
+        serverId: order.serverId!,
+        receiptNumber: order.receiptNumber,
+        method: method,
+        paymentBreakdown: paymentBreakdown,
+        amountReceived: amountReceived,
+        change: change,
+      );
+      await refresh();
+      return const OrderHistoryMutationResult(
+        isSuccess: true,
+        message: 'Open bill berhasil dibayar.',
+      );
+    } catch (error) {
+      final message = error.toString().replaceFirst('Bad state: ', '');
+      return OrderHistoryMutationResult(
+        isSuccess: false,
+        message: message.isEmpty
+            ? 'Pembayaran open bill belum dapat disimpan.'
+            : message,
       );
     }
   }

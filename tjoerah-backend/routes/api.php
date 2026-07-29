@@ -16,6 +16,7 @@ use App\Domains\POS\Controllers\ProductCatalogController;
 use App\Domains\POS\Controllers\ReceiptController;
 use App\Domains\POS\Controllers\SyncController;
 use App\Domains\POS\Controllers\TableManagementController;
+use App\Domains\POS\Controllers\TransactionSettingsController;
 use App\Domains\Recipe\Controllers\RecipeController;
 use App\Domains\Reporting\Controllers\ReportingController;
 use App\Domains\Sales\Controllers\OrderController;
@@ -71,8 +72,13 @@ Route::middleware('auth:api')->group(function () {
     Route::post('/orders/{order}/refund', [OrderController::class, 'refund'])
         ->middleware('role:owner,admin');
     Route::post('/orders/{order}/complete', [OrderController::class, 'complete']);
+    Route::post('/orders/{order}/pay', [PaymentController::class, 'pay']);
     Route::post('/payments', [PaymentController::class, 'store']);
     Route::get('/receipts/{order}', [ReceiptController::class, 'show']);
+
+    Route::get('/transaction-settings', [TransactionSettingsController::class, 'show']);
+    Route::put('/transaction-settings', [TransactionSettingsController::class, 'update'])
+        ->middleware('role:owner,admin');
 
     Route::get('/floors', [TableManagementController::class, 'floors']);
     Route::post('/floors', [TableManagementController::class, 'storeFloor']);

@@ -207,12 +207,13 @@ class _CustomerDetails extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final history = ref.watch(customerOrderHistoryProvider(customer.id));
     final orders = history.asData?.value ?? const <OrderHistoryItem>[];
-    final historyTotal = orders.fold<double>(
+    final paidOrders = orders.where((order) => order.isPaid).toList();
+    final historyTotal = paidOrders.fold<double>(
       0,
       (total, order) => total + order.total,
     );
-    final visitCount = orders.length > customer.visitCount
-        ? orders.length
+    final visitCount = paidOrders.length > customer.visitCount
+        ? paidOrders.length
         : customer.visitCount;
     final totalSpent = historyTotal > customer.totalSpent
         ? historyTotal
@@ -334,7 +335,10 @@ class _CustomerOrderRow extends StatelessWidget {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
-        subtitle: Text('$date · ${order.itemCount} item'),
+        subtitle: Text(
+          '$date · ${order.itemCount} item'
+          '${order.isOpenBill ? ' · Belum lunas' : ''}',
+        ),
         trailing: Text(
           formattedTotal,
           style: Theme.of(context).textTheme.titleSmall,

@@ -334,6 +334,7 @@ class DatabaseHelper {
         SUM(CAST(json_extract(payload, '\$.total') AS REAL)) as total_revenue
       FROM offline_orders
       WHERE created_at >= ? AND created_at <= ?
+        AND COALESCE(json_extract(payload, '\$.is_open_bill'), 0) = 0
     ''',
       [startOfDay, endOfDay],
     );
@@ -346,6 +347,7 @@ class DatabaseHelper {
         SUM(CAST(json_extract(payload, '\$.total') AS REAL)) as amount
       FROM offline_orders
       WHERE created_at >= ? AND created_at <= ?
+        AND COALESCE(json_extract(payload, '\$.is_open_bill'), 0) = 0
       GROUP BY payment_method
     ''',
       [startOfDay, endOfDay],

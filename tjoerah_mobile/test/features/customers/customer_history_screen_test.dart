@@ -42,6 +42,27 @@ void main() {
                   ],
                   paymentBreakdown: const {'cash': 38850},
                 ),
+                OrderHistoryItem(
+                  id: 'order-2',
+                  receiptNumber: 'TJ-260729-002',
+                  orderType: 'dine_in',
+                  paymentMethod: 'open_bill',
+                  total: 55500,
+                  createdAt: DateTime(2026, 7, 29, 12),
+                  syncStatus: 'synced',
+                  customerId: customerId,
+                  customerName: 'Ayu',
+                  orderStatus: 'open',
+                  items: const [
+                    OrderHistoryLine(
+                      name: 'Makan Siang',
+                      quantity: 1,
+                      price: 50000,
+                      total: 50000,
+                    ),
+                  ],
+                  paymentBreakdown: const {},
+                ),
               ];
             }),
           ],
@@ -58,7 +79,15 @@ void main() {
 
       expect(find.text('Riwayat transaksi'), findsOneWidget);
       expect(find.text('TJ-260729-001'), findsOneWidget);
+      expect(find.text('TJ-260729-002'), findsOneWidget);
       expect(find.text('29 Juli 2026, 11:21 · 1 item'), findsOneWidget);
+      expect(
+        find.text('29 Juli 2026, 12:00 · 1 item · Belum lunas'),
+        findsOneWidget,
+      );
+      expect(find.text('Total kunjungan'), findsOneWidget);
+      expect(find.text('1'), findsNWidgets(2));
+      expect(find.text('2'), findsNothing);
       expect(find.text('Rp 38.850'), findsWidgets);
       expect(tester.takeException(), isNull);
 

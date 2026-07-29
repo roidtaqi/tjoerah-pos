@@ -3,11 +3,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/printer/print_job.dart';
 import '../../../shared/components/app_badge.dart';
 import '../../../shared/components/app_bottom_sheet.dart';
 import '../../../shared/components/app_button.dart';
 import '../../customers/providers/customer_provider.dart';
+import '../../orders/providers/order_history_provider.dart';
+import '../../settings/providers/printer_provider.dart';
 import '../providers/cart_provider.dart';
+import '../repositories/order_repository.dart';
 import '../screens/payment_screen.dart';
 
 class OrderCart extends ConsumerWidget {
@@ -20,7 +24,9 @@ class OrderCart extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final cart = ref.watch(cartProvider);
     final theme = Theme.of(context);
-    final useFlexibleFooter = MediaQuery.textScalerOf(context).scale(16) > 18;
+    final useFlexibleFooter =
+        MediaQuery.textScalerOf(context).scale(16) > 18 ||
+        MediaQuery.sizeOf(context).height < 560;
 
     return Column(
       children: [
@@ -484,13 +490,21 @@ class _OrderActions extends ConsumerWidget {
   }
 }
 
-class _OrderTotals extends StatelessWidget {
+class _OrderTotals extends ConsumerStatefulWidget {
   const _OrderTotals({required this.cart});
 
   final CartState cart;
 
   @override
+  ConsumerState<_OrderTotals> createState() => _OrderTotalsState();
+}
+
+class _OrderTotalsState extends ConsumerState<_OrderTotals> {
+  bool _isSavingOpenBill = false;
+
+  @override
   Widget build(BuildContext context) {
+    final cart = widget.cart;
     final theme = Theme.of(context);
     final currency = NumberFormat.currency(
       locale: 'id_ID',
@@ -512,8 +526,13 @@ class _OrderTotals extends StatelessWidget {
                 color: theme.colorScheme.secondary,
               ),
             ],
-            const SizedBox(height: 6),
-            _TotalRow(label: 'Pajak 11%', value: currency.format(cart.tax)),
+            if (cart.taxEnabled && cart.taxRate > 0) ...[
+              const SizedBox(height: 6),
+              _TotalRow(
+                label: 'Pajak ${_percentage(cart.taxRate)}',
+                value: currency.format(cart.tax),
+              ),
+            ],
             const SizedBox(height: 12),
             _TotalRow(
               label: 'Total',
@@ -521,6 +540,24 @@ class _OrderTotals extends StatelessWidget {
               emphasize: true,
             ),
             const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _isSavingOpenBill ? null : _saveOpenBill,
+                icon: _isSavingOpenBill
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.bookmark_add_outlined),
+                label: Text(
+                  _isSavingOpenBill
+                      ? 'Menyimpan open bill...'
+                      : 'Simpan sebagai open bill',
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
             AppButton(
               text: 'Bayar ${currency.format(cart.total)}',
               icon: Icons.arrow_forward_rounded,
@@ -530,6 +567,128 @@ class _OrderTotals extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _saveOpenBill() async {
+    final cart = widget.cart;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Buat open bill?'),
+        content: const Text(
+          'Pesanan akan disimpan sebagai belum dibayar dan dikirim ke dapur. '
+          'Stok bahan dikurangi satu kali saat pesanan berhasil dikirim.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Batal'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            icon: const Icon(Icons.send_outlined),
+            label: const Text('Simpan & kirim'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _isSavingOpenBill = true);
+    try {
+      final created = await OrderRepository().createOpenBill(
+        items: cart.items,
+        subtotal: cart.subtotal,
+        discount: cart.discount,
+        tax: cart.tax,
+        total: cart.total,
+        orderType: cart.orderType,
+        tableId: cart.tableId,
+        tableName: cart.tableName,
+        note: cart.note,
+        customerId: cart.customerId,
+        customerName: cart.customerName,
+      );
+      final printData = TransactionPrintData(
+        orderId: created.id,
+        receiptNumber: created.receiptNumber,
+        createdAt: created.createdAt,
+        orderTypeLabel: cart.orderTypeLabel,
+        tableName: cart.tableName,
+        customerName: cart.customerName,
+        note: cart.note,
+        paymentMethod: 'open_bill',
+        paymentBreakdown: const {},
+        items: cart.items
+            .map(
+              (item) => PrintOrderItem(
+                name: item.name,
+                quantity: item.quantity,
+                unitPrice: item.price,
+                station: item.station,
+              ),
+            )
+            .toList(),
+        subtotal: cart.subtotal,
+        discount: cart.discount,
+        tax: cart.tax,
+        total: cart.total,
+        isSynced: created.isSynced,
+      );
+      ref.invalidate(orderHistoryProvider);
+      final printer = ref.read(printerProvider.notifier);
+      await printer.autoPrintKitchenTickets(printData);
+      if (!mounted) return;
+      final printBill = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) {
+          final canPrint = ref.read(printerProvider).hasCashierPrinter;
+          return AlertDialog(
+            icon: const Icon(Icons.bookmark_added_outlined),
+            title: const Text('Open bill tersimpan'),
+            content: Text(
+              created.isSynced
+                  ? 'Pesanan sudah dikirim ke dapur. Cetak tagihan belum lunas untuk pelanggan bila diperlukan.'
+                  : 'Pesanan tersimpan di perangkat dan akan dikirim ke server saat sinkronisasi.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Selesai'),
+              ),
+              FilledButton.icon(
+                onPressed: canPrint
+                    ? () => Navigator.pop(dialogContext, true)
+                    : null,
+                icon: const Icon(Icons.receipt_long_outlined),
+                label: const Text('Cetak tagihan'),
+              ),
+            ],
+          );
+        },
+      );
+      if (printBill == true) {
+        await printer.printReceipt(printData);
+      }
+      ref.read(cartProvider.notifier).clearCart();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            created.isSynced
+                ? 'Open bill ${created.receiptNumber} tersimpan dan dikirim ke dapur.'
+                : 'Open bill tersimpan di perangkat dan akan dikirim saat sinkronisasi.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Open bill belum dapat disimpan: $error')),
+      );
+    } finally {
+      if (mounted) setState(() => _isSavingOpenBill = false);
+    }
   }
 }
 
@@ -566,4 +725,11 @@ class _TotalRow extends StatelessWidget {
       ],
     );
   }
+}
+
+String _percentage(double value) {
+  final formatted = value == value.roundToDouble()
+      ? value.toInt().toString()
+      : value.toStringAsFixed(2).replaceFirst(RegExp(r'0+$'), '');
+  return '$formatted%';
 }

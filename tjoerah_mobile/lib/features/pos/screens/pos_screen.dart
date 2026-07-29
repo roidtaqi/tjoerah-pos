@@ -8,6 +8,7 @@ import '../../../shared/components/app_bottom_sheet.dart';
 import '../../../shared/components/app_search_bar.dart';
 import '../providers/cart_provider.dart';
 import '../providers/catalog_provider.dart';
+import '../../settings/providers/transaction_settings_provider.dart';
 import '../widgets/category_chips.dart';
 import '../widgets/floating_cart.dart';
 import '../widgets/order_cart.dart';
@@ -20,6 +21,20 @@ class PosScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final isWide = AppBreakpoints.isWide(context);
     final cart = ref.watch(cartProvider);
+    final transactionSettings = ref.watch(transactionSettingsProvider);
+    final settings = transactionSettings.asData?.value;
+    if (settings != null &&
+        (cart.taxEnabled != settings.taxEnabled ||
+            cart.taxRate != settings.taxRate)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ref
+            .read(cartProvider.notifier)
+            .setTaxSettings(
+              enabled: settings.taxEnabled,
+              rate: settings.taxRate,
+            );
+      });
+    }
 
     return Scaffold(
       appBar: AppBar(

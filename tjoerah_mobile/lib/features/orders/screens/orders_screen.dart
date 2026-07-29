@@ -11,18 +11,20 @@ import '../../../core/theme/app_layout.dart';
 import '../../../core/utils/app_date_formatter.dart';
 import '../../../shared/components/app_badge.dart';
 import '../../../shared/components/app_bottom_sheet.dart';
+import '../../../shared/components/app_button.dart';
 import '../../../shared/components/app_card.dart';
 import '../../../shared/components/app_empty_state.dart';
 import '../../../shared/components/app_error_state.dart';
 import '../../../shared/components/app_loading_state.dart';
 import '../../../shared/components/app_metric_card.dart';
 import '../../../shared/components/app_search_bar.dart';
-import '../../settings/providers/printer_provider.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../../customers/providers/customer_provider.dart';
+import '../../settings/providers/printer_provider.dart';
 import '../models/order_history_model.dart';
 import '../providers/order_history_provider.dart';
 
-enum _OrderFilter { all, synced, pending }
+enum _OrderFilter { all, openBill, synced, pending }
 
 class OrdersScreen extends ConsumerStatefulWidget {
   const OrdersScreen({super.key});
@@ -85,7 +87,9 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
           order.createdAt.day == today.day,
     );
     final pending = orders.where((order) => order.isPending).length;
-    final revenue = todayOrders.fold<double>(
+    final openBills = orders.where((order) => order.isOpenBill).length;
+    final paidToday = todayOrders.where((order) => order.isPaid);
+    final revenue = paidToday.fold<double>(
       0,
       (sum, order) => sum + order.total - order.refundedAmount,
     );
@@ -93,6 +97,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
     final filtered = orders.where((order) {
       final matchesFilter = switch (_filter) {
         _OrderFilter.all => true,
+        _OrderFilter.openBill => order.isOpenBill,
         _OrderFilter.synced => !order.isPending,
         _OrderFilter.pending => order.isPending,
       };
@@ -113,9 +118,10 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
         padding: AppSpacing.page(context),
         children: [
           _Metrics(
-            orderCount: todayOrders.length,
+            orderCount: paidToday.length,
             revenue: _currency.format(revenue),
             pendingCount: pending,
+            openBillCount: openBills,
           ),
           const SizedBox(height: 20),
           AppSearchBar(
@@ -134,6 +140,10 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
                 const ButtonSegment(
                   value: _OrderFilter.synced,
                   label: Text('Tersimpan'),
+                ),
+                ButtonSegment(
+                  value: _OrderFilter.openBill,
+                  label: Text('Open bill ($openBills)'),
                 ),
                 ButtonSegment(
                   value: _OrderFilter.pending,
@@ -178,6 +188,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
   void _showDetail(OrderHistoryItem order) {
     final canRefund =
         canManageCatalogForUser(ref.read(authProvider).user) &&
+        order.isPaid &&
         !order.isPending &&
         order.serverId != null &&
         order.items.any((item) => item.id != null) &&
@@ -205,6 +216,13 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
                     color: AppColors.errorSoft,
                     textColor: AppColors.error,
                     icon: Icons.currency_exchange_rounded,
+                  ),
+                if (order.isOpenBill)
+                  const AppBadge(
+                    text: 'Open bill',
+                    color: AppColors.infoSoft,
+                    textColor: AppColors.info,
+                    icon: Icons.bookmark_added_outlined,
                   ),
                 AppBadge(
                   text: order.isPending ? 'Belum sinkron' : 'Tersimpan',
@@ -247,7 +265,9 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
             const Divider(height: 28),
             _DetailLine(
               label: 'Pembayaran',
-              value: _paymentLabel(order.paymentMethod),
+              value: order.isOpenBill
+                  ? 'Belum dibayar'
+                  : _paymentLabel(order.paymentMethod),
             ),
             const SizedBox(height: 10),
             _DetailLine(
@@ -274,12 +294,33 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
               const SizedBox(height: 6),
               Text(order.note!),
             ],
+            if (order.isOpenBill) ...[
+              const SizedBox(height: 18),
+              AppButton(
+                text: order.isPending || order.serverId == null
+                    ? 'Sinkronkan sebelum membayar'
+                    : 'Bayar open bill',
+                icon: Icons.payments_outlined,
+                onPressed: order.isPending || order.serverId == null
+                    ? null
+                    : () {
+                        Navigator.pop(context);
+                        Future<void>.delayed(
+                          const Duration(milliseconds: 180),
+                          () {
+                            if (mounted) _openOpenBillPayment(order);
+                          },
+                        );
+                      },
+              ),
+            ],
             const Divider(height: 28),
             Consumer(
               builder: (context, ref, _) {
                 final printer = ref.watch(printerProvider);
                 return _OrderPrintActions(
                   state: printer,
+                  isOpenBill: order.isOpenBill,
                   onReceipt: () => _reprint(order, receiptOnly: true),
                   onKitchen: () => _reprint(order, kitchenOnly: true),
                   onAll: () => _reprint(order),
@@ -325,6 +366,53 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
           inventoryOutcome: draft.inventoryOutcome,
           reason: draft.reason,
         );
+    if (!mounted) return;
+    setState(() => _isMutating = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(result.message),
+        backgroundColor: result.isSuccess ? null : AppColors.error,
+      ),
+    );
+  }
+
+  Future<void> _openOpenBillPayment(OrderHistoryItem order) async {
+    final draft = await AppBottomSheet.show<_OpenBillPaymentDraft>(
+      context,
+      title: 'Bayar open bill',
+      subtitle: order.receiptNumber,
+      child: _OpenBillPaymentForm(order: order),
+    );
+    if (draft == null || !mounted) return;
+
+    setState(() => _isMutating = true);
+    final result = await ref
+        .read(orderHistoryProvider.notifier)
+        .payOpenBill(
+          order: order,
+          method: draft.method,
+          paymentBreakdown: {draft.method: order.total},
+          amountReceived: draft.amountReceived,
+          change: draft.change,
+        );
+    if (!mounted) return;
+    if (result.isSuccess) {
+      ref.invalidate(customerProvider);
+      if (order.customerId != null) {
+        ref.invalidate(customerOrderHistoryProvider(order.customerId!));
+      }
+      await ref
+          .read(printerProvider.notifier)
+          .autoPrintReceipt(
+            order.toPrintData(
+              paymentMethod: draft.method,
+              paymentBreakdown: {draft.method: order.total},
+              amountReceived: draft.amountReceived,
+              change: draft.change,
+              isReprint: false,
+            ),
+          );
+    }
     if (!mounted) return;
     setState(() => _isMutating = false);
     ScaffoldMessenger.of(context).showSnackBar(
@@ -558,12 +646,14 @@ class _RefundDraft {
 class _OrderPrintActions extends StatelessWidget {
   const _OrderPrintActions({
     required this.state,
+    required this.isOpenBill,
     required this.onReceipt,
     required this.onKitchen,
     required this.onAll,
   });
 
   final PrinterState state;
+  final bool isOpenBill;
   final VoidCallback onReceipt;
   final VoidCallback onKitchen;
   final VoidCallback onAll;
@@ -589,7 +679,9 @@ class _OrderPrintActions extends StatelessWidget {
         const SizedBox(height: 6),
         Text(
           state.hasAnyPrinter
-              ? 'Dokumen cetak ulang diberi penanda salinan.'
+              ? isOpenBill
+                    ? 'Tagihan dicetak dengan status belum lunas.'
+                    : 'Dokumen cetak ulang diberi penanda salinan.'
               : 'Atur printer kasir dan dapur dari menu Lainnya.',
           style: theme.textTheme.bodySmall,
         ),
@@ -610,7 +702,7 @@ class _OrderPrintActions extends StatelessWidget {
                   ? onReceipt
                   : null,
               icon: const Icon(Icons.receipt_long_outlined),
-              label: const Text('Struk pelanggan'),
+              label: Text(isOpenBill ? 'Tagihan pelanggan' : 'Struk pelanggan'),
             );
             final kitchenButton = OutlinedButton.icon(
               onPressed: state.hasProductionPrinter && !state.isPrinting
@@ -638,15 +730,186 @@ class _OrderPrintActions extends StatelessWidget {
             );
           },
         ),
-        const SizedBox(height: 8),
-        FilledButton.icon(
-          onPressed: state.hasAnyPrinter && !state.isPrinting ? onAll : null,
-          icon: const Icon(Icons.print_rounded),
-          label: const Text('Cetak semua dokumen'),
-        ),
+        if (!isOpenBill) ...[
+          const SizedBox(height: 8),
+          FilledButton.icon(
+            onPressed: state.hasAnyPrinter && !state.isPrinting ? onAll : null,
+            icon: const Icon(Icons.print_rounded),
+            label: const Text('Cetak semua dokumen'),
+          ),
+        ],
       ],
     );
   }
+}
+
+class _OpenBillPaymentForm extends StatefulWidget {
+  const _OpenBillPaymentForm({required this.order});
+
+  final OrderHistoryItem order;
+
+  @override
+  State<_OpenBillPaymentForm> createState() => _OpenBillPaymentFormState();
+}
+
+class _OpenBillPaymentFormState extends State<_OpenBillPaymentForm> {
+  final _cash = TextEditingController();
+  String _method = 'cash';
+
+  double get _cashAmount =>
+      double.tryParse(_cash.text.replaceAll('.', '')) ?? 0;
+
+  bool get _isValid => _method != 'cash' || _cashAmount >= widget.order.total;
+
+  @override
+  void initState() {
+    super.initState();
+    _cash.addListener(_refresh);
+  }
+
+  @override
+  void dispose() {
+    _cash.removeListener(_refresh);
+    _cash.dispose();
+    super.dispose();
+  }
+
+  void _refresh() => setState(() {});
+
+  @override
+  Widget build(BuildContext context) {
+    final currency = NumberFormat.currency(
+      locale: 'id_ID',
+      symbol: 'Rp ',
+      decimalDigits: 0,
+    );
+    final change = _method == 'cash'
+        ? math.max(0, _cashAmount - widget.order.total).toDouble()
+        : 0.0;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          AppCard(
+            child: Column(
+              children: [
+                _DetailLine(
+                  label: 'Total tagihan',
+                  value: currency.format(widget.order.total),
+                  emphasized: true,
+                ),
+                if (widget.order.tableName != null) ...[
+                  const SizedBox(height: 10),
+                  _DetailLine(label: 'Meja', value: widget.order.tableName!),
+                ],
+                if (widget.order.customerName != null) ...[
+                  const SizedBox(height: 10),
+                  _DetailLine(
+                    label: 'Pelanggan',
+                    value: widget.order.customerName!,
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          SegmentedButton<String>(
+            expandedInsets: EdgeInsets.zero,
+            segments: const [
+              ButtonSegment(
+                value: 'cash',
+                icon: Icon(Icons.payments_outlined),
+                label: Text('Tunai'),
+              ),
+              ButtonSegment(
+                value: 'qris',
+                icon: Icon(Icons.qr_code_2_rounded),
+                label: Text('QRIS'),
+              ),
+              ButtonSegment(
+                value: 'card',
+                icon: Icon(Icons.credit_card_outlined),
+                label: Text('Kartu'),
+              ),
+            ],
+            selected: {_method},
+            showSelectedIcon: false,
+            onSelectionChanged: (selection) {
+              setState(() => _method = selection.first);
+            },
+          ),
+          if (_method == 'cash') ...[
+            const SizedBox(height: 16),
+            TextField(
+              controller: _cash,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: const InputDecoration(
+                labelText: 'Uang diterima',
+                prefixText: 'Rp ',
+                prefixIcon: Icon(Icons.payments_outlined),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: ActionChip(
+                label: const Text('Uang pas'),
+                onPressed: () {
+                  _cash.text = widget.order.total.round().toString();
+                },
+              ),
+            ),
+            const SizedBox(height: 10),
+            _DetailLine(
+              label: 'Kembalian',
+              value: currency.format(change),
+              emphasized: true,
+            ),
+          ],
+          const SizedBox(height: 20),
+          AppButton(
+            text: 'Konfirmasi pembayaran',
+            icon: Icons.check_rounded,
+            onPressed: _isValid
+                ? () => Navigator.pop(
+                    context,
+                    _OpenBillPaymentDraft(
+                      method: _method,
+                      amountReceived: _method == 'cash' ? _cashAmount : null,
+                      change: change,
+                    ),
+                  )
+                : null,
+          ),
+          if (!_isValid) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Jumlah tunai belum mencukupi.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.error,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _OpenBillPaymentDraft {
+  const _OpenBillPaymentDraft({
+    required this.method,
+    required this.amountReceived,
+    required this.change,
+  });
+
+  final String method;
+  final double? amountReceived;
+  final double change;
 }
 
 class _Metrics extends StatelessWidget {
@@ -654,17 +917,23 @@ class _Metrics extends StatelessWidget {
     required this.orderCount,
     required this.revenue,
     required this.pendingCount,
+    required this.openBillCount,
   });
 
   final int orderCount;
   final String revenue;
   final int pendingCount;
+  final int openBillCount;
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final columns = constraints.maxWidth >= 760 ? 3 : 2;
+        final columns = constraints.maxWidth >= 1000
+            ? 4
+            : constraints.maxWidth >= 760
+            ? 3
+            : 2;
         final width = (constraints.maxWidth - (columns - 1) * 12) / columns;
         return Wrap(
           spacing: 12,
@@ -690,19 +959,30 @@ class _Metrics extends StatelessWidget {
                 iconColor: AppColors.success,
               ),
             ),
-            if (columns == 3)
-              SizedBox(
-                width: width,
-                height: 112,
-                child: AppMetricCard(
-                  title: 'Antrean sinkron',
-                  value: '$pendingCount',
-                  icon: Icons.cloud_upload_outlined,
-                  iconColor: pendingCount == 0
-                      ? AppColors.success
-                      : AppColors.warning,
-                ),
+            SizedBox(
+              width: width,
+              height: 112,
+              child: AppMetricCard(
+                title: 'Open bill aktif',
+                value: '$openBillCount',
+                icon: Icons.bookmark_added_outlined,
+                iconColor: openBillCount == 0
+                    ? AppColors.success
+                    : AppColors.info,
               ),
+            ),
+            SizedBox(
+              width: width,
+              height: 112,
+              child: AppMetricCard(
+                title: 'Antrean sinkron',
+                value: '$pendingCount',
+                icon: Icons.cloud_upload_outlined,
+                iconColor: pendingCount == 0
+                    ? AppColors.success
+                    : AppColors.warning,
+              ),
+            ),
           ],
         );
       },
@@ -775,6 +1055,15 @@ class _OrderRow extends StatelessWidget {
                     icon: Icons.cloud_upload_outlined,
                   ),
                 ],
+                if (order.isOpenBill) ...[
+                  const SizedBox(height: 7),
+                  const AppBadge(
+                    text: 'Belum dibayar',
+                    color: AppColors.infoSoft,
+                    textColor: AppColors.info,
+                    icon: Icons.bookmark_added_outlined,
+                  ),
+                ],
               ],
             ),
           ),
@@ -821,9 +1110,11 @@ String _orderTypeLabel(String value) => switch (value) {
 String _paymentLabel(String value) => switch (value) {
   'cash' => 'Tunai',
   'qris' => 'QRIS',
+  'card' => 'Kartu',
   'debit' => 'Kartu debit',
   'credit_card' => 'Kartu kredit',
   'ewallet' => 'Dompet digital',
   'split' => 'Pembayaran terpisah',
+  'open_bill' => 'Belum dibayar',
   _ => value.toUpperCase(),
 };

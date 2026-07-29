@@ -109,7 +109,7 @@ class TableManagementController extends Controller
     {
         $validated = $request->validate([
             'table_id' => 'required|integer|exists:tables,id',
-            'order_id' => 'nullable|integer|exists:orders,id',
+            'order_id' => 'nullable|uuid|exists:orders,id',
         ]);
 
         $session = TableSession::create([

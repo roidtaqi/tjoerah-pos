@@ -28,6 +28,7 @@ class OrderApiTest extends TestCase
             'brand_id' => $brand->id,
             'name' => 'Main Outlet',
             'code' => 'MAIN',
+            'tax_enabled' => false,
         ]);
         $category = Category::create(['company_id' => $company->id, 'brand_id' => $brand->id, 'name' => 'Coffee']);
         $product = Product::create([
@@ -181,6 +182,94 @@ class OrderApiTest extends TestCase
             ->assertJsonPath('data.0.items.0.snapshot_name', 'Latte');
     }
 
+    public function test_open_bill_is_submitted_once_and_paid_later(): void
+    {
+        [$user, $outlet, $product] = $this->createOrderContext();
+        $customer = Customer::create([
+            'company_id' => $user->company_id,
+            'name' => 'Dina',
+        ]);
+        $this->actingAs($user, 'api');
+        $payload = $this->orderPayload(
+            $outlet->id,
+            $product->id,
+            'RCP-OPEN-001',
+            'client-open-001',
+        );
+        unset($payload['payment_method']);
+        $payload['is_open_bill'] = true;
+        $payload['customer_id'] = $customer->id;
+
+        $created = $this->postJson('/api/orders', $payload);
+        $created->assertCreated()
+            ->assertJsonPath('data.status', 'open')
+            ->assertJsonCount(0, 'data.payments')
+            ->assertJsonCount(1, 'data.kitchen_tickets');
+
+        $orderId = $created->json('data.id');
+        $this->assertDatabaseHas('orders', [
+            'id' => $orderId,
+            'status' => 'open',
+        ]);
+        $this->assertDatabaseMissing('payments', ['order_id' => $orderId]);
+        $this->assertNotNull(Order::find($orderId)->inventory_deducted_at);
+        $this->assertSame(0, $customer->fresh()->visit_count);
+
+        $this->postJson("/api/orders/{$orderId}/pay", [
+            'method' => 'cash',
+            'payment_breakdown' => ['cash' => 35000],
+            'amount_received' => 50000,
+            'change' => 15000,
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'paid')
+            ->assertJsonCount(1, 'data.payments');
+
+        $this->assertDatabaseHas('payments', [
+            'order_id' => $orderId,
+            'method' => 'cash',
+            'amount' => 35000,
+        ]);
+        $this->assertSame(1, $customer->fresh()->visit_count);
+
+        $this->postJson("/api/orders/{$orderId}/pay", [
+            'method' => 'cash',
+            'payment_breakdown' => ['cash' => 35000],
+        ])->assertOk()
+            ->assertJsonPath('message', 'Open bill ini sudah dibayar.');
+        $this->assertDatabaseCount('payments', 1);
+        $this->assertSame(1, $customer->fresh()->visit_count);
+    }
+
+    public function test_outlet_tax_setting_is_used_as_server_source_of_truth(): void
+    {
+        [$user, $outlet, $product] = $this->createOrderContext();
+        $user->update(['role' => 'owner']);
+        $this->actingAs($user, 'api');
+
+        $this->putJson('/api/transaction-settings', [
+            'outlet_id' => $outlet->id,
+            'tax_enabled' => true,
+            'tax_rate' => 8.5,
+        ])->assertOk()
+            ->assertJsonPath('data.tax_enabled', true)
+            ->assertJsonPath('data.tax_rate', 8.5);
+
+        $payload = $this->orderPayload(
+            $outlet->id,
+            $product->id,
+            'RCP-TAX-001',
+            'client-tax-001',
+        );
+        $payload['tax'] = 0;
+        $payload['total'] = 35000;
+
+        $this->postJson('/api/orders', $payload)
+            ->assertCreated()
+            ->assertJsonPath('data.tax_rate', 8.5)
+            ->assertJsonPath('data.tax', 2975)
+            ->assertJsonPath('data.total', 37975);
+    }
+
     private function createOrderContext(): array
     {
         $company = Company::create(['name' => 'Tjoerah']);
@@ -190,6 +279,7 @@ class OrderApiTest extends TestCase
             'brand_id' => $brand->id,
             'name' => 'Main Outlet',
             'code' => 'MAIN',
+            'tax_enabled' => false,
         ]);
         $category = Category::create(['company_id' => $company->id, 'brand_id' => $brand->id, 'name' => 'Coffee']);
         $product = Product::create([

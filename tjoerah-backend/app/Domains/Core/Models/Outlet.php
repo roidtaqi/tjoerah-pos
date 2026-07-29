@@ -17,6 +17,8 @@ class Outlet extends Model
 
     protected $casts = [
         'is_active' => 'boolean',
+        'tax_enabled' => 'boolean',
+        'tax_rate' => 'float',
     ];
 
     public function users(): BelongsToMany

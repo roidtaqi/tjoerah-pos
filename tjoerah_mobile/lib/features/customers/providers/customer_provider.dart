@@ -42,6 +42,7 @@ class CustomerNotifier extends AsyncNotifier<List<CustomerModel>> {
       final payload = Map<String, dynamic>.from(
         jsonDecode(row['payload']?.toString() ?? '{}') as Map,
       );
+      if (payload['is_open_bill'] == true) continue;
       final meta = payload['meta'] is Map
           ? Map<String, dynamic>.from(payload['meta'] as Map)
           : <String, dynamic>{};

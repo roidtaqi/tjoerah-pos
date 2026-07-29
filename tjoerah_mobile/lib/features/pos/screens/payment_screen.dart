@@ -477,8 +477,13 @@ class _OrderSummary extends StatelessWidget {
               value: '-${currency.format(cart.discount)}',
             ),
           ],
-          const SizedBox(height: 8),
-          _PaymentRow(label: 'Pajak 11%', value: currency.format(cart.tax)),
+          if (cart.taxEnabled && cart.taxRate > 0) ...[
+            const SizedBox(height: 8),
+            _PaymentRow(
+              label: 'Pajak ${_percentage(cart.taxRate)}',
+              value: currency.format(cart.tax),
+            ),
+          ],
           const SizedBox(height: 14),
           _PaymentRow(
             label: 'Total',
@@ -519,6 +524,13 @@ class _PaymentRow extends StatelessWidget {
 
 NumberFormat _currency() =>
     NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
+
+String _percentage(double value) {
+  final formatted = value == value.roundToDouble()
+      ? value.toInt().toString()
+      : value.toStringAsFixed(2).replaceFirst(RegExp(r'0+$'), '');
+  return '$formatted%';
+}
 
 Future<void> showPaymentSuccessDialog(
   BuildContext context,

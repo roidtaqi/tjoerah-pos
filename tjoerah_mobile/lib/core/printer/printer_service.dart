@@ -112,10 +112,19 @@ class PrinterService {
       await _printer.printNewLine();
       await _printer.printCustom('TJOERAH POS', 2, 1);
       await _printer.printCustom(
-        order.isReprint ? 'SALINAN STRUK' : 'STRUK PEMBAYARAN',
+        order.isOpenBill
+            ? order.isReprint
+                  ? 'SALINAN TAGIHAN'
+                  : 'TAGIHAN'
+            : order.isReprint
+            ? 'SALINAN STRUK'
+            : 'STRUK PEMBAYARAN',
         1,
         1,
       );
+      if (order.isOpenBill) {
+        await _printer.printCustom('BELUM LUNAS', 2, 1);
+      }
       await _printer.printNewLine();
       await _printer.printCustom('No: ${order.receiptNumber}', 0, 0);
       await _printer.printCustom('Waktu: ${_dateTime(order.createdAt)}', 0, 0);
@@ -145,18 +154,22 @@ class PrinterService {
       await _printColumns('Pajak', _money(order.tax), width);
       await _printColumns('TOTAL', _money(order.total), width, size: 1);
       await _printer.printCustom(_separator(width), 0, 1);
-      await _printer.printCustom(
-        'Pembayaran: ${order.paymentMethodLabel}',
-        0,
-        0,
-      );
-      if (order.paymentMethod == 'split') {
-        for (final entry in order.paymentBreakdown.entries) {
-          await _printColumns(
-            _paymentLabel(entry.key),
-            _money(entry.value),
-            width,
-          );
+      if (order.isOpenBill) {
+        await _printer.printCustom('Status: BELUM DIBAYAR', 1, 0);
+      } else {
+        await _printer.printCustom(
+          'Pembayaran: ${order.paymentMethodLabel}',
+          0,
+          0,
+        );
+        if (order.paymentMethod == 'split') {
+          for (final entry in order.paymentBreakdown.entries) {
+            await _printColumns(
+              _paymentLabel(entry.key),
+              _money(entry.value),
+              width,
+            );
+          }
         }
       }
       if (order.amountReceived != null) {
@@ -167,7 +180,11 @@ class PrinterService {
         await _printer.printCustom('Catatan: ${order.note}', 0, 0);
       }
       await _printer.printNewLine();
-      await _printer.printCustom('Terima kasih', 0, 1);
+      await _printer.printCustom(
+        order.isOpenBill ? 'Mohon simpan tagihan ini' : 'Terima kasih',
+        0,
+        1,
+      );
       await _finishDocument(cutPaper);
     } catch (error) {
       if (error is PrinterException) rethrow;

@@ -19,5 +19,7 @@ class OrderData
         public readonly float $discountTotal = 0,
         public readonly float $serviceCharge = 0,
         public readonly array $meta = [],
+        public readonly bool $isOpenBill = false,
+        public readonly float $taxRate = 0,
     ) {}
 }

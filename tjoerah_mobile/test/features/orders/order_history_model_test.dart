@@ -117,4 +117,41 @@ void main() {
     expect(order.items.single.name, 'Kopi Tjoerah');
     expect(order.isPending, isFalse);
   });
+
+  test('recognizes a local open bill separately from sync status', () {
+    final order = OrderHistoryItem.fromRow({
+      'id': 'open-order',
+      'created_at': '2026-07-29T12:00:00.000',
+      'status': 'synced',
+      'payload': jsonEncode({
+        'receipt_number': 'TJ-OPEN-001',
+        'is_open_bill': true,
+        'subtotal': 50000,
+        'tax': 5500,
+        'total': 55500,
+        'items': [
+          {
+            'product_id': 9,
+            'snapshot_name': 'Makan Siang',
+            'snapshot_price': 50000,
+            'qty': 1,
+            'total': 50000,
+          },
+        ],
+        'meta': {
+          'server_order_id': 'server-open-order',
+          'server_order_status': 'open',
+        },
+      }),
+    });
+
+    expect(order.isOpenBill, isTrue);
+    expect(order.isPending, isFalse);
+    expect(order.isPaid, isFalse);
+    expect(order.serverId, 'server-open-order');
+    expect(order.paymentMethod, 'open_bill');
+    expect(order.items.single.productId, '9');
+    expect(order.toPrintData().isOpenBill, isTrue);
+    expect(order.toPrintData().paymentMethodLabel, 'Belum dibayar');
+  });
 }

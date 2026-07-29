@@ -43,4 +43,26 @@ void main() {
     expect(container.read(cartProvider).customerId, isNull);
     expect(container.read(cartProvider).customerName, isNull);
   });
+
+  test('cart applies configurable tax after the order discount', () {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    final cart = container.read(cartProvider.notifier);
+
+    cart.addItem('1', 'Kopi Susu', 100000);
+    cart.setDiscount(10);
+    cart.setTaxSettings(enabled: true, rate: 8.5);
+
+    expect(container.read(cartProvider).taxableAmount, 90000);
+    expect(container.read(cartProvider).tax, 7650);
+    expect(container.read(cartProvider).total, 97650);
+
+    cart.setTaxSettings(enabled: false, rate: 8.5);
+    expect(container.read(cartProvider).tax, 0);
+    expect(container.read(cartProvider).total, 90000);
+
+    cart.clearCart();
+    expect(container.read(cartProvider).taxEnabled, isFalse);
+    expect(container.read(cartProvider).taxRate, 8.5);
+  });
 }

@@ -27,6 +27,8 @@ class DatabaseSeeder extends Seeder
             'address' => '123 Coffee Street, Jakarta',
             'phone' => '+6281234567890',
             'is_active' => true,
+            'tax_enabled' => true,
+            'tax_rate' => 11,
         ]);
 
         $owner = User::updateOrCreate(

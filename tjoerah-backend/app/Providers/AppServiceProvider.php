@@ -2,13 +2,14 @@
 
 namespace App\Providers;
 
-use Illuminate\Support\ServiceProvider;
-use Illuminate\Database\Eloquent\Factories\Factory;
-use Illuminate\Support\Str;
-
-use Illuminate\Support\Facades\Event;
+use App\Domains\CRM\Listeners\AwardLoyaltyPointsListener;
+use App\Domains\Inventory\Listeners\DeductInventoryOnOrderSubmission;
 use App\Domains\Sales\Events\OrderCompleted;
-use App\Domains\Inventory\Listeners\DeductInventoryOnOrderCompletion;
+use App\Domains\Sales\Events\OrderSubmitted;
+use Illuminate\Database\Eloquent\Factories\Factory;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Str;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -29,19 +30,21 @@ class AppServiceProvider extends ServiceProvider
             // Map App\Domains\Core\Models\User to Database\Factories\UserFactory
             if (Str::startsWith($modelName, 'App\\Domains\\')) {
                 $className = class_basename($modelName);
-                return 'Database\\Factories\\' . $className . 'Factory';
+
+                return 'Database\\Factories\\'.$className.'Factory';
             }
-            return 'Database\\Factories\\' . class_basename($modelName) . 'Factory';
+
+            return 'Database\\Factories\\'.class_basename($modelName).'Factory';
         });
 
         Event::listen(
-            OrderCompleted::class,
-            DeductInventoryOnOrderCompletion::class
+            OrderSubmitted::class,
+            DeductInventoryOnOrderSubmission::class
         );
 
         Event::listen(
             OrderCompleted::class,
-            \App\Domains\CRM\Listeners\AwardLoyaltyPointsListener::class
+            AwardLoyaltyPointsListener::class
         );
     }
 }

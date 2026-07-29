@@ -26,10 +26,12 @@ class OrderRepository
             'subtotal' => $data->subtotal,
             'discount_total' => $data->discountTotal,
             'tax' => $data->tax,
+            'tax_rate' => $data->taxRate,
             'service_charge' => $data->serviceCharge,
             'total' => $data->total,
-            'status' => 'paid',
-            'completed_at' => now(),
+            'status' => $data->isOpenBill ? 'open' : 'paid',
+            'submitted_at' => now(),
+            'completed_at' => $data->isOpenBill ? null : now(),
             'meta' => $data->meta,
         ]);
 
@@ -48,14 +50,16 @@ class OrderRepository
             ]);
         }
 
-        $order->payments()->create([
-            'method' => $data->paymentMethod,
-            'amount' => $data->total,
-            'status' => 'completed',
-            'paid_at' => now(),
-        ]);
+        if (! $data->isOpenBill) {
+            $order->payments()->create([
+                'method' => $data->paymentMethod,
+                'amount' => $data->total,
+                'status' => 'completed',
+                'paid_at' => now(),
+            ]);
+        }
 
-        if ($data->customerId) {
+        if (! $data->isOpenBill && $data->customerId) {
             $customer = Customer::lockForUpdate()->find($data->customerId);
             if ($customer) {
                 $customer->total_spent = (float) $customer->total_spent + $data->total;

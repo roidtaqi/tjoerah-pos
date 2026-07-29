@@ -65,8 +65,11 @@ class TransactionPrintData {
     'qris' => 'QRIS',
     'card' => 'Kartu',
     'split' => 'Pembayaran terpisah',
+    'open_bill' => 'Belum dibayar',
     _ => paymentMethod,
   };
+
+  bool get isOpenBill => paymentMethod == 'open_bill';
 
   Map<String, List<PrintOrderItem>> get itemsByStation {
     final groups = <String, List<PrintOrderItem>>{};

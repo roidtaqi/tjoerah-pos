@@ -31,6 +31,7 @@ class ReportingController extends Controller
         return DB::table('order_items')
             ->join('orders', 'orders.id', '=', 'order_items.order_id')
             ->selectRaw("order_items.product_id, order_items.snapshot_name, SUM(order_items.qty) as qty, SUM(order_items.total - {$refunds}) as revenue, SUM({$refunds}) as refunds, SUM(order_items.cogs_total) as cogs")
+            ->whereIn('orders.status', ['paid', 'completed', 'partially_refunded', 'refunded'])
             ->when($request->integer('outlet_id'), fn ($query, $outletId) => $query->where('orders.outlet_id', $outletId))
             ->when($request->date('from'), fn ($query, $from) => $query->whereDate('orders.created_at', '>=', $from))
             ->when($request->date('to'), fn ($query, $to) => $query->whereDate('orders.created_at', '<=', $to))
@@ -80,6 +81,7 @@ class ReportingController extends Controller
     private function baseOrderQuery(Request $request)
     {
         return Order::query()
+            ->whereIn('status', ['paid', 'completed', 'partially_refunded', 'refunded'])
             ->when($request->integer('outlet_id'), fn ($query, $outletId) => $query->where('outlet_id', $outletId))
             ->when($request->date('from'), fn ($query, $from) => $query->whereDate('created_at', '>=', $from))
             ->when($request->date('to'), fn ($query, $to) => $query->whereDate('created_at', '<=', $to));

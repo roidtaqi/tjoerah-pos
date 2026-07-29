@@ -69,6 +69,14 @@ class SettingsScreen extends ConsumerWidget {
                           icon: Icons.badge_outlined,
                           onTap: () => context.push('/employees/manage'),
                         ),
+                        const Divider(),
+                        AppListTile(
+                          title: 'Pajak transaksi',
+                          subtitle:
+                              'Aktifkan pajak dan atur tarif untuk outlet ini',
+                          icon: Icons.percent_rounded,
+                          onTap: () => context.push('/transaction-settings'),
+                        ),
                       ],
                       const Divider(),
                       if (role == AppRole.production)

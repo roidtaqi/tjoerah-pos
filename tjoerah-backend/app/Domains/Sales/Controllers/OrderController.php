@@ -2,6 +2,7 @@
 
 namespace App\Domains\Sales\Controllers;
 
+use App\Domains\Core\Models\Outlet;
 use App\Domains\Inventory\Services\ProductionIncidentService;
 use App\Domains\KDS\Models\KitchenTicket;
 use App\Domains\POS\Models\Order;
@@ -77,36 +78,55 @@ class OrderController extends Controller
             'items.*.modifiers' => 'nullable|array',
             'items.*.notes' => 'nullable|string',
             'subtotal' => 'required|numeric',
-            'discount_total' => 'nullable|numeric',
-            'tax' => 'required|numeric',
-            'service_charge' => 'nullable|numeric',
-            'total' => 'required|numeric',
-            'payment_method' => 'required|string',
+            'discount_total' => 'nullable|numeric|min:0',
+            'tax' => 'nullable|numeric|min:0',
+            'service_charge' => 'nullable|numeric|min:0',
+            'total' => 'nullable|numeric|min:0',
+            'is_open_bill' => 'nullable|boolean',
+            'payment_method' => 'nullable|required_unless:is_open_bill,true|string',
             'receipt_number' => 'required|string|unique:orders,receipt_number',
             'meta' => 'nullable|array',
         ]);
+
+        $outlet = Outlet::findOrFail($validated['outlet_id']);
+        $this->ensureOutletIsAccessible($request, $outlet);
+        $subtotal = round(collect($validated['items'])->sum(
+            fn (array $item) => (float) $item['total'],
+        ), 2);
+        $discount = min((float) ($validated['discount_total'] ?? 0), $subtotal);
+        $serviceCharge = (float) ($validated['service_charge'] ?? 0);
+        $taxRate = $outlet->tax_enabled ? (float) $outlet->tax_rate : 0.0;
+        $tax = round(max($subtotal - $discount, 0) * ($taxRate / 100), 2);
+        $total = round($subtotal - $discount + $tax + $serviceCharge, 2);
+        $isOpenBill = (bool) ($validated['is_open_bill'] ?? false);
+        $meta = $validated['meta'] ?? [];
+        $meta['tax_rate'] = $taxRate;
 
         $dto = new OrderData(
             outletId: $validated['outlet_id'],
             userId: $request->user()?->id,
             items: $validated['items'],
-            subtotal: $validated['subtotal'],
-            tax: $validated['tax'],
-            total: $validated['total'],
-            paymentMethod: $validated['payment_method'],
+            subtotal: $subtotal,
+            tax: $tax,
+            total: $total,
+            paymentMethod: $validated['payment_method'] ?? 'open_bill',
             receiptNumber: $validated['receipt_number'],
             orderType: $validated['order_type'] ?? 'take_away',
             customerId: $validated['customer_id'] ?? null,
             tableId: $validated['table_id'] ?? null,
-            discountTotal: $validated['discount_total'] ?? 0,
-            serviceCharge: $validated['service_charge'] ?? 0,
-            meta: $validated['meta'] ?? [],
+            discountTotal: $discount,
+            serviceCharge: $serviceCharge,
+            meta: $meta,
+            isOpenBill: $isOpenBill,
+            taxRate: $taxRate,
         );
 
         $order = $this->orderService->placeOrder($dto);
 
         return response()->json([
-            'message' => 'Order placed successfully',
+            'message' => $isOpenBill
+                ? 'Open bill berhasil disimpan dan dikirim ke dapur.'
+                : 'Order placed successfully',
             'data' => $order,
         ], 201);
     }
@@ -147,22 +167,37 @@ class OrderController extends Controller
         return response()->json($order->load(['items', 'payments', 'refunds', 'kitchenTickets.items']));
     }
 
-    public function hold(Order $order)
+    public function hold(Request $request, Order $order)
     {
+        $this->ensureOrderIsAccessible($request, $order);
+        if (in_array($order->status, ['paid', 'completed', 'refunded'], true)) {
+            throw ValidationException::withMessages([
+                'order' => 'Pesanan yang sudah dibayar tidak dapat ditahan.',
+            ]);
+        }
         $order->update(['status' => 'held']);
 
         return response()->json(['message' => 'Order held.', 'data' => $order]);
     }
 
-    public function resume(Order $order)
+    public function resume(Request $request, Order $order)
     {
-        $order->update(['status' => 'draft']);
+        $this->ensureOrderIsAccessible($request, $order);
+        $order->update([
+            'status' => $order->submitted_at ? 'open' : 'draft',
+        ]);
 
         return response()->json(['message' => 'Order resumed.', 'data' => $order]);
     }
 
-    public function complete(Order $order)
+    public function complete(Request $request, Order $order)
     {
+        $this->ensureOrderIsAccessible($request, $order);
+        if (in_array($order->status, ['open', 'held', 'draft'], true)) {
+            throw ValidationException::withMessages([
+                'order' => 'Open bill harus dibayar sebelum diselesaikan.',
+            ]);
+        }
         $order->update(['status' => 'completed', 'completed_at' => now()]);
 
         return response()->json(['message' => 'Order completed.', 'data' => $order]);
@@ -170,8 +205,9 @@ class OrderController extends Controller
 
     public function void(Request $request, Order $order)
     {
+        $this->ensureOrderIsAccessible($request, $order);
         $validated = $request->validate([
-            'order_item_id' => 'nullable|integer|exists:order_items,id',
+            'order_item_id' => 'nullable|uuid|exists:order_items,id',
             'amount' => 'nullable|numeric',
             'reason' => 'required|string',
         ]);
@@ -303,6 +339,15 @@ class OrderController extends Controller
         $companyId = $request->user()?->company_id;
         abort_if(
             $companyId && (int) $order->outlet?->company_id !== (int) $companyId,
+            404,
+        );
+    }
+
+    private function ensureOutletIsAccessible(Request $request, Outlet $outlet): void
+    {
+        $companyId = $request->user()?->company_id;
+        abort_if(
+            $companyId && (int) $outlet->company_id !== (int) $companyId,
             404,
         );
     }

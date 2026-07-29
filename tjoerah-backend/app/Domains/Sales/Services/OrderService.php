@@ -6,6 +6,7 @@ use App\Domains\KDS\Models\KitchenTicket;
 use App\Domains\Sales\DTOs\OrderData;
 use App\Domains\Sales\Events\OrderCompleted;
 use App\Domains\Sales\Events\OrderCreated;
+use App\Domains\Sales\Events\OrderSubmitted;
 use App\Domains\Sales\Repositories\OrderRepository;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -26,20 +27,31 @@ class OrderService
             return [$order, $tickets];
         });
 
-        $this->dispatchSideEffects($order, $tickets);
+        $this->dispatchSideEffects($order, $tickets, $data->isOpenBill);
 
         return $order->load(['items', 'payments', 'kitchenTickets.items']);
     }
 
-    private function dispatchSideEffects($order, $tickets): void
+    private function dispatchSideEffects($order, $tickets, bool $isOpenBill): void
     {
         try {
-            OrderCompleted::dispatch($order);
+            OrderSubmitted::dispatch($order);
         } catch (Throwable $exception) {
             Log::warning('Order follow-up jobs could not be dispatched.', [
                 'order_id' => $order->id,
                 'error' => $exception->getMessage(),
             ]);
+        }
+
+        if (! $isOpenBill) {
+            try {
+                OrderCompleted::dispatch($order);
+            } catch (Throwable $exception) {
+                Log::warning('Paid order follow-up jobs could not be dispatched.', [
+                    'order_id' => $order->id,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
         }
 
         try {

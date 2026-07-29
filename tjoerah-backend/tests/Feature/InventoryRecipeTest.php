@@ -145,9 +145,12 @@ class InventoryRecipeTest extends TestCase
             total: 40000,
             paymentMethod: 'cash',
             receiptNumber: 'REC-0099',
+            isOpenBill: true,
         );
 
         $order = $orderService->placeOrder($orderData);
+        $this->assertSame('open', $order->status);
+        $this->assertCount(0, $order->payments);
 
         // 6. Verify stock deduction
         // 1000g - (15g * 2) = 970g remaining.
@@ -162,6 +165,24 @@ class InventoryRecipeTest extends TestCase
         $this->assertEquals(15 * 120 * 2, (float) $orderItem->cogs_total);
 
         $this->actingAs($user, 'api');
+        $this->getJson('/api/reports/products')->assertOk()->assertJsonCount(0);
+        $this->postJson("/api/orders/{$order->id}/pay", [
+            'method' => 'cash',
+            'payment_breakdown' => ['cash' => 40000],
+        ])->assertCreated();
+        $this->assertEquals(
+            970,
+            (float) StockMovement::where('inventory_item_id', $coffeeBeans->id)
+                ->where('warehouse_id', $warehouse->id)
+                ->sum('quantity'),
+        );
+        $this->assertSame(
+            1,
+            StockMovement::where('reference_id', $order->id)
+                ->where('movement_type', 'consume')
+                ->count(),
+        );
+
         $response = $this->getJson('/api/reports/products')->assertOk();
         $this->assertEquals(15 * 120 * 2, (float) $response->json('0.cogs'));
     }
