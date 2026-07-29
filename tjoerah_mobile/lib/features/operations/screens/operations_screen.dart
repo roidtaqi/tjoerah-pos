@@ -132,6 +132,14 @@ class OperationsScreen extends ConsumerWidget {
                           icon: Icons.fact_check_outlined,
                           onTap: () => context.push('/attendance/manage'),
                         ),
+                        const Divider(),
+                        AppListTile(
+                          title: 'Karyawan & akses',
+                          subtitle:
+                              'Profil, akun login, role, outlet, dan shift',
+                          icon: Icons.badge_outlined,
+                          onTap: () => context.push('/employees/manage'),
+                        ),
                       ],
                       const Divider(),
                       if (canManageProductsForUser(user)) ...[
@@ -192,7 +200,7 @@ class OperationsScreen extends ConsumerWidget {
                       const Divider(),
                       AppListTile(
                         title: 'Resep & HPP',
-                        subtitle: 'Komposisi dan biaya menu',
+                        subtitle: 'Tambah resep, impor CSV, dan biaya menu',
                         icon: Icons.menu_book_outlined,
                         onTap: () => context.push('/recipes'),
                       ),

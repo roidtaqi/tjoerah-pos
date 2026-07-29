@@ -59,6 +59,8 @@ void main() {
     await tester.tap(find.text('Jadwal'));
     await tester.pumpAndSettle();
     expect(find.text('Jadwal karyawan'), findsOneWidget);
+    expect(find.byTooltip('Unduh template jadwal'), findsOneWidget);
+    expect(find.byTooltip('Impor jadwal CSV'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await tester.tap(find.text('Shift'));

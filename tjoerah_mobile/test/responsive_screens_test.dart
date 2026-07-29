@@ -269,7 +269,9 @@ void main() {
       ],
     );
 
-    await tester.tap(find.widgetWithText(FloatingActionButton, 'Tambah resep'));
+    expect(find.text('Unduh template'), findsOneWidget);
+    expect(find.text('Impor CSV'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Tambah resep'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextFormField).first, 'Espresso Test');
     await tester.tap(find.text('Tambah bahan'));

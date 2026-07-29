@@ -11,6 +11,7 @@ use App\Domains\Employee\Models\Employee;
 use App\Domains\Employee\Models\EmployeeSchedule;
 use App\Domains\Employee\Services\AttendanceService;
 use App\Http\Controllers\Controller;
+use App\Support\CsvTable;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
@@ -421,6 +422,225 @@ class AttendanceController extends Controller
             $dateFrom,
             $dateTo,
         )->get();
+    }
+
+    public function scheduleTemplate(Request $request)
+    {
+        $validated = $request->validate([
+            'outlet_id' => 'required|integer|exists:outlets,id',
+            'start_date' => 'nullable|date',
+            'days' => 'nullable|integer|min:1|max:31',
+        ]);
+        $outlet = $this->accessibleOutlet($request, (int) $validated['outlet_id']);
+        $startDate = CarbonImmutable::parse(
+            $validated['start_date'] ?? now()->addDay()->toDateString(),
+        )->startOfDay();
+        $days = (int) ($validated['days'] ?? 7);
+        $employees = Employee::with('attendanceShift')
+            ->where('outlet_id', $outlet->id)
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get();
+        $fallbackShift = AttendanceShift::where('outlet_id', $outlet->id)
+            ->where('is_active', true)
+            ->orderBy('sort_order')
+            ->first();
+
+        $rows = [];
+        foreach ($employees as $employee) {
+            for ($day = 0; $day < $days; $day++) {
+                $rows[] = [
+                    $startDate->addDays($day)->toDateString(),
+                    $employee->employee_number,
+                    $employee->name,
+                    $employee->attendanceShift?->name ?? $fallbackShift?->name ?? '',
+                    'scheduled',
+                    '',
+                ];
+            }
+        }
+        if ($rows === []) {
+            $rows[] = [
+                $startDate->toDateString(),
+                'EMP-001',
+                'Nama karyawan',
+                'Shift Pagi',
+                'scheduled',
+                '',
+            ];
+        }
+
+        return CsvTable::download(
+            'template-jadwal-'.$outlet->code.'-'.$startDate->format('Ymd').'.csv',
+            [
+                'work_date',
+                'employee_number',
+                'employee_name',
+                'shift_name',
+                'status',
+                'notes',
+            ],
+            $rows,
+        );
+    }
+
+    public function importSchedules(Request $request)
+    {
+        $validated = $request->validate([
+            'outlet_id' => 'required|integer|exists:outlets,id',
+            'file' => 'required|file|max:5120',
+        ]);
+        $outlet = $this->accessibleOutlet($request, (int) $validated['outlet_id']);
+        $rows = CsvTable::read($validated['file']);
+        CsvTable::requireHeaders($rows, [
+            'work_date',
+            'employee_number',
+            'employee_name',
+            'shift_name',
+            'status',
+        ]);
+        $seen = [];
+        $created = 0;
+        $updated = 0;
+
+        DB::transaction(function () use (
+            $request,
+            $rows,
+            $outlet,
+            &$seen,
+            &$created,
+            &$updated,
+        ): void {
+            foreach ($rows as $row) {
+                $line = (int) $row['_line'];
+                $workDate = trim($row['work_date']);
+                $employeeNumber = trim($row['employee_number']);
+                $employeeName = trim($row['employee_name']);
+                $shiftName = trim($row['shift_name']);
+                $status = trim($row['status']) ?: 'scheduled';
+                if (! $this->isDateOnly($workDate)) {
+                    $this->scheduleImportError(
+                        $line,
+                        'Tanggal wajib memakai format YYYY-MM-DD.',
+                    );
+                }
+                if (! in_array($status, ['scheduled', 'leave', 'sick', 'off', 'cancelled'], true)) {
+                    $this->scheduleImportError(
+                        $line,
+                        'Status harus scheduled, leave, sick, off, atau cancelled.',
+                    );
+                }
+
+                $employee = Employee::query()
+                    ->where('outlet_id', $outlet->id)
+                    ->when(
+                        $employeeNumber !== '',
+                        fn ($query) => $query->whereRaw(
+                            'LOWER(employee_number) = ?',
+                            [mb_strtolower($employeeNumber)],
+                        ),
+                        fn ($query) => $query->whereRaw(
+                            'LOWER(name) = ?',
+                            [mb_strtolower($employeeName)],
+                        ),
+                    )
+                    ->first();
+                if (! $employee) {
+                    $reference = $employeeNumber !== ''
+                        ? $employeeNumber
+                        : $employeeName;
+                    $this->scheduleImportError(
+                        $line,
+                        "Karyawan '{$reference}' tidak ditemukan di outlet ini.",
+                    );
+                }
+
+                $key = "{$employee->id}:{$workDate}";
+                if (isset($seen[$key])) {
+                    $this->scheduleImportError(
+                        $line,
+                        'Karyawan yang sama hanya boleh memiliki satu jadwal per tanggal.',
+                    );
+                }
+                $seen[$key] = true;
+
+                $shift = $shiftName !== ''
+                    ? AttendanceShift::query()
+                        ->where('outlet_id', $outlet->id)
+                        ->whereRaw('LOWER(name) = ?', [mb_strtolower($shiftName)])
+                        ->first()
+                    : $employee->attendanceShift;
+                if ($status === 'scheduled' && ! $shift) {
+                    $this->scheduleImportError(
+                        $line,
+                        "Shift '{$shiftName}' tidak ditemukan.",
+                    );
+                }
+
+                $scheduleData = [
+                    'employee_id' => $employee->id,
+                    'outlet_id' => $outlet->id,
+                    'attendance_shift_id' => $shift?->id,
+                    'work_date' => $workDate,
+                    'shift_name' => $shift?->name ?? 'Reguler',
+                    'status' => $status,
+                    'notes' => trim($row['notes'] ?? '') ?: null,
+                ];
+                if (! $shift) {
+                    $policy = $this->attendanceService->policyForOutlet($outlet);
+                    $start = CarbonImmutable::parse(
+                        "{$workDate} {$policy->work_start_time}",
+                        $policy->timezone,
+                    );
+                    $end = CarbonImmutable::parse(
+                        "{$workDate} {$policy->work_end_time}",
+                        $policy->timezone,
+                    );
+                    if ($end->lessThanOrEqualTo($start)) {
+                        $end = $end->addDay();
+                    }
+                    $scheduleData += [
+                        'start_at' => $start->utc(),
+                        'late_after_at' => $start
+                            ->addMinutes($policy->late_tolerance_minutes)
+                            ->utc(),
+                        'end_at' => $end->utc(),
+                    ];
+                }
+                $scheduleData = $this->prepareScheduleData(
+                    $request,
+                    $scheduleData,
+                    $outlet,
+                );
+
+                $schedule = EmployeeSchedule::where('employee_id', $employee->id)
+                    ->whereDate('work_date', $workDate)
+                    ->first();
+                if ($schedule?->attendance()->exists()) {
+                    $this->scheduleImportError(
+                        $line,
+                        'Jadwal sudah memiliki catatan absensi dan tidak dapat diganti.',
+                    );
+                }
+                if ($schedule) {
+                    $schedule->update($scheduleData);
+                    $updated++;
+                } else {
+                    EmployeeSchedule::create([
+                        ...$scheduleData,
+                        'created_by' => $request->user()->id,
+                    ]);
+                    $created++;
+                }
+            }
+        });
+
+        return response()->json([
+            'message' => 'Impor jadwal berhasil.',
+            'imported_schedules' => $created + $updated,
+            'created' => $created,
+            'updated' => $updated,
+        ]);
     }
 
     public function storeSchedule(Request $request)
@@ -935,5 +1155,22 @@ class AttendanceController extends Controller
         }
 
         return "Absen {$action} berhasil dicatat.";
+    }
+
+    private function isDateOnly(string $value): bool
+    {
+        if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+            return false;
+        }
+        [$year, $month, $day] = array_map('intval', explode('-', $value));
+
+        return checkdate($month, $day, $year);
+    }
+
+    private function scheduleImportError(int $line, string $message): never
+    {
+        throw ValidationException::withMessages([
+            'file' => "Baris {$line}: {$message}",
+        ]);
     }
 }

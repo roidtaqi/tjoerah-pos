@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -134,6 +135,39 @@ class RecipeNotifier extends AsyncNotifier<List<RecipeModel>> {
     } catch (_) {
       return const RecipeMutationResult.failure(
         'Resep belum dapat ditambahkan. Periksa koneksi lalu coba lagi.',
+      );
+    }
+  }
+
+  Future<Uint8List> downloadTemplate() async {
+    final response = await ApiClient.get('/recipes/template');
+    if (response.statusCode != 200) {
+      throw StateError(_responseMessage(response.body));
+    }
+    return response.bodyBytes;
+  }
+
+  Future<RecipeMutationResult> importRecipes({
+    required Uint8List bytes,
+    required String filename,
+  }) async {
+    try {
+      final response = await ApiClient.uploadFile(
+        '/recipes/import',
+        bytes: bytes,
+        filename: filename,
+      );
+      if (response.statusCode != 200) {
+        return RecipeMutationResult.failure(_responseMessage(response.body));
+      }
+      final body = Map<String, dynamic>.from(jsonDecode(response.body) as Map);
+      await _syncAfterMutation();
+      return RecipeMutationResult.success(
+        '${body['imported_recipes'] ?? 0} resep berhasil diimpor.',
+      );
+    } catch (_) {
+      return const RecipeMutationResult.failure(
+        'File resep belum dapat diimpor. Periksa file dan koneksi server.',
       );
     }
   }

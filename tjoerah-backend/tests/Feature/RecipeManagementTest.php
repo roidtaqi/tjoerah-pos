@@ -8,6 +8,7 @@ use App\Domains\Inventory\Models\InventoryItem;
 use App\Domains\POS\Models\Product;
 use App\Domains\Recipe\Models\Recipe;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Tests\TestCase;
 
 class RecipeManagementTest extends TestCase
@@ -162,6 +163,49 @@ class RecipeManagementTest extends TestCase
         $this->deleteJson("/api/recipes/{$recipeId}")->assertNoContent();
         $this->assertSoftDeleted('recipes', ['id' => $recipeId]);
         $this->assertDatabaseHas('recipe_versions', ['recipe_id' => $recipeId]);
+    }
+
+    public function test_owner_can_download_and_import_recipe_csv_template(): void
+    {
+        [$company, $owner, $product, $ingredient] = $this->recipeContext();
+        $secondIngredient = InventoryItem::create([
+            'company_id' => $company->id,
+            'name' => 'Susu Segar',
+            'sku' => 'MILK-01',
+            'unit' => 'ml',
+            'weighted_average_cost' => 50,
+            'is_active' => true,
+        ]);
+        $this->actingAs($owner, 'api');
+
+        $template = $this->get('/api/recipes/template')
+            ->assertOk()
+            ->assertHeader('content-type', 'text/csv; charset=UTF-8');
+        $this->assertStringContainsString(
+            'recipe_name',
+            $template->streamedContent(),
+        );
+
+        $csv = implode("\n", [
+            'recipe_name;product_name;status;yield_quantity;yield_unit;ingredient_name;ingredient_sku;quantity;unit;waste_percent;notes',
+            "Kopi Susu Batch;{$product->name};active;2;porsi;{$ingredient->name};{$ingredient->sku};10;g;0;",
+            "Kopi Susu Batch;{$product->name};active;2;porsi;{$secondIngredient->name};{$secondIngredient->sku};20;ml;0;",
+        ]);
+
+        $this->post('/api/recipes/import', [
+            'file' => UploadedFile::fake()->createWithContent(
+                'resep.csv',
+                $csv,
+            ),
+        ], ['Accept' => 'application/json'])
+            ->assertOk()
+            ->assertJsonPath('imported_recipes', 1)
+            ->assertJsonPath('created', 1);
+
+        $recipe = Recipe::where('product_id', $product->id)->firstOrFail();
+        $this->assertSame('active', $recipe->status);
+        $this->assertSame(1000.0, (float) $recipe->current_cost);
+        $this->assertCount(2, $recipe->latestVersionRecord->items);
     }
 
     private function recipeContext(): array

@@ -291,6 +291,64 @@ class AttendanceManagementTest extends TestCase
             ->assertJsonPath('is_active', false);
     }
 
+    public function test_owner_can_download_prefilled_schedule_template_and_import_it(): void
+    {
+        [, $employee, $outlet, $company] = $this->attendanceFixture();
+        $owner = User::factory()->create([
+            'company_id' => $company->id,
+            'role' => 'owner',
+        ]);
+        $owner->outlets()->attach($outlet);
+        $shift = $this->actingAs($owner, 'api')
+            ->postJson('/api/attendance/shifts', [
+                'outlet_id' => $outlet->id,
+                'name' => 'Shift Pagi',
+                'start_time' => '07:30',
+                'late_after_time' => '07:45',
+                'end_time' => '15:30',
+                'check_in_open_minutes' => 60,
+                'is_active' => true,
+                'sort_order' => 1,
+            ])
+            ->assertCreated()
+            ->json();
+        $employee->update(['attendance_shift_id' => $shift['id']]);
+
+        $template = $this->get(
+            "/api/attendance/schedules/template?outlet_id={$outlet->id}"
+            .'&start_date=2026-07-30&days=2',
+        )
+            ->assertOk()
+            ->assertHeader('content-type', 'text/csv; charset=UTF-8');
+        $contents = $template->streamedContent();
+        $this->assertStringContainsString($employee->employee_number, $contents);
+        $this->assertStringContainsString('Shift Pagi', $contents);
+
+        $csv = implode("\n", [
+            'work_date,employee_number,employee_name,shift_name,status,notes',
+            "2026-07-30,{$employee->employee_number},{$employee->name},Shift Pagi,scheduled,Opening",
+            "2026-07-31,{$employee->employee_number},{$employee->name},Shift Pagi,scheduled,Regular",
+        ]);
+        $this->post('/api/attendance/schedules/import', [
+            'outlet_id' => $outlet->id,
+            'file' => UploadedFile::fake()->createWithContent(
+                'jadwal.csv',
+                $csv,
+            ),
+        ], ['Accept' => 'application/json'])
+            ->assertOk()
+            ->assertJsonPath('imported_schedules', 2)
+            ->assertJsonPath('created', 2);
+
+        $this->assertDatabaseCount('employee_schedules', 2);
+        $this->assertDatabaseHas('employee_schedules', [
+            'employee_id' => $employee->id,
+            'attendance_shift_id' => $shift['id'],
+            'work_date' => '2026-07-30 00:00:00',
+            'shift_name' => 'Shift Pagi',
+        ]);
+    }
+
     public function test_employee_cannot_view_another_company_attendance_photo(): void
     {
         Storage::fake('local');

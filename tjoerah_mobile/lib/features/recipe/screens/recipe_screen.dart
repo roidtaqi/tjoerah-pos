@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import '../../../core/router/role_navigation.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_layout.dart';
+import '../../../core/utils/csv_transfer_service.dart';
 import '../../../shared/components/app_badge.dart';
 import '../../../shared/components/app_bottom_sheet.dart';
 import '../../../shared/components/app_button.dart';
@@ -75,11 +76,6 @@ class _RecipeScreenState extends ConsumerState<RecipeScreen> {
               )
             : null,
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _isMutating ? null : () => _openRecipeForm(),
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('Tambah resep'),
-      ),
       body: recipes.when(
         loading: () =>
             const AppLoadingState(message: 'Menghitung biaya resep...'),
@@ -90,6 +86,40 @@ class _RecipeScreenState extends ConsumerState<RecipeScreen> {
         data: _buildContent,
       ),
     );
+  }
+
+  Future<void> _downloadTemplate() async {
+    setState(() => _isMutating = true);
+    try {
+      final bytes = await ref.read(recipeProvider.notifier).downloadTemplate();
+      await CsvTransferService.share(
+        bytes: bytes,
+        filename: 'template-resep.csv',
+        subject: 'Template impor resep Tjoerah POS',
+      );
+    } catch (_) {
+      if (mounted) {
+        _showResult(
+          const RecipeMutationResult.failure(
+            'Template resep belum dapat diunduh.',
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isMutating = false);
+    }
+  }
+
+  Future<void> _importTemplate() async {
+    final file = await CsvTransferService.pick();
+    if (file == null || !mounted) return;
+    setState(() => _isMutating = true);
+    final result = await ref
+        .read(recipeProvider.notifier)
+        .importRecipes(bytes: file.bytes, filename: file.name);
+    if (!mounted) return;
+    setState(() => _isMutating = false);
+    _showResult(result);
   }
 
   Widget _buildContent(List<RecipeModel> recipes) {
@@ -125,6 +155,29 @@ class _RecipeScreenState extends ConsumerState<RecipeScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                Wrap(
+                  alignment: WrapAlignment.end,
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: _isMutating ? null : _downloadTemplate,
+                      icon: const Icon(Icons.download_outlined),
+                      label: const Text('Unduh template'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _isMutating ? null : _importTemplate,
+                      icon: const Icon(Icons.upload_file_outlined),
+                      label: const Text('Impor CSV'),
+                    ),
+                    FilledButton.icon(
+                      onPressed: _isMutating ? null : _openRecipeForm,
+                      icon: const Icon(Icons.add_rounded),
+                      label: const Text('Tambah resep'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
                 if (MediaQuery.sizeOf(context).width >= 760) ...[
                   LayoutBuilder(
                     builder: (context, constraints) {
@@ -232,12 +285,8 @@ class _RecipeScreenState extends ConsumerState<RecipeScreen> {
                           icon: recipes.isEmpty
                               ? Icons.menu_book_outlined
                               : Icons.search_off_rounded,
-                          onAction: recipes.isEmpty
-                              ? () => _openRecipeForm()
-                              : _clearFilters,
-                          actionLabel: recipes.isEmpty
-                              ? 'Tambah resep'
-                              : 'Hapus filter',
+                          onAction: recipes.isEmpty ? null : _clearFilters,
+                          actionLabel: recipes.isEmpty ? null : 'Hapus filter',
                         )
                       : LayoutBuilder(
                           builder: (context, constraints) {

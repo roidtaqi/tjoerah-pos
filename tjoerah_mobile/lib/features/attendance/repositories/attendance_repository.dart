@@ -371,6 +371,34 @@ class AttendanceRepository {
         .toList();
   }
 
+  Future<Uint8List> downloadScheduleTemplate(int outletId) async {
+    final response = await ApiClient.get(
+      '/attendance/schedules/template?outlet_id=$outletId&days=7',
+    );
+    if (response.statusCode != 200) {
+      throw _apiError(response.body, response.statusCode);
+    }
+    return response.bodyBytes;
+  }
+
+  Future<int> importSchedules({
+    required int outletId,
+    required Uint8List bytes,
+    required String filename,
+  }) async {
+    final response = await ApiClient.uploadFile(
+      '/attendance/schedules/import',
+      bytes: bytes,
+      filename: filename,
+      fields: {'outlet_id': '$outletId'},
+    );
+    if (response.statusCode != 200) {
+      throw _apiError(response.body, response.statusCode);
+    }
+    final body = Map<String, dynamic>.from(jsonDecode(response.body) as Map);
+    return _asInt(body['imported_schedules']);
+  }
+
   Future<EmployeeScheduleModel> createSchedule(
     Map<String, dynamic> data,
   ) async {
@@ -493,5 +521,9 @@ class AttendanceRepository {
     return '${date.year.toString().padLeft(4, '0')}-'
         '${date.month.toString().padLeft(2, '0')}-'
         '${date.day.toString().padLeft(2, '0')}';
+  }
+
+  int _asInt(dynamic value) {
+    return value is int ? value : int.tryParse('$value') ?? 0;
   }
 }

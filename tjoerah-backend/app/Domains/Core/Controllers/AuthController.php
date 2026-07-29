@@ -18,7 +18,9 @@ class AuthController extends Controller
         ]);
 
         if ($request->has('pin') && $request->pin) {
-            $user = User::where('pin', $request->pin)->first();
+            $user = User::where('pin', $request->pin)
+                ->where('is_active', true)
+                ->first();
             if (! $user) {
                 return response()->json([
                     'message' => 'Invalid PIN.',
@@ -27,7 +29,10 @@ class AuthController extends Controller
             }
             $token = Auth::guard('api')->login($user);
         } else {
-            $credentials = $request->only('email', 'password');
+            $credentials = [
+                ...$request->only('email', 'password'),
+                'is_active' => true,
+            ];
             if (! $token = Auth::guard('api')->attempt($credentials)) {
                 return response()->json([
                     'message' => 'Invalid credentials.',

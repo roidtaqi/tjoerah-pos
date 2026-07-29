@@ -106,6 +106,8 @@ Route::middleware('auth:api')->group(function () {
         Route::match(['put', 'patch'], '/recipes/{recipe}', [RecipeController::class, 'update']);
         Route::delete('/recipes/{recipe}', [RecipeController::class, 'destroy']);
         Route::post('/recipes/version', [RecipeController::class, 'version']);
+        Route::get('/recipes/template', [RecipeController::class, 'template']);
+        Route::post('/recipes/import', [RecipeController::class, 'import']);
     });
 
     Route::get('/suppliers', [PurchaseController::class, 'suppliers']);
@@ -131,6 +133,7 @@ Route::middleware('auth:api')->group(function () {
 
     Route::middleware('role:owner,admin')->group(function () {
         Route::get('/employees', [EmployeeController::class, 'index']);
+        Route::get('/employees/options', [EmployeeController::class, 'options']);
         Route::post('/employees', [EmployeeController::class, 'store']);
         Route::match(['put', 'patch'], '/employees/{employee}', [EmployeeController::class, 'update']);
         Route::delete('/employees/{employee}', [EmployeeController::class, 'destroy']);
@@ -146,6 +149,8 @@ Route::middleware('auth:api')->group(function () {
         Route::delete('/attendance/shifts/{attendanceShift}', [AttendanceController::class, 'destroyAttendanceShift']);
         Route::put('/attendance/shift-assignments', [AttendanceController::class, 'assignAttendanceShifts']);
         Route::get('/attendance/schedules', [AttendanceController::class, 'schedules']);
+        Route::get('/attendance/schedules/template', [AttendanceController::class, 'scheduleTemplate']);
+        Route::post('/attendance/schedules/import', [AttendanceController::class, 'importSchedules']);
         Route::post('/attendance/schedules', [AttendanceController::class, 'storeSchedule']);
         Route::match(['put', 'patch'], '/attendance/schedules/{schedule}', [AttendanceController::class, 'updateSchedule']);
         Route::delete('/attendance/schedules/{schedule}', [AttendanceController::class, 'destroySchedule']);

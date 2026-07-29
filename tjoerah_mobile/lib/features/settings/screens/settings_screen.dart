@@ -63,6 +63,14 @@ class SettingsScreen extends ConsumerWidget {
                           icon: Icons.fact_check_outlined,
                           onTap: () => context.push('/attendance/manage'),
                         ),
+                        const Divider(),
+                        AppListTile(
+                          title: 'Karyawan & akses',
+                          subtitle:
+                              'Tambah profil, akun login, role, outlet, dan shift',
+                          icon: Icons.badge_outlined,
+                          onTap: () => context.push('/employees/manage'),
+                        ),
                       ],
                       const Divider(),
                       if (role == AppRole.production)
@@ -106,7 +114,8 @@ class SettingsScreen extends ConsumerWidget {
                           ],
                           AppListTile(
                             title: 'Resep & HPP',
-                            subtitle: 'Komposisi, susut, dan biaya produk',
+                            subtitle:
+                                'Tambah resep, impor CSV, komposisi, dan HPP',
                             icon: Icons.menu_book_outlined,
                             onTap: () => context.push('/recipes'),
                           ),

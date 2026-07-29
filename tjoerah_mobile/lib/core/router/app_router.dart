@@ -6,6 +6,7 @@ import '../../features/attendance/screens/attendance_screen.dart';
 import '../../features/auth/screens/login_screen.dart';
 import '../../features/customers/screens/customers_screen.dart';
 import '../../features/dashboard/screens/dashboard_screen.dart';
+import '../../features/employees/screens/employee_management_screen.dart';
 import '../../features/inventory/screens/inventory_screen.dart';
 import '../../features/kds/screens/kds_screen.dart';
 import '../../features/operations/screens/operations_screen.dart';
@@ -92,6 +93,11 @@ final GoRouter appRouter = GoRouter(
       path: '/attendance/manage',
       parentNavigatorKey: _rootNavigatorKey,
       builder: (context, state) => const AttendanceAdminScreen(),
+    ),
+    GoRoute(
+      path: '/employees/manage',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (context, state) => const EmployeeManagementScreen(),
     ),
     GoRoute(
       path: '/categories/manage',

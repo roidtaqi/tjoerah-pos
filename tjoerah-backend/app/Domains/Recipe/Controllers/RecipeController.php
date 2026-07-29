@@ -7,6 +7,7 @@ use App\Domains\POS\Models\Product;
 use App\Domains\Recipe\Models\Recipe;
 use App\Domains\Recipe\Models\RecipeVersion;
 use App\Http\Controllers\Controller;
+use App\Support\CsvTable;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -197,6 +198,223 @@ class RecipeController extends Controller
             ->when($request->integer('product_id'), fn ($query, $productId) => $query->where('product_id', $productId))
             ->orderBy('name')
             ->paginate(100);
+    }
+
+    public function template(Request $request)
+    {
+        $companyId = $request->user()?->company_id;
+        $product = Product::query()
+            ->when($companyId, fn ($query) => $query->where('company_id', $companyId))
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->first();
+        $ingredients = InventoryItem::query()
+            ->when($companyId, fn ($query) => $query->where('company_id', $companyId))
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->limit(2)
+            ->get();
+
+        $sampleIngredients = $ingredients->isNotEmpty()
+            ? $ingredients
+            : collect([(object) [
+                'name' => 'Nama bahan persediaan',
+                'sku' => '',
+                'unit' => 'g',
+            ]]);
+        $productName = $product?->name ?? 'Nama produk di aplikasi';
+        $rows = $sampleIngredients->values()->map(
+            fn ($ingredient, $index) => [
+                "Resep {$productName}",
+                $productName,
+                'draft',
+                1,
+                'porsi',
+                $ingredient->name,
+                $ingredient->sku ?? '',
+                $index === 0 ? 10 : 20,
+                $ingredient->unit ?: 'pcs',
+                0,
+                '',
+            ],
+        )->all();
+
+        return CsvTable::download(
+            'template-resep.csv',
+            [
+                'recipe_name',
+                'product_name',
+                'status',
+                'yield_quantity',
+                'yield_unit',
+                'ingredient_name',
+                'ingredient_sku',
+                'quantity',
+                'unit',
+                'waste_percent',
+                'notes',
+            ],
+            $rows,
+        );
+    }
+
+    public function import(Request $request)
+    {
+        $validated = $request->validate([
+            'file' => 'required|file|max:5120',
+        ]);
+        $rows = CsvTable::read($validated['file']);
+        CsvTable::requireHeaders($rows, [
+            'recipe_name',
+            'product_name',
+            'status',
+            'yield_quantity',
+            'yield_unit',
+            'ingredient_name',
+            'quantity',
+        ]);
+
+        $companyId = $request->user()?->company_id;
+        $groups = collect($rows)->groupBy(
+            fn ($row) => mb_strtolower(trim($row['product_name'])),
+        );
+        $created = 0;
+        $updated = 0;
+
+        DB::transaction(function () use (
+            $groups,
+            $companyId,
+            $request,
+            &$created,
+            &$updated,
+        ): void {
+            foreach ($groups as $group) {
+                $first = $group->first();
+                $line = (int) $first['_line'];
+                $productName = trim($first['product_name']);
+                $recipeName = trim($first['recipe_name']);
+                $status = trim($first['status']) ?: 'draft';
+                $yieldQuantity = (float) $first['yield_quantity'];
+                $yieldUnit = trim($first['yield_unit']);
+
+                $this->validateImportedRecipeHeader(
+                    $line,
+                    $recipeName,
+                    $productName,
+                    $status,
+                    $yieldQuantity,
+                    $yieldUnit,
+                );
+                $product = Product::query()
+                    ->when($companyId, fn ($query) => $query->where('company_id', $companyId))
+                    ->whereRaw('LOWER(name) = ?', [mb_strtolower($productName)])
+                    ->first();
+                if (! $product) {
+                    $this->importError(
+                        $line,
+                        "Produk '{$productName}' tidak ditemukan.",
+                    );
+                }
+
+                $items = $group->map(function (array $row) use ($companyId) {
+                    $line = (int) $row['_line'];
+                    $ingredientName = trim($row['ingredient_name']);
+                    $sku = trim($row['ingredient_sku'] ?? '');
+                    $quantity = (float) $row['quantity'];
+                    $wastePercent = (float) ($row['waste_percent'] ?: 0);
+                    if ($ingredientName === '' || $quantity <= 0) {
+                        $this->importError(
+                            $line,
+                            'Nama bahan dan quantity lebih dari 0 wajib diisi.',
+                        );
+                    }
+                    if ($wastePercent < 0 || $wastePercent > 100) {
+                        $this->importError(
+                            $line,
+                            'Waste percent harus berada di antara 0 dan 100.',
+                        );
+                    }
+
+                    $ingredient = InventoryItem::query()
+                        ->when($companyId, fn ($query) => $query->where('company_id', $companyId))
+                        ->when(
+                            $sku !== '',
+                            fn ($query) => $query->whereRaw('LOWER(sku) = ?', [mb_strtolower($sku)]),
+                            fn ($query) => $query->whereRaw('LOWER(name) = ?', [mb_strtolower($ingredientName)]),
+                        )
+                        ->first();
+                    if (! $ingredient) {
+                        $reference = $sku !== '' ? "SKU {$sku}" : $ingredientName;
+                        $this->importError(
+                            $line,
+                            "Bahan '{$reference}' tidak ditemukan.",
+                        );
+                    }
+
+                    return [
+                        'inventory_item_id' => $ingredient->id,
+                        'quantity' => $quantity,
+                        'waste_percent' => $wastePercent,
+                        'notes' => trim($row['notes'] ?? '') ?: null,
+                    ];
+                })->values()->all();
+
+                $duplicateIngredient = collect($items)
+                    ->groupBy('inventory_item_id')
+                    ->first(fn ($items) => $items->count() > 1);
+                if ($duplicateIngredient) {
+                    $this->importError(
+                        $line,
+                        'Satu bahan tidak boleh muncul dua kali dalam resep yang sama.',
+                    );
+                }
+
+                $recipe = Recipe::query()
+                    ->when($companyId, fn ($query) => $query->where('company_id', $companyId))
+                    ->where('product_id', $product->id)
+                    ->first();
+                $versionNumber = $recipe
+                    ? ((int) $recipe->versions()->max('version')) + 1
+                    : 1;
+                if ($recipe) {
+                    $recipe->update([
+                        'name' => $recipeName,
+                        'status' => $status,
+                        'active_version' => $versionNumber,
+                        'yield_quantity' => $yieldQuantity,
+                        'yield_unit' => $yieldUnit,
+                    ]);
+                    $updated++;
+                } else {
+                    $recipe = Recipe::create([
+                        'company_id' => $companyId,
+                        'product_id' => $product->id,
+                        'name' => $recipeName,
+                        'status' => $status,
+                        'active_version' => 1,
+                        'yield_quantity' => $yieldQuantity,
+                        'yield_unit' => $yieldUnit,
+                        'current_cost' => 0,
+                    ]);
+                    $created++;
+                }
+
+                $this->createVersion(
+                    $recipe,
+                    $items,
+                    $versionNumber,
+                    $status,
+                    $request->user()?->id,
+                );
+            }
+        });
+
+        return response()->json([
+            'message' => 'Impor resep berhasil.',
+            'imported_recipes' => $created + $updated,
+            'created' => $created,
+            'updated' => $updated,
+        ]);
     }
 
     private function recipeRules(?Recipe $recipe = null): array
@@ -395,5 +613,37 @@ class RecipeController extends Controller
                 $request->merge([$field => null]);
             }
         }
+    }
+
+    private function validateImportedRecipeHeader(
+        int $line,
+        string $recipeName,
+        string $productName,
+        string $status,
+        float $yieldQuantity,
+        string $yieldUnit,
+    ): void {
+        if ($recipeName === '' || $productName === '' || $yieldUnit === '') {
+            $this->importError(
+                $line,
+                'Nama resep, produk, dan satuan hasil wajib diisi.',
+            );
+        }
+        if (! in_array($status, ['draft', 'active', 'inactive'], true)) {
+            $this->importError(
+                $line,
+                'Status harus draft, active, atau inactive.',
+            );
+        }
+        if ($yieldQuantity <= 0) {
+            $this->importError($line, 'Yield quantity harus lebih dari 0.');
+        }
+    }
+
+    private function importError(int $line, string $message): never
+    {
+        throw ValidationException::withMessages([
+            'file' => "Baris {$line}: {$message}",
+        ]);
     }
 }

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/attendance_models.dart';
@@ -167,6 +169,29 @@ class AttendanceAdminNotifier extends AsyncNotifier<AttendanceAdminState> {
       return const AttendanceAdminResult(
         false,
         'Jadwal belum dapat disimpan. Periksa koneksi server.',
+      );
+    }
+  }
+
+  Future<AttendanceAdminResult> importSchedules({
+    required Uint8List bytes,
+    required String filename,
+  }) async {
+    try {
+      final current = state.requireValue;
+      final count = await _repository.importSchedules(
+        outletId: current.selectedOutlet.id,
+        bytes: bytes,
+        filename: filename,
+      );
+      await refresh();
+      return AttendanceAdminResult(true, '$count jadwal berhasil diimpor.');
+    } on AttendanceApiException catch (error) {
+      return AttendanceAdminResult(false, error.message);
+    } catch (_) {
+      return const AttendanceAdminResult(
+        false,
+        'Jadwal belum dapat diimpor. Periksa file dan koneksi server.',
       );
     }
   }

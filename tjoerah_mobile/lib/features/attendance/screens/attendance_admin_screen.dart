@@ -11,6 +11,7 @@ import '../../../core/router/role_navigation.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_layout.dart';
 import '../../../core/utils/app_date_formatter.dart';
+import '../../../core/utils/csv_transfer_service.dart';
 import '../../../shared/components/app_badge.dart';
 import '../../../shared/components/app_bottom_sheet.dart';
 import '../../../shared/components/app_button.dart';
@@ -121,6 +122,9 @@ class _AttendanceAdminScreenState extends ConsumerState<AttendanceAdminScreen> {
                         onAdd: () => _openScheduleForm(data),
                         onEdit: (schedule) => _openScheduleForm(data, schedule),
                         onDelete: _confirmDeleteSchedule,
+                        onDownloadTemplate: () =>
+                            _downloadScheduleTemplate(data),
+                        onImport: _importSchedules,
                       ),
                       _AttendanceShiftTab(
                         shifts: data.shifts,
@@ -229,6 +233,44 @@ class _AttendanceAdminScreenState extends ConsumerState<AttendanceAdminScreen> {
     final result = await ref
         .read(attendanceAdminProvider.notifier)
         .deleteSchedule(schedule);
+    if (!mounted) return;
+    setState(() => _isMutating = false);
+    _showResult(result);
+  }
+
+  Future<void> _downloadScheduleTemplate(AttendanceAdminState data) async {
+    setState(() => _isMutating = true);
+    try {
+      final bytes = await ref
+          .read(attendanceRepositoryProvider)
+          .downloadScheduleTemplate(data.selectedOutlet.id);
+      await CsvTransferService.share(
+        bytes: bytes,
+        filename:
+            'template-jadwal-${data.selectedOutlet.name.toLowerCase().replaceAll(' ', '-')}.csv',
+        subject: 'Template jadwal ${data.selectedOutlet.name}',
+      );
+    } catch (_) {
+      if (mounted) {
+        _showResult(
+          const AttendanceAdminResult(
+            false,
+            'Template jadwal belum dapat diunduh.',
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isMutating = false);
+    }
+  }
+
+  Future<void> _importSchedules() async {
+    final file = await CsvTransferService.pick();
+    if (file == null || !mounted) return;
+    setState(() => _isMutating = true);
+    final result = await ref
+        .read(attendanceAdminProvider.notifier)
+        .importSchedules(bytes: file.bytes, filename: file.name);
     if (!mounted) return;
     setState(() => _isMutating = false);
     _showResult(result);
@@ -846,6 +888,8 @@ class _ScheduleTab extends StatelessWidget {
     required this.onAdd,
     required this.onEdit,
     required this.onDelete,
+    required this.onDownloadTemplate,
+    required this.onImport,
   });
 
   final AttendanceAdminState data;
@@ -853,6 +897,8 @@ class _ScheduleTab extends StatelessWidget {
   final VoidCallback onAdd;
   final ValueChanged<EmployeeScheduleModel> onEdit;
   final ValueChanged<EmployeeScheduleModel> onDelete;
+  final VoidCallback onDownloadTemplate;
+  final VoidCallback onImport;
 
   @override
   Widget build(BuildContext context) {
@@ -874,6 +920,17 @@ class _ScheduleTab extends StatelessWidget {
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
                     ),
+                    IconButton(
+                      tooltip: 'Unduh template jadwal',
+                      onPressed: enabled ? onDownloadTemplate : null,
+                      icon: const Icon(Icons.download_outlined),
+                    ),
+                    IconButton(
+                      tooltip: 'Impor jadwal CSV',
+                      onPressed: enabled ? onImport : null,
+                      icon: const Icon(Icons.upload_file_outlined),
+                    ),
+                    const SizedBox(width: 4),
                     FilledButton.icon(
                       onPressed: enabled ? onAdd : null,
                       icon: const Icon(Icons.add_rounded),

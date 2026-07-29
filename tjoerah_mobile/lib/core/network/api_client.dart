@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -37,6 +38,29 @@ class ApiClient {
           })
           ..fields.addAll(fields)
           ..files.add(await http.MultipartFile.fromPath('photo', photoPath));
+    final streamed = await _client.send(request).timeout(requestTimeout);
+    return http.Response.fromStream(streamed);
+  }
+
+  static Future<http.Response> uploadFile(
+    String endpoint, {
+    required Uint8List bytes,
+    required String filename,
+    String fieldName = 'file',
+    Map<String, String> fields = const {},
+  }) async {
+    final headers = await _getHeaders();
+    final request =
+        http.MultipartRequest('POST', Uri.parse('$baseUrl$endpoint'))
+          ..headers.addAll({
+            'Accept': headers['Accept']!,
+            if (headers['Authorization'] != null)
+              'Authorization': headers['Authorization']!,
+          })
+          ..fields.addAll(fields)
+          ..files.add(
+            http.MultipartFile.fromBytes(fieldName, bytes, filename: filename),
+          );
     final streamed = await _client.send(request).timeout(requestTimeout);
     return http.Response.fromStream(streamed);
   }
