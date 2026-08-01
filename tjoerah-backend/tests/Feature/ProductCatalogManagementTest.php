@@ -176,6 +176,43 @@ class ProductCatalogManagementTest extends TestCase
         $this->assertSoftDeleted('products', ['id' => $product['id']]);
     }
 
+    public function test_catalog_sync_uses_etag_and_invalidates_it_after_a_change(): void
+    {
+        $company = Company::create(['name' => 'Tjoerah']);
+        $owner = User::factory()->create([
+            'company_id' => $company->id,
+            'role' => 'owner',
+        ]);
+        Product::create([
+            'company_id' => $company->id,
+            'name' => 'Americano',
+            'base_price' => 22000,
+            'is_active' => true,
+        ]);
+        $this->actingAs($owner, 'api');
+
+        $first = $this->getJson('/api/catalog/sync')->assertOk();
+        $etag = $first->headers->get('ETag');
+        $this->assertNotEmpty($etag);
+
+        $this->withHeader('If-None-Match', $etag)
+            ->getJson('/api/catalog/sync')
+            ->assertStatus(304)
+            ->assertContent('');
+
+        $this->postJson('/api/products', [
+            'name' => 'Latte',
+            'base_price' => 25000,
+            'is_active' => true,
+        ])->assertCreated();
+
+        $changed = $this->withHeader('If-None-Match', $etag)
+            ->getJson('/api/catalog/sync')
+            ->assertOk()
+            ->assertJsonCount(2, 'products');
+        $this->assertNotSame($etag, $changed->headers->get('ETag'));
+    }
+
     public function test_admin_direct_or_assigned_role_can_manage_catalog(): void
     {
         $admin = User::factory()->create(['role' => 'admin']);

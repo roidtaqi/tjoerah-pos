@@ -8,6 +8,7 @@ use App\Domains\POS\Models\Product;
 use App\Http\Controllers\Controller;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -15,23 +16,41 @@ class ProductCatalogController extends Controller
 {
     public function sync(Request $request)
     {
-        $categories = Category::with([
-            'children' => fn ($query) => $query->where('is_active', true)->orderBy('sort_order'),
-        ])
-            ->whereNull('parent_id')
-            ->where('is_active', true)
-            ->when($request->user()?->company_id, fn ($query, $companyId) => $query->where('company_id', $companyId))
-            ->orderBy('sort_order')
-            ->get();
-        $products = $this->productQuery($request)
-            ->where('is_active', true)
-            ->orderBy('name')
-            ->get();
+        $companyId = $request->user()?->company_id ?? $request->integer('company_id');
+        $payload = Cache::remember(
+            $this->catalogCacheKey($companyId),
+            now()->addMinutes(5),
+            function () use ($request, $companyId): array {
+                $categories = Category::with([
+                    'children' => fn ($query) => $query->where('is_active', true)->orderBy('sort_order'),
+                ])
+                    ->whereNull('parent_id')
+                    ->where('is_active', true)
+                    ->when($companyId, fn ($query) => $query->where('company_id', $companyId))
+                    ->orderBy('sort_order')
+                    ->get();
+                $products = $this->productQuery($request)
+                    ->where('is_active', true)
+                    ->orderBy('name')
+                    ->get();
 
-        return response()->json([
-            'categories' => $categories,
-            'products' => $products,
-        ]);
+                return [
+                    'categories' => $categories->toArray(),
+                    'products' => $products->toArray(),
+                ];
+            },
+        );
+        $etag = '"'.hash('sha256', json_encode($payload, JSON_THROW_ON_ERROR)).'"';
+        $headers = [
+            'Cache-Control' => 'private, max-age=0, must-revalidate',
+            'ETag' => $etag,
+        ];
+
+        if ($request->header('If-None-Match') === $etag) {
+            return response('', 304, $headers);
+        }
+
+        return response()->json($payload, 200, $headers);
     }
 
     public function getProducts(Request $request)
@@ -94,6 +113,7 @@ class ProductCatalogController extends Controller
         }
 
         $product = Product::create($validated);
+        $this->forgetCatalogCache($product->company_id);
 
         return response()->json(
             $product->load(['variants', 'modifierGroups.options', 'category']),
@@ -111,6 +131,7 @@ class ProductCatalogController extends Controller
             $validated['company_id'] = $request->user()->company_id;
         }
         $product->update($validated);
+        $this->forgetCatalogCache($product->company_id);
 
         return response()->json($product->fresh()->load([
             'variants',
@@ -122,7 +143,9 @@ class ProductCatalogController extends Controller
     public function destroyProduct(Request $request, Product $product)
     {
         $this->ensureProductIsAccessible($request, $product);
+        $companyId = $product->company_id;
         $product->delete();
+        $this->forgetCatalogCache($companyId);
 
         return response()->noContent();
     }
@@ -207,6 +230,7 @@ class ProductCatalogController extends Controller
         }
         $this->validateCategoryParent($request, $validated);
         $category = Category::create($validated);
+        $this->forgetCatalogCache($category->company_id);
 
         return response()->json($category->load(['parent', 'children']), 201);
     }
@@ -222,6 +246,7 @@ class ProductCatalogController extends Controller
         }
         $this->validateCategoryParent($request, $validated, $category);
         $category->update($validated);
+        $this->forgetCatalogCache($category->company_id);
 
         return response()->json($category->fresh()->load(['parent', 'children']));
     }
@@ -241,7 +266,9 @@ class ProductCatalogController extends Controller
             ]);
         }
 
+        $companyId = $category->company_id;
         $category->delete();
+        $this->forgetCatalogCache($companyId);
 
         return response()->noContent();
     }
@@ -302,6 +329,16 @@ class ProductCatalogController extends Controller
                 $request->merge([$field => null]);
             }
         }
+    }
+
+    private function catalogCacheKey(int|string|null $companyId): string
+    {
+        return 'catalog-sync:v1:company:'.($companyId ?? 'all');
+    }
+
+    private function forgetCatalogCache(int|string|null $companyId): void
+    {
+        Cache::forget($this->catalogCacheKey($companyId));
     }
 
     public function modifierGroups(Request $request)

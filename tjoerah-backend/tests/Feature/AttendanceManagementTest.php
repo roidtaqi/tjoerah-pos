@@ -108,6 +108,46 @@ class AttendanceManagementTest extends TestCase
             ->assertJsonPath('attendance.check_in_is_mock', true);
     }
 
+    public function test_attendance_photo_is_rejected_when_it_exceeds_the_upload_limit(): void
+    {
+        Storage::fake('local');
+        [$cashier, , $outlet] = $this->attendanceFixture();
+        $this->actingAs($cashier, 'api');
+
+        $this->post('/api/attendance/check-in', [
+            ...$this->capturePayload($outlet, (string) Str::uuid()),
+            'photo' => UploadedFile::fake()
+                ->image('too-large.jpg', 960, 960)
+                ->size(1025),
+        ], ['Accept' => 'application/json'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('photo');
+
+        $this->assertDatabaseCount('attendance_logs', 0);
+    }
+
+    public function test_attendance_photo_uses_the_configured_private_disk(): void
+    {
+        Storage::fake('attendance-photos');
+        config(['attendance.photo_disk' => 'attendance-photos']);
+        [$cashier, , $outlet] = $this->attendanceFixture();
+        $this->actingAs($cashier, 'api');
+
+        $attendanceId = $this->post('/api/attendance/check-in', [
+            ...$this->capturePayload($outlet, (string) Str::uuid()),
+            'photo' => UploadedFile::fake()->image('check-in.jpg', 480, 640),
+        ], ['Accept' => 'application/json'])
+            ->assertCreated()
+            ->json('attendance.id');
+
+        $attendance = AttendanceLog::findOrFail($attendanceId);
+        Storage::disk('attendance-photos')->assertExists(
+            $attendance->getRawOriginal('check_in_photo_path'),
+        );
+        $this->get("/api/attendance/{$attendance->id}/photo/check-in")
+            ->assertOk();
+    }
+
     public function test_owner_can_manage_policy_schedule_report_and_review(): void
     {
         Storage::fake('local');

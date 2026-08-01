@@ -19,7 +19,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 9,
+      version: 10,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -52,6 +52,7 @@ class DatabaseHelper {
     if (oldVersion < 7) await _createOfflineAttendanceTable(db);
     if (oldVersion < 8) await _upgradeRecipesTable(db);
     if (oldVersion < 9) await _upgradeInventoryItemsTable(db);
+    if (oldVersion < 10) await _createIndexes(db);
   }
 
   Future<void> _createDB(Database db, int version) async {
@@ -192,6 +193,7 @@ class DatabaseHelper {
 
     await _createCustomersTable(db);
     await _createOfflineAttendanceTable(db);
+    await _createIndexes(db);
   }
 
   Future<void> _createCustomersTable(Database db) async {
@@ -295,6 +297,32 @@ class DatabaseHelper {
         FOREIGN KEY (recipe_id) REFERENCES recipes (id) ON DELETE CASCADE
       )
     ''');
+  }
+
+  Future<void> _createIndexes(Database db) async {
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS products_category_active_idx '
+      'ON products(category_id, is_active)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS categories_parent_sort_idx '
+      'ON categories(parent_id, is_active, sort_order)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS offline_orders_status_created_idx '
+      'ON offline_orders(status, created_at)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS offline_attendance_status_created_idx '
+      'ON offline_attendance_actions(status, created_at)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS customers_sync_idx ON customers(is_synced)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS dining_tables_floor_status_idx '
+      'ON dining_tables(floor_id, status)',
+    );
   }
 
   Future<void> clearCatalog() async {

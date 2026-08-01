@@ -234,12 +234,19 @@ class _AttendanceAdminScreenState extends ConsumerState<AttendanceAdminScreen> {
   }
 
   Future<void> _confirmDeleteSchedule(EmployeeScheduleModel schedule) async {
+    final employeeName = ref
+        .read(attendanceAdminProvider)
+        .value
+        ?.employees
+        .where((employee) => employee.id == schedule.employeeId)
+        .firstOrNull
+        ?.name;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Hapus jadwal?'),
         content: Text(
-          'Jadwal ${schedule.employee?.name ?? 'karyawan'} pada '
+          'Jadwal ${schedule.employee?.name ?? employeeName ?? 'karyawan'} pada '
           '${AppDateFormatter.longDate(schedule.workDate)} akan dihapus.',
         ),
         actions: [

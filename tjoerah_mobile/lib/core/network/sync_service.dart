@@ -1,12 +1,26 @@
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'api_client.dart';
 import '../database/database_helper.dart';
 
 class SyncService {
+  static const _catalogEtagKey = 'catalog_sync_etag';
+
   static Future<bool> syncCatalog() async {
     try {
-      final response = await ApiClient.get('/catalog/sync');
+      final preferences = await SharedPreferences.getInstance();
+      final etag = preferences.getString(_catalogEtagKey);
+      final response = await ApiClient.get(
+        '/catalog/sync',
+        additionalHeaders: {
+          if (etag != null && etag.isNotEmpty) 'If-None-Match': etag,
+        },
+      );
+
+      if (response.statusCode == 304) return true;
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -21,10 +35,10 @@ class SyncService {
           await txn.delete('products');
           await txn.delete('categories');
 
-          // Insert categories
+          final batch = txn.batch();
           for (final root in categories.whereType<Map>()) {
             for (final cat in _flattenCategories(root)) {
-              await txn.insert('categories', {
+              batch.insert('categories', {
                 'id': cat['id'].toString(),
                 'name': cat['name'],
                 'parent_id': cat['parent_id']?.toString(),
@@ -36,9 +50,8 @@ class SyncService {
             }
           }
 
-          // Insert products
           for (var prod in products) {
-            await txn.insert('products', {
+            batch.insert('products', {
               'id': prod['id'].toString(),
               'category_id': prod['category_id']?.toString(),
               'name': prod['name'],
@@ -60,7 +73,13 @@ class SyncService {
                   : 0,
             });
           }
+          await batch.commit(noResult: true);
         });
+
+        final responseEtag = response.headers['etag'];
+        if (responseEtag != null && responseEtag.isNotEmpty) {
+          await preferences.setString(_catalogEtagKey, responseEtag);
+        }
 
         debugPrint(
           'Catalog synced successfully: ${categories.length} categories, ${products.length} products',

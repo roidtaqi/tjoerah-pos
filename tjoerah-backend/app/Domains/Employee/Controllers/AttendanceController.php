@@ -166,9 +166,10 @@ class AttendanceController extends Controller
         $path = $type === 'check-in'
             ? $attendance->getRawOriginal('check_in_photo_path')
             : $attendance->getRawOriginal('check_out_photo_path');
-        abort_if(blank($path) || ! Storage::disk('local')->exists($path), 404);
+        $disk = Storage::disk(config('attendance.photo_disk', 'local'));
+        abort_if(blank($path) || ! $disk->exists($path), 404);
 
-        return Storage::disk('local')->response($path, basename($path), [
+        return $disk->response($path, basename($path), [
             'Cache-Control' => 'private, max-age=300',
         ]);
     }
@@ -891,7 +892,13 @@ class AttendanceController extends Controller
     {
         return [
             'outlet_id' => 'nullable|integer|exists:outlets,id',
-            'photo' => 'nullable|image|mimes:jpg,jpeg,png|max:5120',
+            'photo' => [
+                'nullable',
+                'image',
+                'mimes:jpg,jpeg',
+                'max:'.config('attendance.photo_max_kilobytes', 1024),
+                'dimensions:max_width=1600,max_height=1600',
+            ],
             'latitude' => 'required|numeric|between:-90,90',
             'longitude' => 'required|numeric|between:-180,180',
             'accuracy_meters' => 'required|numeric|min:0|max:100000',
@@ -1106,7 +1113,7 @@ class AttendanceController extends Controller
             ->addDay()
             ->toDateString();
 
-        return EmployeeSchedule::with(['employee', 'outlet', 'attendanceShift'])
+        return EmployeeSchedule::query()
             ->withExists('attendance')
             ->where('work_date', '>=', $dateFrom)
             ->where('work_date', '<', $dateToExclusive)

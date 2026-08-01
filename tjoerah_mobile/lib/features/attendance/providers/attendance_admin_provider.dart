@@ -155,12 +155,16 @@ class AttendanceAdminNotifier extends AsyncNotifier<AttendanceAdminState> {
     int? scheduleId,
   }) async {
     try {
-      if (scheduleId == null) {
-        await _repository.createSchedule(data);
-      } else {
-        await _repository.updateSchedule(scheduleId, data);
-      }
-      await refresh();
+      final saved = scheduleId == null
+          ? await _repository.createSchedule(data)
+          : await _repository.updateSchedule(scheduleId, data);
+      final current = state.requireValue;
+      final schedules = scheduleId == null
+          ? [...current.schedules, saved]
+          : current.schedules
+                .map((schedule) => schedule.id == saved.id ? saved : schedule)
+                .toList();
+      state = AsyncValue.data(current.copyWith(schedules: schedules));
       return AttendanceAdminResult(
         true,
         scheduleId == null
@@ -269,7 +273,14 @@ class AttendanceAdminNotifier extends AsyncNotifier<AttendanceAdminState> {
   ) async {
     try {
       await _repository.deleteSchedule(schedule.id);
-      await refresh();
+      final current = state.requireValue;
+      state = AsyncValue.data(
+        current.copyWith(
+          schedules: current.schedules
+              .where((item) => item.id != schedule.id)
+              .toList(),
+        ),
+      );
       return const AttendanceAdminResult(true, 'Jadwal berhasil dihapus.');
     } on AttendanceApiException catch (error) {
       return AttendanceAdminResult(false, error.message);

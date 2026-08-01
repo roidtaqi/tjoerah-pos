@@ -42,12 +42,8 @@ dependencies:
   uuid: ^4.5.3
   path: ^1.9.1
   flutter_riverpod: ^3.3.2
-  # Temporary pin to the upstream built-in Kotlin migration (release 2.7.0).
-  # Return to a hosted constraint after pusher-channels-flutter#210 is released.
-  pusher_channels_flutter:
-    git:
-      url: https://github.com/pusher/pusher-channels-flutter.git
-      ref: b14d3129d8b7e8d67d923169c8d2c86e9d378010
+  pusher_client_socket: ^0.0.8
+  image: ^4.9.1
   blue_thermal_printer: ^1.2.3
   fl_chart: ^1.2.0
   intl: ^0.20.3

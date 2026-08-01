@@ -172,7 +172,7 @@ class AttendanceService
             ]));
         } catch (Throwable $error) {
             if ($photoData['path']) {
-                Storage::disk('local')->delete($photoData['path']);
+                Storage::disk(config('attendance.photo_disk', 'local'))->delete($photoData['path']);
             }
             throw $error;
         }
@@ -264,7 +264,7 @@ class AttendanceService
             });
         } catch (Throwable $error) {
             if ($photoData['path']) {
-                Storage::disk('local')->delete($photoData['path']);
+                Storage::disk(config('attendance.photo_disk', 'local'))->delete($photoData['path']);
             }
             throw $error;
         }
@@ -544,7 +544,12 @@ class AttendanceService
             $capturedAt->format('Y/m'),
         );
         $filename = sprintf('%s-%s.jpg', $type, Str::uuid());
-        $path = $photo->storeAs($directory, $filename, 'local');
+        $hash = hash_file('sha256', $photo->getRealPath());
+        $path = $photo->storeAs(
+            $directory,
+            $filename,
+            config('attendance.photo_disk', 'local'),
+        );
 
         if (! $path) {
             throw ValidationException::withMessages([
@@ -554,7 +559,7 @@ class AttendanceService
 
         return [
             'path' => $path,
-            'hash' => hash_file('sha256', Storage::disk('local')->path($path)),
+            'hash' => $hash,
         ];
     }
 

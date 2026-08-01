@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 import '../models/attendance_models.dart';
 import '../repositories/attendance_repository.dart';
 import '../services/attendance_capture_service.dart';
+import '../services/attendance_photo_optimizer.dart';
 
 final attendanceRepositoryProvider = Provider<AttendanceRepository>(
   (ref) => AttendanceRepository(),
@@ -11,6 +12,10 @@ final attendanceRepositoryProvider = Provider<AttendanceRepository>(
 
 final attendanceCaptureServiceProvider = Provider<AttendanceCaptureService>(
   (ref) => AttendanceCaptureService(),
+);
+
+final attendancePhotoOptimizerProvider = Provider<AttendancePhotoOptimizer>(
+  (ref) => AttendancePhotoOptimizer(),
 );
 
 class AttendanceNotifier extends AsyncNotifier<AttendanceContextModel> {
@@ -58,11 +63,28 @@ class AttendanceNotifier extends AsyncNotifier<AttendanceContextModel> {
       payload['attendance_log_id'] = context.activeAttendance!.id;
     }
 
+    OptimizedAttendancePhoto optimizedPhoto;
+    try {
+      optimizedPhoto = await ref
+          .read(attendancePhotoOptimizerProvider)
+          .optimize(photoPath);
+    } on AttendancePhotoOptimizationException catch (error) {
+      return AttendanceSubmissionResult(
+        isSuccess: false,
+        message: error.message,
+      );
+    } catch (_) {
+      return const AttendanceSubmissionResult(
+        isSuccess: false,
+        message: 'Foto belum dapat diproses. Ambil foto kembali.',
+      );
+    }
+
     try {
       final result = await _repository.submit(
         action: action,
         payload: payload,
-        photoPath: photoPath,
+        photoPath: optimizedPhoto.path,
       );
       state = AsyncValue.data(await _repository.getContext());
       return result;
@@ -76,7 +98,7 @@ class AttendanceNotifier extends AsyncNotifier<AttendanceContextModel> {
         await _repository.queue(
           action: action,
           payload: payload,
-          photoPath: photoPath,
+          photoPath: optimizedPhoto.path,
         );
         state = AsyncValue.data(
           context.copyWith(
@@ -96,6 +118,8 @@ class AttendanceNotifier extends AsyncNotifier<AttendanceContextModel> {
               'Absensi belum dapat disimpan. Periksa ruang penyimpanan dan koneksi.',
         );
       }
+    } finally {
+      await optimizedPhoto.delete();
     }
   }
 

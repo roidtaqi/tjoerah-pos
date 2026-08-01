@@ -2,10 +2,8 @@
 
 namespace App\Domains\Sales\Events;
 
-use App\Domains\Sales\Models\Order;
-use App\Domains\KDS\Models\KitchenTicket;
-use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
+use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
@@ -23,14 +21,26 @@ class OrderCreated implements ShouldBroadcastNow
 
     public function broadcastOn()
     {
-        return new Channel('kds.tickets');
+        return collect($this->tickets)
+            ->pluck('outlet_id')
+            ->filter()
+            ->unique()
+            ->map(fn ($outletId) => new PrivateChannel("kds.outlet.{$outletId}"))
+            ->all();
+    }
+
+    public function broadcastAs(): string
+    {
+        return 'order.created';
     }
 
     public function broadcastWith()
     {
-        // Broadcast new tickets generated from the order
         return [
-            'tickets' => $this->tickets,
+            'tickets' => collect($this->tickets)
+                ->map(fn ($ticket) => $ticket->loadMissing('items')->toArray())
+                ->values()
+                ->all(),
         ];
     }
 }

@@ -2,6 +2,7 @@
 
 namespace App\Domains\Core\Controllers;
 
+use App\Domains\Core\Models\Outlet;
 use App\Domains\Core\Models\User;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
@@ -50,7 +51,7 @@ class AuthController extends Controller
     public function me()
     {
         return response()->json([
-            'user' => Auth::guard('api')->user()->load(['outlets', 'roles']),
+            'user' => $this->authenticatedUser(),
         ]);
     }
 
@@ -69,11 +70,28 @@ class AuthController extends Controller
     protected function respondWithToken($token)
     {
         return response()->json([
-            'user' => Auth::guard('api')->user()->load(['outlets', 'roles']),
+            'user' => $this->authenticatedUser(),
             'token' => $token,
             'token_type' => 'bearer',
             'expires_in' => Auth::guard('api')->factory()->getTTL() * 60,
         ]);
+    }
+
+    private function authenticatedUser(): User
+    {
+        $user = Auth::guard('api')->user()->load('roles');
+        $outlets = $user->company_id
+            ? Outlet::query()
+                ->where('company_id', $user->company_id)
+                ->where('is_active', true)
+                ->orderBy('name')
+                ->get()
+            : $user->outlets()
+                ->where('is_active', true)
+                ->orderBy('name')
+                ->get();
+
+        return $user->setRelation('outlets', $outlets);
     }
 
     public function registerDevice(Request $request)

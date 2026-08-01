@@ -12,12 +12,14 @@ class ApiClient {
   static const Duration requestTimeout = Duration(seconds: 12);
   static final http.Client _client = http.Client();
 
-  static Future<Map<String, String>> _getHeaders() async {
+  static Future<Map<String, String>> authHeaders({
+    bool includeContentType = true,
+  }) async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
 
     return {
-      'Content-Type': 'application/json',
+      if (includeContentType) 'Content-Type': 'application/json',
       'Accept': 'application/json',
       if (token != null) 'Authorization': 'Bearer $token',
     };
@@ -28,7 +30,7 @@ class ApiClient {
     required Map<String, String> fields,
     required String photoPath,
   }) async {
-    final headers = await _getHeaders();
+    final headers = await authHeaders();
     final request =
         http.MultipartRequest('POST', Uri.parse('$baseUrl$endpoint'))
           ..headers.addAll({
@@ -49,7 +51,7 @@ class ApiClient {
     String fieldName = 'file',
     Map<String, String> fields = const {},
   }) async {
-    final headers = await _getHeaders();
+    final headers = await authHeaders();
     final request =
         http.MultipartRequest('POST', Uri.parse('$baseUrl$endpoint'))
           ..headers.addAll({
@@ -69,7 +71,7 @@ class ApiClient {
     String endpoint,
     Map<String, dynamic> data,
   ) async {
-    final headers = await _getHeaders();
+    final headers = await authHeaders();
     return _client
         .post(
           Uri.parse('$baseUrl$endpoint'),
@@ -79,8 +81,11 @@ class ApiClient {
         .timeout(requestTimeout);
   }
 
-  static Future<http.Response> get(String endpoint) async {
-    final headers = await _getHeaders();
+  static Future<http.Response> get(
+    String endpoint, {
+    Map<String, String> additionalHeaders = const {},
+  }) async {
+    final headers = {...await authHeaders(), ...additionalHeaders};
     return _client
         .get(Uri.parse('$baseUrl$endpoint'), headers: headers)
         .timeout(requestTimeout);
@@ -90,7 +95,7 @@ class ApiClient {
     String endpoint,
     Map<String, dynamic> data,
   ) async {
-    final headers = await _getHeaders();
+    final headers = await authHeaders();
     return _client
         .put(
           Uri.parse('$baseUrl$endpoint'),
@@ -104,7 +109,7 @@ class ApiClient {
     String endpoint,
     Map<String, dynamic> data,
   ) async {
-    final headers = await _getHeaders();
+    final headers = await authHeaders();
     return _client
         .patch(
           Uri.parse('$baseUrl$endpoint'),
@@ -115,7 +120,7 @@ class ApiClient {
   }
 
   static Future<http.Response> delete(String endpoint) async {
-    final headers = await _getHeaders();
+    final headers = await authHeaders();
     return _client
         .delete(Uri.parse('$baseUrl$endpoint'), headers: headers)
         .timeout(requestTimeout);

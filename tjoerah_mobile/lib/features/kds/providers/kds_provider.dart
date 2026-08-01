@@ -1,9 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pusher_channels_flutter/pusher_channels_flutter.dart';
+import 'package:pusher_client_socket/pusher_client_socket.dart';
+
+import '../../../core/config/realtime_config.dart';
 import '../../../core/network/api_client.dart';
+import '../../auth/providers/auth_provider.dart';
 import '../models/kitchen_ticket_model.dart';
 
 class ProductionIncidentResult {
@@ -43,81 +47,119 @@ final kdsOverviewProvider = FutureProvider<List<KitchenTicketModel>>((
 });
 
 class KdsNotifier extends AsyncNotifier<List<KitchenTicketModel>> {
-  PusherChannelsFlutter pusher = PusherChannelsFlutter.getInstance();
-  bool _pusherInitialized = false;
+  PusherClient? _pusher;
+  final Map<int, PrivateChannel> _channels = {};
+  bool _disposeRegistered = false;
 
   @override
   FutureOr<List<KitchenTicketModel>> build() async {
     final station = ref.watch(kdsStationProvider);
+    final user = ref.watch(authProvider.select((auth) => auth.user));
+    final outletIds = _outletIds(user);
 
-    // Initialize Pusher only once (you might want to move this to a dedicated service)
-    _initPusher();
+    if (RealtimeConfig.enabled) {
+      _configureRealtime(outletIds);
+    }
+    if (!_disposeRegistered) {
+      _disposeRegistered = true;
+      ref.onDispose(_disconnectRealtime);
+    }
 
     return _fetchTickets(station);
   }
 
-  Future<void> _initPusher() async {
-    if (_pusherInitialized) return;
-    _pusherInitialized = true;
+  void _configureRealtime(Set<int> outletIds) {
     try {
-      await pusher.init(
-        apiKey: "tjoerah-reverb-key",
-        cluster: "mt1",
-        onEvent: _onPusherEvent,
-        // Uncomment these if targeting local Reverb server:
-        // useTLS: false,
-        // host: "10.0.2.2", // For Android emulator targeting localhost
-        // wsPort: 8080,
+      final client = _pusher ??= PusherClient(
+        options: PusherOptions(
+          key: RealtimeConfig.appKey,
+          host: RealtimeConfig.host,
+          wsPort: RealtimeConfig.port,
+          wssPort: RealtimeConfig.port,
+          encrypted: RealtimeConfig.encrypted,
+          authOptions: PusherAuthOptions(
+            RealtimeConfig.authEndpoint,
+            headers: () => ApiClient.authHeaders(includeContentType: false),
+          ),
+          autoConnect: false,
+        ),
       );
-      await pusher.subscribe(channelName: "kds.tickets");
-      await pusher.connect();
-    } catch (e) {
-      _pusherInitialized = false;
-      debugPrint("Pusher Init Error: $e");
+
+      for (final removedId in _channels.keys.toSet().difference(outletIds)) {
+        _channels.remove(removedId)?.unsubscribe();
+      }
+      for (final outletId in outletIds.difference(_channels.keys.toSet())) {
+        final channel = client.private('kds.outlet.$outletId', subscribe: true);
+        channel.bind('order.created', _onOrderCreated);
+        channel.bind('ticket.status.updated', _onTicketStatusUpdated);
+        _channels[outletId] = channel;
+      }
+
+      if (!client.connected) client.connect();
+    } catch (error) {
+      debugPrint('KDS realtime initialization failed: $error');
     }
   }
 
-  void _onPusherEvent(PusherEvent event) {
-    debugPrint("Pusher Event Received: ${event.eventName}");
+  void _onOrderCreated(dynamic eventData) {
     ref.invalidate(kdsOverviewProvider);
+    final data = _eventMap(eventData);
+    final ticketsData = data['tickets'] as List<dynamic>? ?? const [];
+    final newTickets = ticketsData
+        .whereType<Map>()
+        .map(
+          (ticket) =>
+              KitchenTicketModel.fromJson(Map<String, dynamic>.from(ticket)),
+        )
+        .toList();
+    final currentStation = ref.read(kdsStationProvider);
 
-    if (event.eventName == 'App\\Domains\\Sales\\Events\\OrderCreated') {
-      final data = jsonDecode(event.data);
-      final List<dynamic> ticketsData = data['tickets'] ?? [];
-      final newTickets = ticketsData
-          .map((t) => KitchenTicketModel.fromJson(t as Map<String, dynamic>))
-          .toList();
-
-      final currentStation = ref.read(kdsStationProvider);
-
-      // Update state if new tickets belong to the current station
-      state = state.whenData((currentTickets) {
-        final List<KitchenTicketModel> updated = List.from(currentTickets);
-        for (var newTicket in newTickets) {
-          if (newTicket.station == currentStation &&
-              !updated.any((t) => t.id == newTicket.id)) {
-            updated.add(newTicket);
-          }
+    state = state.whenData((currentTickets) {
+      final updated = List<KitchenTicketModel>.from(currentTickets);
+      for (final newTicket in newTickets) {
+        if (newTicket.station == currentStation &&
+            !updated.any((ticket) => ticket.id == newTicket.id)) {
+          updated.add(newTicket);
         }
-        return updated;
-      });
-    } else if (event.eventName ==
-        'App\\Domains\\KDS\\Events\\TicketStatusUpdated') {
-      final data = jsonDecode(event.data);
-      final updatedTicket = KitchenTicketModel.fromJson(
-        data['ticket'] as Map<String, dynamic>,
-      );
-
-      final currentStation = ref.read(kdsStationProvider);
-
-      if (updatedTicket.station == currentStation) {
-        state = state.whenData((currentTickets) {
-          return currentTickets
-              .map((t) => t.id == updatedTicket.id ? updatedTicket : t)
-              .toList();
-        });
       }
+      return updated;
+    });
+  }
+
+  void _onTicketStatusUpdated(dynamic eventData) {
+    ref.invalidate(kdsOverviewProvider);
+    final data = _eventMap(eventData);
+    final rawTicket = data['ticket'];
+    if (rawTicket is! Map) return;
+
+    final updatedTicket = KitchenTicketModel.fromJson(
+      Map<String, dynamic>.from(rawTicket),
+    );
+    final currentStation = ref.read(kdsStationProvider);
+    if (updatedTicket.station != currentStation) return;
+
+    state = state.whenData((currentTickets) {
+      if (updatedTicket.status == 'completed') {
+        return currentTickets
+            .where((ticket) => ticket.id != updatedTicket.id)
+            .toList();
+      }
+      return currentTickets
+          .map(
+            (ticket) => ticket.id == updatedTicket.id ? updatedTicket : ticket,
+          )
+          .toList();
+    });
+  }
+
+  void _disconnectRealtime() {
+    try {
+      _pusher?.disconnect();
+    } catch (_) {
+      // The socket may already be closed while the provider is being disposed.
     }
+    _channels.clear();
+    _pusher = null;
   }
 
   Future<List<KitchenTicketModel>> _fetchTickets(String station) async {
@@ -216,6 +258,25 @@ class KdsNotifier extends AsyncNotifier<List<KitchenTicketModel>> {
       );
     }
   }
+}
+
+Set<int> _outletIds(Map<String, dynamic>? user) {
+  final outlets = user?['outlets'];
+  if (outlets is! List) return const {};
+  return outlets
+      .whereType<Map>()
+      .map((outlet) => int.tryParse(outlet['id'].toString()))
+      .whereType<int>()
+      .toSet();
+}
+
+Map<String, dynamic> _eventMap(dynamic data) {
+  if (data is Map) return Map<String, dynamic>.from(data);
+  if (data is String) {
+    final decoded = jsonDecode(data);
+    if (decoded is Map) return Map<String, dynamic>.from(decoded);
+  }
+  return const {};
 }
 
 String? _firstError(Map<String, dynamic> body) {

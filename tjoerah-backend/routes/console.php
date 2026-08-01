@@ -12,10 +12,11 @@ Artisan::command('inspire', function () {
 
 Artisan::command('attendance:purge-photos', function () {
     $purged = 0;
+    $disk = Storage::disk(config('attendance.photo_disk', 'local'));
     AttendanceLog::with('outlet.attendancePolicy')
         ->whereNotNull('check_in_at')
         ->orderBy('id')
-        ->chunkById(100, function ($records) use (&$purged): void {
+        ->chunkById(100, function ($records) use (&$purged, $disk): void {
             foreach ($records as $record) {
                 $retentionDays = $record->outlet?->attendancePolicy?->photo_retention_days ?? 180;
                 if ($record->check_in_at->isAfter(now()->subDays($retentionDays))) {
@@ -24,7 +25,7 @@ Artisan::command('attendance:purge-photos', function () {
 
                 foreach (['check_in_photo_path', 'check_out_photo_path'] as $column) {
                     $path = $record->getRawOriginal($column);
-                    if ($path && Storage::disk('local')->delete($path)) {
+                    if ($path && $disk->delete($path)) {
                         $record->forceFill([
                             $column => null,
                             str_replace('_path', '_hash', $column) => null,
