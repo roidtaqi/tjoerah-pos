@@ -25,6 +25,9 @@ class PrinterService {
   );
 
   final BlueThermalPrinter _printer = BlueThermalPrinter.instance;
+  String? _connectedAddress;
+
+  static const Duration _deviceSwitchDelay = Duration(milliseconds: 350);
 
   Future<List<BluetoothDevice>> getDevices() async {
     await _prepareBluetooth();
@@ -71,21 +74,39 @@ class PrinterService {
 
   Future<void> connect(BluetoothDevice device) async {
     await _prepareBluetooth();
-    if (device.address == null || device.address!.isEmpty) {
+    final targetAddress = normalizePrinterAddress(device.address);
+    if (targetAddress.isEmpty) {
       throw const PrinterException('Alamat printer Bluetooth tidak tersedia.');
     }
 
     try {
-      if (await _printer.isDeviceConnected(device) == true) return;
-      if (await _printer.isConnected == true) await _printer.disconnect();
+      final nativeConnected = await _printer.isConnected == true;
+      if (canReusePrinterConnection(
+        nativeConnected: nativeConnected,
+        connectedAddress: _connectedAddress,
+        targetAddress: targetAddress,
+      )) {
+        return;
+      }
 
-      final result = await _printer.connect(device);
-      if (result != true && await _printer.isConnected != true) {
+      if (nativeConnected) {
+        await _printer.disconnect();
+        _connectedAddress = null;
+        await Future<void>.delayed(_deviceSwitchDelay);
+      } else {
+        _connectedAddress = null;
+      }
+
+      await _printer.connect(BluetoothDevice(device.name, targetAddress));
+      final connected = await _printer.isConnected == true;
+      if (!connected) {
         throw PrinterException(
-          'Tidak dapat terhubung ke ${device.name ?? 'printer'}.',
+          'Koneksi ke ${device.name ?? 'printer'} tidak aktif.',
         );
       }
+      _connectedAddress = targetAddress;
     } catch (error) {
+      _connectedAddress = null;
       if (error is PrinterException) rethrow;
       throw PrinterException(
         'Tidak dapat terhubung ke ${device.name ?? 'printer'}: $error',
@@ -95,9 +116,14 @@ class PrinterService {
 
   Future<void> disconnect() async {
     try {
-      if (await _printer.isConnected == true) await _printer.disconnect();
+      if (await _printer.isConnected == true) {
+        await _printer.disconnect();
+        await Future<void>.delayed(_deviceSwitchDelay);
+      }
     } catch (error) {
       throw PrinterException('Printer tidak dapat diputuskan: $error');
+    } finally {
+      _connectedAddress = null;
     }
   }
 
@@ -408,4 +434,16 @@ class PrinterService {
 
   static double _asDouble(dynamic value) =>
       value is num ? value.toDouble() : double.tryParse('$value') ?? 0;
+}
+
+@visibleForTesting
+bool canReusePrinterConnection({
+  required bool nativeConnected,
+  required String? connectedAddress,
+  required String? targetAddress,
+}) {
+  if (!nativeConnected) return false;
+  final connected = normalizePrinterAddress(connectedAddress);
+  final target = normalizePrinterAddress(targetAddress);
+  return connected.isNotEmpty && connected == target;
 }

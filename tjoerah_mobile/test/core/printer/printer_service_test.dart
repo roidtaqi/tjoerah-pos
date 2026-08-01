@@ -33,4 +33,34 @@ void main() {
       expect(invokedMethod, 'openBluetoothSettings');
     },
   );
+
+  test('connection is reused only for the same printer MAC address', () {
+    expect(
+      canReusePrinterConnection(
+        nativeConnected: true,
+        connectedAddress: 'AA:BB:CC:DD:EE:01',
+        targetAddress: 'aa:bb:cc:dd:ee:01',
+      ),
+      isTrue,
+    );
+    expect(
+      canReusePrinterConnection(
+        nativeConnected: true,
+        connectedAddress: 'AA:BB:CC:DD:EE:01',
+        targetAddress: 'AA:BB:CC:DD:EE:02',
+      ),
+      isFalse,
+    );
+  });
+
+  test('unknown native connection is never reused', () {
+    expect(
+      canReusePrinterConnection(
+        nativeConnected: true,
+        connectedAddress: null,
+        targetAddress: 'AA:BB:CC:DD:EE:02',
+      ),
+      isFalse,
+    );
+  });
 }

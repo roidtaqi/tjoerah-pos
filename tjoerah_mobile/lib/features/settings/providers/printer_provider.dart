@@ -398,6 +398,15 @@ class PrinterNotifier extends Notifier<PrinterState> {
         completed.add(task.label);
       } catch (error) {
         failures.add('${task.label} gagal: ${_message(error)}');
+      } finally {
+        try {
+          await PrinterService.instance.disconnect();
+        } catch (error) {
+          failures.add(
+            '${task.label}: koneksi printer tidak dapat ditutup: '
+            '${_message(error)}',
+          );
+        }
       }
     }
 
