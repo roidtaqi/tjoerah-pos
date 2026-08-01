@@ -98,6 +98,29 @@ class AttendanceNotifier extends AsyncNotifier<AttendanceContextModel> {
       }
     }
   }
+
+  Future<AttendanceSubmissionResult> requestScheduleChange(
+    Map<String, dynamic> data,
+  ) async {
+    try {
+      await _repository.createShiftChangeRequest(data);
+      state = AsyncValue.data(await _repository.getContext());
+      return const AttendanceSubmissionResult(
+        isSuccess: true,
+        message: 'Permintaan perubahan jadwal berhasil dikirim.',
+      );
+    } on AttendanceApiException catch (error) {
+      return AttendanceSubmissionResult(
+        isSuccess: false,
+        message: error.message,
+      );
+    } catch (_) {
+      return const AttendanceSubmissionResult(
+        isSuccess: false,
+        message: 'Permintaan belum dapat dikirim. Periksa koneksi server.',
+      );
+    }
+  }
 }
 
 final attendanceProvider =

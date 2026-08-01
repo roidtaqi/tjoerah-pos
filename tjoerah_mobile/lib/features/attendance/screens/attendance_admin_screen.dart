@@ -52,7 +52,7 @@ class _AttendanceAdminScreenState extends ConsumerState<AttendanceAdminScreen> {
     final admin = ref.watch(attendanceAdminProvider);
     final isRefreshing = admin.value?.isRefreshing ?? false;
     return DefaultTabController(
-      length: 4,
+      length: 5,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Manajemen absensi'),
@@ -71,7 +71,8 @@ class _AttendanceAdminScreenState extends ConsumerState<AttendanceAdminScreen> {
             tabAlignment: TabAlignment.start,
             tabs: [
               Tab(icon: Icon(Icons.analytics_outlined), text: 'Laporan'),
-              Tab(icon: Icon(Icons.calendar_month_outlined), text: 'Jadwal'),
+              Tab(icon: Icon(Icons.calendar_month_outlined), text: 'Roster'),
+              Tab(icon: Icon(Icons.swap_horiz_rounded), text: 'Permintaan'),
               Tab(icon: Icon(Icons.schedule_rounded), text: 'Shift'),
               Tab(icon: Icon(Icons.tune_rounded), text: 'Kebijakan'),
             ],
@@ -120,11 +121,35 @@ class _AttendanceAdminScreenState extends ConsumerState<AttendanceAdminScreen> {
                         data: data,
                         enabled: enabled,
                         onAdd: () => _openScheduleForm(data),
-                        onEdit: (schedule) => _openScheduleForm(data, schedule),
+                        onAddFor: (employee, date) => _openScheduleForm(
+                          data,
+                          initialEmployeeId: employee.id,
+                          initialDate: date,
+                        ),
+                        onEdit: (schedule) =>
+                            _openScheduleForm(data, schedule: schedule),
                         onDelete: _confirmDeleteSchedule,
+                        onRangeChanged: (range) => ref
+                            .read(attendanceAdminProvider.notifier)
+                            .setFilters(
+                              dateFrom: range.start,
+                              dateTo: range.end,
+                            ),
+                        onBulk: () => _openBulkRosterForm(data),
+                        onPublish: () => _publishRoster(data),
+                        onCopyPrevious: () => _copyPreviousRoster(data),
+                        onAudit: _openScheduleAudits,
                         onDownloadTemplate: () =>
                             _downloadScheduleTemplate(data),
                         onImport: _importSchedules,
+                      ),
+                      _ShiftChangeRequestTab(
+                        requests: data.changeRequests,
+                        enabled: enabled,
+                        onApprove: (request) =>
+                            _reviewShiftChangeRequest(data, request, true),
+                        onReject: (request) =>
+                            _reviewShiftChangeRequest(data, request, false),
                       ),
                       _AttendanceShiftTab(
                         shifts: data.shifts,
@@ -180,9 +205,11 @@ class _AttendanceAdminScreenState extends ConsumerState<AttendanceAdminScreen> {
   }
 
   Future<void> _openScheduleForm(
-    AttendanceAdminState data, [
+    AttendanceAdminState data, {
     EmployeeScheduleModel? schedule,
-  ]) async {
+    int? initialEmployeeId,
+    DateTime? initialDate,
+  }) async {
     final payload = await AppBottomSheet.show<Map<String, dynamic>>(
       context,
       title: schedule == null ? 'Jadwal baru' : 'Edit jadwal',
@@ -192,6 +219,8 @@ class _AttendanceAdminScreenState extends ConsumerState<AttendanceAdminScreen> {
         shifts: data.shifts,
         outletId: data.selectedOutlet.id,
         schedule: schedule,
+        initialEmployeeId: initialEmployeeId,
+        initialDate: initialDate,
       ),
     );
     if (payload == null || !mounted) return;
@@ -271,6 +300,195 @@ class _AttendanceAdminScreenState extends ConsumerState<AttendanceAdminScreen> {
     final result = await ref
         .read(attendanceAdminProvider.notifier)
         .importSchedules(bytes: file.bytes, filename: file.name);
+    if (!mounted) return;
+    setState(() => _isMutating = false);
+    _showResult(result);
+  }
+
+  Future<void> _openBulkRosterForm(AttendanceAdminState data) async {
+    final batch = await AppBottomSheet.show<_RosterBatch>(
+      context,
+      title: 'Isi roster massal',
+      subtitle: 'Terapkan Shift, Off, atau jam khusus ke beberapa hari',
+      child: _BulkRosterForm(
+        employees: data.employees,
+        shifts: data.shifts,
+        initialRange: DateTimeRange(start: data.dateFrom, end: data.dateTo),
+      ),
+    );
+    if (batch == null || !mounted) return;
+    setState(() => _isMutating = true);
+    final result = await ref
+        .read(attendanceAdminProvider.notifier)
+        .saveRoster(batch.assignments, changeReason: batch.changeReason);
+    if (!mounted) return;
+    setState(() => _isMutating = false);
+    _showResult(result);
+  }
+
+  Future<void> _publishRoster(AttendanceAdminState data) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Terbitkan roster?'),
+        content: Text(
+          'Jadwal ${AppDateFormatter.shortDate(data.dateFrom)} sampai '
+          '${AppDateFormatter.shortDate(data.dateTo)} akan terlihat oleh '
+          'karyawan. Setiap tanggal wajib berisi Shift atau Off.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Batal'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(context, true),
+            icon: const Icon(Icons.publish_outlined),
+            label: const Text('Terbitkan'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _isMutating = true);
+    final result = await ref
+        .read(attendanceAdminProvider.notifier)
+        .publishRoster();
+    if (!mounted) return;
+    setState(() => _isMutating = false);
+    _showResult(result);
+  }
+
+  Future<void> _copyPreviousRoster(AttendanceAdminState data) async {
+    final isFullMonth =
+        data.dateFrom.day == 1 &&
+        data.dateTo.day ==
+            DateTime(data.dateFrom.year, data.dateFrom.month + 1, 0).day;
+    final sourceStart = isFullMonth
+        ? DateTime(data.dateFrom.year, data.dateFrom.month - 1, 1)
+        : data.dateFrom.subtract(
+            Duration(days: data.dateTo.difference(data.dateFrom).inDays + 1),
+          );
+    final targetDays = data.dateTo.difference(data.dateFrom).inDays + 1;
+    final sourceDays = isFullMonth
+        ? DateTime(sourceStart.year, sourceStart.month + 1, 0).day
+        : targetDays;
+    final days = sourceDays < targetDays ? sourceDays : targetDays;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Salin periode sebelumnya?'),
+        content: Text(
+          'Jadwal terbit mulai ${AppDateFormatter.shortDate(sourceStart)} '
+          'akan disalin ke periode aktif sebagai draft. Isi yang sudah ada '
+          'pada periode tujuan akan diperbarui.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Batal'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(context, true),
+            icon: const Icon(Icons.content_copy_outlined),
+            label: const Text('Salin'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _isMutating = true);
+    final result = await ref
+        .read(attendanceAdminProvider.notifier)
+        .copyRoster(
+          sourceStartDate: sourceStart,
+          targetStartDate: data.dateFrom,
+          days: days,
+        );
+    if (!mounted) return;
+    setState(() => _isMutating = false);
+    _showResult(result);
+  }
+
+  Future<void> _openScheduleAudits(EmployeeScheduleModel schedule) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Riwayat perubahan'),
+        content: SizedBox(
+          width: 520,
+          child: FutureBuilder<List<EmployeeScheduleAuditModel>>(
+            future: ref
+                .read(attendanceRepositoryProvider)
+                .getScheduleAudits(schedule.id),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return const SizedBox(
+                  height: 180,
+                  child: AppLoadingState(message: 'Memuat riwayat...'),
+                );
+              }
+              if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                return const AppEmptyState(
+                  title: 'Belum ada riwayat',
+                  message: 'Perubahan jadwal akan tercatat di sini.',
+                  icon: Icons.history_rounded,
+                );
+              }
+              return ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 420),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: snapshot.data!.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final audit = snapshot.data![index];
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.history_rounded),
+                      title: Text(_auditActionLabel(audit.action)),
+                      subtitle: Text(
+                        '${audit.actorName ?? 'Sistem'} - '
+                        '${DateFormat('dd MMM yyyy, HH:mm').format(audit.createdAt.toLocal())}'
+                        '${audit.reason == null ? '' : '\n${audit.reason}'}',
+                      ),
+                    );
+                  },
+                ),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Tutup'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _reviewShiftChangeRequest(
+    AttendanceAdminState data,
+    ShiftChangeRequestModel changeRequest,
+    bool approve,
+  ) async {
+    final payload = await AppBottomSheet.show<Map<String, dynamic>>(
+      context,
+      title: approve ? 'Setujui perubahan jadwal' : 'Tolak permintaan',
+      subtitle: changeRequest.employee?.name ?? 'Karyawan',
+      child: _ShiftChangeReviewForm(
+        request: changeRequest,
+        shifts: data.shifts,
+        approve: approve,
+      ),
+    );
+    if (payload == null || !mounted) return;
+    setState(() => _isMutating = true);
+    final result = await ref
+        .read(attendanceAdminProvider.notifier)
+        .reviewShiftChangeRequest(changeRequest, payload);
     if (!mounted) return;
     setState(() => _isMutating = false);
     _showResult(result);
@@ -881,13 +1099,19 @@ class _AdminAttendanceRow extends StatelessWidget {
   }
 }
 
-class _ScheduleTab extends StatelessWidget {
+class _ScheduleTab extends StatefulWidget {
   const _ScheduleTab({
     required this.data,
     required this.enabled,
     required this.onAdd,
+    required this.onAddFor,
     required this.onEdit,
     required this.onDelete,
+    required this.onRangeChanged,
+    required this.onBulk,
+    required this.onPublish,
+    required this.onCopyPrevious,
+    required this.onAudit,
     required this.onDownloadTemplate,
     required this.onImport,
   });
@@ -895,163 +1119,570 @@ class _ScheduleTab extends StatelessWidget {
   final AttendanceAdminState data;
   final bool enabled;
   final VoidCallback onAdd;
+  final void Function(AttendanceEmployee employee, DateTime date) onAddFor;
   final ValueChanged<EmployeeScheduleModel> onEdit;
   final ValueChanged<EmployeeScheduleModel> onDelete;
+  final ValueChanged<DateTimeRange> onRangeChanged;
+  final VoidCallback onBulk;
+  final VoidCallback onPublish;
+  final VoidCallback onCopyPrevious;
+  final ValueChanged<EmployeeScheduleModel> onAudit;
   final VoidCallback onDownloadTemplate;
   final VoidCallback onImport;
 
   @override
+  State<_ScheduleTab> createState() => _ScheduleTabState();
+}
+
+class _ScheduleTabState extends State<_ScheduleTab> {
+  bool _monthly = true;
+  final ScrollController _horizontalScrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _horizontalScrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final time = DateFormat('HH:mm');
+    final dates = _datesBetween(widget.data.dateFrom, widget.data.dateTo);
+    final schedules = <String, EmployeeScheduleModel>{
+      for (final schedule in widget.data.schedules)
+        '${schedule.employeeId}:${_dateKey(schedule.workDate)}': schedule,
+    };
+    final draftCount = widget.data.schedules
+        .where((schedule) => schedule.publicationStatus == 'draft')
+        .length;
+    final expected = widget.data.employees.length * dates.length;
+    final missing = expected - widget.data.schedules.length;
     return ListView(
       padding: AppSpacing.page(context),
       children: [
         Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 900),
+            constraints: const BoxConstraints(maxWidth: 1400),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Row(
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Expanded(
+                    SizedBox(
+                      width: 230,
                       child: Text(
-                        'Jadwal karyawan',
+                        _rangeTitle(widget.data.dateFrom, widget.data.dateTo),
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
                     ),
+                    IconButton.outlined(
+                      tooltip: 'Periode sebelumnya',
+                      onPressed: widget.enabled ? () => _movePeriod(-1) : null,
+                      icon: const Icon(Icons.chevron_left_rounded),
+                    ),
+                    IconButton.outlined(
+                      tooltip: 'Periode berikutnya',
+                      onPressed: widget.enabled ? () => _movePeriod(1) : null,
+                      icon: const Icon(Icons.chevron_right_rounded),
+                    ),
+                    SegmentedButton<bool>(
+                      segments: const [
+                        ButtonSegment(
+                          value: false,
+                          icon: Icon(Icons.view_week_outlined),
+                          label: Text('Minggu'),
+                        ),
+                        ButtonSegment(
+                          value: true,
+                          icon: Icon(Icons.calendar_view_month_outlined),
+                          label: Text('Bulan'),
+                        ),
+                      ],
+                      selected: {_monthly},
+                      onSelectionChanged: widget.enabled
+                          ? (selection) => _changeMode(selection.first)
+                          : null,
+                    ),
+                    const SizedBox(width: 8),
                     IconButton(
                       tooltip: 'Unduh template jadwal',
-                      onPressed: enabled ? onDownloadTemplate : null,
+                      onPressed: widget.enabled
+                          ? widget.onDownloadTemplate
+                          : null,
                       icon: const Icon(Icons.download_outlined),
                     ),
                     IconButton(
                       tooltip: 'Impor jadwal CSV',
-                      onPressed: enabled ? onImport : null,
+                      onPressed: widget.enabled ? widget.onImport : null,
                       icon: const Icon(Icons.upload_file_outlined),
                     ),
-                    const SizedBox(width: 4),
+                    PopupMenuButton<String>(
+                      tooltip: 'Aksi roster',
+                      enabled: widget.enabled,
+                      onSelected: (value) {
+                        if (value == 'copy') widget.onCopyPrevious();
+                        if (value == 'bulk') widget.onBulk();
+                      },
+                      itemBuilder: (context) => const [
+                        PopupMenuItem(
+                          value: 'copy',
+                          child: ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: Icon(Icons.content_copy_outlined),
+                            title: Text('Salin periode sebelumnya'),
+                          ),
+                        ),
+                        PopupMenuItem(
+                          value: 'bulk',
+                          child: ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: Icon(Icons.playlist_add_rounded),
+                            title: Text('Isi roster massal'),
+                          ),
+                        ),
+                      ],
+                    ),
                     FilledButton.icon(
-                      onPressed: enabled ? onAdd : null,
+                      onPressed: widget.enabled ? widget.onPublish : null,
+                      icon: const Icon(Icons.publish_outlined),
+                      label: const Text('Terbitkan'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: widget.enabled ? widget.onAdd : null,
                       icon: const Icon(Icons.add_rounded),
-                      label: const Text('Tambah'),
+                      label: const Text('Jadwal'),
                     ),
                   ],
                 ),
                 const SizedBox(height: 12),
-                if (data.employees.isEmpty)
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    AppBadge(
+                      text: '${widget.data.schedules.length} terisi',
+                      icon: Icons.event_available_outlined,
+                      color: AppColors.successSoft,
+                      textColor: AppColors.success,
+                    ),
+                    AppBadge(
+                      text: '$draftCount draft',
+                      icon: Icons.edit_note_rounded,
+                      color: AppColors.warningSoft,
+                      textColor: AppColors.warning,
+                    ),
+                    AppBadge(
+                      text: '${missing < 0 ? 0 : missing} belum diisi',
+                      icon: Icons.event_busy_outlined,
+                      color: missing > 0
+                          ? AppColors.errorSoft
+                          : AppColors.surfaceMuted,
+                      textColor: missing > 0
+                          ? AppColors.error
+                          : AppColors.textSecondary,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                if (widget.data.employees.isEmpty)
                   const AppEmptyState(
                     title: 'Belum ada karyawan',
                     message:
                         'Hubungkan akun pengguna dengan profil karyawan terlebih dahulu.',
                     icon: Icons.badge_outlined,
                   )
-                else if (data.schedules.isEmpty)
-                  AppEmptyState(
-                    title: 'Belum ada jadwal khusus',
-                    message:
-                        'Tanpa jadwal khusus, kebijakan jam kerja outlet tetap digunakan.',
-                    icon: Icons.calendar_month_outlined,
-                    onAction: enabled ? onAdd : null,
-                    actionLabel: enabled ? 'Tambah jadwal' : null,
-                  )
                 else
-                  ...data.schedules.map(
-                    (schedule) => Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: AppCard(
-                        onTap: enabled ? () => onEdit(schedule) : null,
-                        padding: const EdgeInsets.all(12),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 44,
-                              height: 44,
-                              decoration: BoxDecoration(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.surfaceContainerHighest,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: const Icon(Icons.calendar_today_outlined),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    schedule.employee?.name ?? 'Karyawan',
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.titleMedium,
-                                  ),
-                                  const SizedBox(height: 3),
-                                  Text(
-                                    '${AppDateFormatter.weekdayShortDate(schedule.workDate.toLocal())} - '
-                                    '${time.format(schedule.startAt.toLocal())}-${time.format(schedule.endAt.toLocal())}',
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.bodySmall,
-                                  ),
-                                  const SizedBox(height: 7),
-                                  Wrap(
-                                    spacing: 6,
-                                    runSpacing: 6,
-                                    children: [
-                                      AppBadge(
-                                        text: schedule.shiftName,
-                                        icon: Icons.schedule_rounded,
-                                      ),
-                                      if (schedule.lateAfterAt != null)
-                                        AppBadge(
-                                          text:
-                                              'Terlambat ${time.format(schedule.lateAfterAt!.toLocal())}',
-                                          icon: Icons.timer_outlined,
-                                          color: AppColors.warningSoft,
-                                          textColor: AppColors.warning,
-                                        ),
-                                    ],
-                                  ),
-                                ],
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surface,
+                      border: Border.all(color: AppColors.border),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Scrollbar(
+                      controller: _horizontalScrollController,
+                      thumbVisibility: true,
+                      child: SingleChildScrollView(
+                        controller: _horizontalScrollController,
+                        scrollDirection: Axis.horizontal,
+                        child: DataTable(
+                          headingRowHeight: 58,
+                          dataRowMinHeight: 72,
+                          dataRowMaxHeight: 72,
+                          horizontalMargin: 12,
+                          columnSpacing: 8,
+                          columns: [
+                            const DataColumn(
+                              label: SizedBox(
+                                width: 150,
+                                child: Text('Karyawan'),
                               ),
                             ),
-                            PopupMenuButton<String>(
-                              tooltip: 'Aksi jadwal',
-                              enabled: enabled,
-                              onSelected: (value) {
-                                if (value == 'edit') onEdit(schedule);
-                                if (value == 'delete') onDelete(schedule);
-                              },
-                              itemBuilder: (context) => const [
-                                PopupMenuItem(
-                                  value: 'edit',
-                                  child: ListTile(
-                                    contentPadding: EdgeInsets.zero,
-                                    leading: Icon(Icons.edit_outlined),
-                                    title: Text('Edit'),
+                            ...dates.map(
+                              (date) => DataColumn(
+                                label: SizedBox(
+                                  width: 96,
+                                  child: Text(
+                                    AppDateFormatter.weekdayShortDate(
+                                      date,
+                                    ).replaceFirst(', ', '\n'),
+                                    textAlign: TextAlign.center,
                                   ),
                                 ),
-                                PopupMenuItem(
-                                  value: 'delete',
-                                  child: ListTile(
-                                    contentPadding: EdgeInsets.zero,
-                                    leading: Icon(Icons.delete_outline_rounded),
-                                    title: Text('Hapus'),
-                                  ),
-                                ),
-                              ],
+                              ),
                             ),
                           ],
+                          rows: widget.data.employees.map((employee) {
+                            return DataRow(
+                              cells: [
+                                DataCell(
+                                  SizedBox(
+                                    width: 150,
+                                    child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          employee.name,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.titleSmall,
+                                        ),
+                                        if (employee.position != null)
+                                          Text(
+                                            employee.position!,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: Theme.of(
+                                              context,
+                                            ).textTheme.bodySmall,
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                ...dates.map((date) {
+                                  final schedule =
+                                      schedules['${employee.id}:${_dateKey(date)}'];
+                                  return DataCell(
+                                    _RosterCell(
+                                      schedule: schedule,
+                                      enabled: widget.enabled,
+                                      onAdd: () =>
+                                          widget.onAddFor(employee, date),
+                                      onEdit: schedule == null
+                                          ? null
+                                          : () => widget.onEdit(schedule),
+                                      onDelete: schedule == null
+                                          ? null
+                                          : () => widget.onDelete(schedule),
+                                      onAudit: schedule == null
+                                          ? null
+                                          : () => widget.onAudit(schedule),
+                                    ),
+                                  );
+                                }),
+                              ],
+                            );
+                          }).toList(),
                         ),
                       ),
                     ),
                   ),
+                const SizedBox(height: 10),
+                Text(
+                  'Jadwal draft belum terlihat oleh karyawan. Jadwal yang '
+                  'sudah memiliki absensi terkunci dan hanya dapat dilihat '
+                  'riwayat perubahannya.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
               ],
             ),
           ),
         ),
       ],
+    );
+  }
+
+  void _changeMode(bool monthly) {
+    setState(() => _monthly = monthly);
+    final anchor = widget.data.dateFrom;
+    widget.onRangeChanged(monthly ? _monthRange(anchor) : _weekRange(anchor));
+  }
+
+  void _movePeriod(int direction) {
+    final current = widget.data.dateFrom;
+    if (_monthly) {
+      final target = DateTime(current.year, current.month + direction, 1);
+      widget.onRangeChanged(_monthRange(target));
+      return;
+    }
+    widget.onRangeChanged(
+      _weekRange(current.add(Duration(days: 7 * direction))),
+    );
+  }
+}
+
+class _RosterCell extends StatelessWidget {
+  const _RosterCell({
+    required this.schedule,
+    required this.enabled,
+    required this.onAdd,
+    required this.onEdit,
+    required this.onDelete,
+    required this.onAudit,
+  });
+
+  final EmployeeScheduleModel? schedule;
+  final bool enabled;
+  final VoidCallback onAdd;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
+  final VoidCallback? onAudit;
+
+  @override
+  Widget build(BuildContext context) {
+    final current = schedule;
+    if (current == null) {
+      return SizedBox(
+        width: 96,
+        height: 56,
+        child: IconButton(
+          tooltip: 'Isi jadwal',
+          onPressed: enabled ? onAdd : null,
+          icon: const Icon(Icons.add_rounded),
+        ),
+      );
+    }
+    final isDraft = current.publicationStatus == 'draft';
+    final color = _rosterStatusColor(current.status);
+    return Container(
+      width: 96,
+      height: 56,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        border: Border.all(
+          color: isDraft ? AppColors.warning : color.withValues(alpha: 0.35),
+        ),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: InkWell(
+              onTap: !enabled
+                  ? null
+                  : current.attendanceExists
+                  ? onAudit
+                  : onEdit,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(8, 5, 2, 5),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _scheduleLabel(current),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        color: color,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      current.attendanceExists
+                          ? 'Terkunci'
+                          : isDraft
+                          ? 'Draft'
+                          : 'Terbit',
+                      maxLines: 1,
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          PopupMenuButton<String>(
+            tooltip: 'Aksi jadwal',
+            enabled: enabled,
+            padding: EdgeInsets.zero,
+            iconSize: 17,
+            onSelected: (value) {
+              if (value == 'edit') onEdit?.call();
+              if (value == 'history') onAudit?.call();
+              if (value == 'delete') onDelete?.call();
+            },
+            itemBuilder: (context) => [
+              if (!current.attendanceExists)
+                const PopupMenuItem(value: 'edit', child: Text('Edit')),
+              const PopupMenuItem(value: 'history', child: Text('Riwayat')),
+              if (!current.attendanceExists)
+                const PopupMenuItem(value: 'delete', child: Text('Hapus')),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ShiftChangeRequestTab extends StatelessWidget {
+  const _ShiftChangeRequestTab({
+    required this.requests,
+    required this.enabled,
+    required this.onApprove,
+    required this.onReject,
+  });
+
+  final List<ShiftChangeRequestModel> requests;
+  final bool enabled;
+  final ValueChanged<ShiftChangeRequestModel> onApprove;
+  final ValueChanged<ShiftChangeRequestModel> onReject;
+
+  @override
+  Widget build(BuildContext context) {
+    if (requests.isEmpty) {
+      return const AppEmptyState(
+        title: 'Tidak ada permintaan menunggu',
+        message: 'Pengajuan perubahan shift karyawan akan muncul di sini.',
+        icon: Icons.swap_horiz_rounded,
+      );
+    }
+    return ListView.separated(
+      padding: AppSpacing.page(context),
+      itemCount: requests.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 10),
+      itemBuilder: (context, index) {
+        final request = requests[index];
+        return Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 900),
+            child: AppCard(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.swap_horiz_rounded),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              request.employee?.name ?? 'Karyawan',
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              AppDateFormatter.weekdayLongDate(
+                                request.requestedWorkDate.toLocal(),
+                              ),
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const AppBadge(
+                        text: 'Menunggu',
+                        icon: Icons.hourglass_top_rounded,
+                        color: AppColors.warningSoft,
+                        textColor: AppColors.warning,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _RequestValue(
+                          label: 'Jadwal saat ini',
+                          value: request.schedule == null
+                              ? 'Belum ada jadwal'
+                              : _scheduleLabel(request.schedule!),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _RequestValue(
+                          label: 'Diajukan',
+                          value: _requestedAssignmentLabel(request),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    request.reason,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 14),
+                  Wrap(
+                    alignment: WrapAlignment.end,
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: enabled ? () => onReject(request) : null,
+                        icon: const Icon(Icons.close_rounded),
+                        label: const Text('Tolak'),
+                      ),
+                      FilledButton.icon(
+                        onPressed: enabled ? () => onApprove(request) : null,
+                        icon: const Icon(Icons.check_rounded),
+                        label: const Text('Tinjau & setujui'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _RequestValue extends StatelessWidget {
+  const _RequestValue({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerLowest,
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: Theme.of(context).textTheme.labelSmall),
+            const SizedBox(height: 3),
+            Text(
+              value,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1910,18 +2541,571 @@ class _ShiftAssignmentsFormState extends State<_ShiftAssignmentsForm> {
   }
 }
 
+class _RosterBatch {
+  const _RosterBatch({required this.assignments, this.changeReason});
+
+  final List<Map<String, dynamic>> assignments;
+  final String? changeReason;
+}
+
+class _BulkRosterForm extends StatefulWidget {
+  const _BulkRosterForm({
+    required this.employees,
+    required this.shifts,
+    required this.initialRange,
+  });
+
+  final List<AttendanceEmployee> employees;
+  final List<AttendanceShiftModel> shifts;
+  final DateTimeRange initialRange;
+
+  @override
+  State<_BulkRosterForm> createState() => _BulkRosterFormState();
+}
+
+class _BulkRosterFormState extends State<_BulkRosterForm> {
+  final _formKey = GlobalKey<FormState>();
+  final _notes = TextEditingController();
+  final _reason = TextEditingController();
+  late DateTimeRange _range;
+  late String _assignment;
+  final Set<int> _employeeIds = {};
+  final Set<int> _weekdays = {1, 2, 3, 4, 5, 6, 7};
+  TimeOfDay _start = const TimeOfDay(hour: 8, minute: 0);
+  TimeOfDay _lateAfter = const TimeOfDay(hour: 8, minute: 15);
+  TimeOfDay _end = const TimeOfDay(hour: 17, minute: 0);
+
+  @override
+  void initState() {
+    super.initState();
+    _range = widget.initialRange;
+    _assignment = widget.shifts.isEmpty
+        ? 'custom'
+        : 'shift:${widget.shifts.first.id}';
+  }
+
+  @override
+  void dispose() {
+    _notes.dispose();
+    _reason.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isCustom = _assignment == 'custom';
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Karyawan (${_employeeIds.length})',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => setState(() {
+                    if (_employeeIds.length == widget.employees.length) {
+                      _employeeIds.clear();
+                    } else {
+                      _employeeIds
+                        ..clear()
+                        ..addAll(
+                          widget.employees.map((employee) => employee.id),
+                        );
+                    }
+                  }),
+                  child: Text(
+                    _employeeIds.length == widget.employees.length
+                        ? 'Kosongkan'
+                        : 'Pilih semua',
+                  ),
+                ),
+              ],
+            ),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border.all(color: AppColors.border),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 190),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: widget.employees.length,
+                  itemBuilder: (context, index) {
+                    final employee = widget.employees[index];
+                    return CheckboxListTile(
+                      dense: true,
+                      value: _employeeIds.contains(employee.id),
+                      title: Text(employee.name),
+                      subtitle: employee.position == null
+                          ? null
+                          : Text(employee.position!),
+                      onChanged: (selected) => setState(() {
+                        if (selected == true) {
+                          _employeeIds.add(employee.id);
+                        } else {
+                          _employeeIds.remove(employee.id);
+                        }
+                      }),
+                    );
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            InkWell(
+              onTap: _pickRange,
+              borderRadius: BorderRadius.circular(8),
+              child: InputDecorator(
+                decoration: const InputDecoration(
+                  labelText: 'Periode',
+                  prefixIcon: Icon(Icons.date_range_outlined),
+                ),
+                child: Text(
+                  '${AppDateFormatter.shortDate(_range.start)} - '
+                  '${AppDateFormatter.shortDate(_range.end)}',
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Terapkan pada hari',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: List.generate(7, (index) {
+                final weekday = index + 1;
+                const labels = [
+                  'Sen',
+                  'Sel',
+                  'Rab',
+                  'Kam',
+                  'Jum',
+                  'Sab',
+                  'Min',
+                ];
+                return FilterChip(
+                  label: Text(labels[index]),
+                  selected: _weekdays.contains(weekday),
+                  onSelected: (selected) => setState(() {
+                    if (selected) {
+                      _weekdays.add(weekday);
+                    } else {
+                      _weekdays.remove(weekday);
+                    }
+                  }),
+                );
+              }),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _assignment,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Penugasan',
+                prefixIcon: Icon(Icons.event_available_outlined),
+              ),
+              items: [
+                ...widget.shifts.map(
+                  (shift) => DropdownMenuItem(
+                    value: 'shift:${shift.id}',
+                    child: Text(
+                      '${shift.name} (${shift.startTime}-${shift.endTime})',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+                const DropdownMenuItem(
+                  value: 'custom',
+                  child: Text('Jam kerja cadangan/khusus'),
+                ),
+                const DropdownMenuItem(value: 'off', child: Text('Off')),
+                const DropdownMenuItem(value: 'leave', child: Text('Cuti')),
+                const DropdownMenuItem(value: 'sick', child: Text('Sakit')),
+              ],
+              onChanged: (value) {
+                if (value != null) setState(() => _assignment = value);
+              },
+            ),
+            if (isCustom) ...[
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: _TimeField(
+                      label: 'Mulai',
+                      value: _start,
+                      onTap: () => _pickTime('start'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _TimeField(
+                      label: 'Terlambat',
+                      value: _lateAfter,
+                      onTap: () => _pickTime('late'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _TimeField(
+                      label: 'Selesai',
+                      value: _end,
+                      onTap: () => _pickTime('end'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _reason,
+              maxLines: 2,
+              decoration: const InputDecoration(
+                labelText: 'Alasan perubahan',
+                prefixIcon: Icon(Icons.history_edu_outlined),
+              ),
+              validator: (value) => isCustom && (value ?? '').trim().isEmpty
+                  ? 'Alasan wajib diisi untuk jam kerja khusus'
+                  : null,
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _notes,
+              maxLines: 2,
+              decoration: const InputDecoration(
+                labelText: 'Catatan untuk karyawan',
+                prefixIcon: Icon(Icons.notes_rounded),
+              ),
+            ),
+            const SizedBox(height: 18),
+            AppButton(
+              text: 'Simpan sebagai draft',
+              icon: Icons.save_outlined,
+              onPressed: _submit,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickRange() async {
+    final range = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2024),
+      lastDate: DateTime.now().add(const Duration(days: 730)),
+      initialDateRange: _range,
+    );
+    if (range != null) setState(() => _range = range);
+  }
+
+  Future<void> _pickTime(String type) async {
+    final initial = type == 'start'
+        ? _start
+        : type == 'late'
+        ? _lateAfter
+        : _end;
+    final selected = await showTimePicker(
+      context: context,
+      initialTime: initial,
+    );
+    if (selected == null) return;
+    setState(() {
+      if (type == 'start') _start = selected;
+      if (type == 'late') _lateAfter = selected;
+      if (type == 'end') _end = selected;
+    });
+  }
+
+  void _submit() {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    if (_employeeIds.isEmpty || _weekdays.isEmpty) {
+      _showInlineError('Pilih setidaknya satu karyawan dan satu hari.');
+      return;
+    }
+    if (_assignment == 'custom' &&
+        !_isTimeInsideShift(_start, _lateAfter, _end)) {
+      _showInlineError('Batas terlambat harus berada dalam jam kerja.');
+      return;
+    }
+    final dates = _datesBetween(
+      _range.start,
+      _range.end,
+    ).where((date) => _weekdays.contains(date.weekday)).toList();
+    final assignments = <Map<String, dynamic>>[];
+    for (final employeeId in _employeeIds) {
+      for (final date in dates) {
+        final row = <String, dynamic>{
+          'employee_id': employeeId,
+          'work_date': _dateKey(date),
+          'status': _assignment.startsWith('shift:') || _assignment == 'custom'
+              ? 'scheduled'
+              : _assignment,
+          'notes': _notes.text.trim().isEmpty ? null : _notes.text.trim(),
+        };
+        if (_assignment.startsWith('shift:')) {
+          row['attendance_shift_id'] = int.parse(_assignment.split(':').last);
+        } else if (_assignment == 'custom') {
+          row.addAll({
+            'custom_start_time': _formatTime(_start),
+            'custom_late_after_time': _formatTime(_lateAfter),
+            'custom_end_time': _formatTime(_end),
+          });
+        }
+        assignments.add(row);
+      }
+    }
+    if (assignments.isEmpty || assignments.length > 1000) {
+      _showInlineError(
+        assignments.length > 1000
+            ? 'Pilihan menghasilkan lebih dari 1000 jadwal. Perkecil periode.'
+            : 'Tidak ada tanggal yang cocok dengan hari yang dipilih.',
+      );
+      return;
+    }
+    Navigator.pop(
+      context,
+      _RosterBatch(
+        assignments: assignments,
+        changeReason: _reason.text.trim().isEmpty ? null : _reason.text.trim(),
+      ),
+    );
+  }
+
+  void _showInlineError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: AppColors.error),
+    );
+  }
+}
+
+class _ShiftChangeReviewForm extends StatefulWidget {
+  const _ShiftChangeReviewForm({
+    required this.request,
+    required this.shifts,
+    required this.approve,
+  });
+
+  final ShiftChangeRequestModel request;
+  final List<AttendanceShiftModel> shifts;
+  final bool approve;
+
+  @override
+  State<_ShiftChangeReviewForm> createState() => _ShiftChangeReviewFormState();
+}
+
+class _ShiftChangeReviewFormState extends State<_ShiftChangeReviewForm> {
+  final _formKey = GlobalKey<FormState>();
+  final _notes = TextEditingController();
+  late String _assignment;
+  late TimeOfDay _start;
+  late TimeOfDay _lateAfter;
+  late TimeOfDay _end;
+
+  @override
+  void initState() {
+    super.initState();
+    final request = widget.request;
+    _assignment = request.requestedStatus != 'scheduled'
+        ? request.requestedStatus
+        : request.requestedAttendanceShiftId != null
+        ? 'shift:${request.requestedAttendanceShiftId}'
+        : 'custom';
+    _start = _parseTime(request.requestedStartTime ?? '08:00');
+    _lateAfter = _parseTime(request.requestedLateAfterTime ?? '08:15');
+    _end = _parseTime(request.requestedEndTime ?? '17:00');
+  }
+
+  @override
+  void dispose() {
+    _notes.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _RequestValue(
+              label: 'Permintaan',
+              value: _requestedAssignmentLabel(widget.request),
+            ),
+            const SizedBox(height: 10),
+            Text(widget.request.reason),
+            if (widget.approve) ...[
+              const SizedBox(height: 14),
+              DropdownButtonFormField<String>(
+                initialValue: _assignment,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Jadwal yang disetujui',
+                  prefixIcon: Icon(Icons.event_available_outlined),
+                ),
+                items: [
+                  ...widget.shifts.map(
+                    (shift) => DropdownMenuItem(
+                      value: 'shift:${shift.id}',
+                      child: Text(
+                        '${shift.name} (${shift.startTime}-${shift.endTime})',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                  const DropdownMenuItem(
+                    value: 'custom',
+                    child: Text('Jam kerja cadangan/khusus'),
+                  ),
+                  const DropdownMenuItem(value: 'off', child: Text('Off')),
+                  const DropdownMenuItem(value: 'leave', child: Text('Cuti')),
+                ],
+                onChanged: (value) {
+                  if (value != null) setState(() => _assignment = value);
+                },
+              ),
+              if (_assignment == 'custom') ...[
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _TimeField(
+                        label: 'Mulai',
+                        value: _start,
+                        onTap: () => _pickTime('start'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _TimeField(
+                        label: 'Terlambat',
+                        value: _lateAfter,
+                        onTap: () => _pickTime('late'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _TimeField(
+                        label: 'Selesai',
+                        value: _end,
+                        onTap: () => _pickTime('end'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _notes,
+              maxLines: 3,
+              decoration: InputDecoration(
+                labelText: widget.approve
+                    ? 'Catatan keputusan'
+                    : 'Alasan penolakan',
+                prefixIcon: const Icon(Icons.notes_rounded),
+              ),
+              validator: (value) =>
+                  !widget.approve && (value ?? '').trim().isEmpty
+                  ? 'Alasan penolakan wajib diisi'
+                  : null,
+            ),
+            const SizedBox(height: 18),
+            AppButton(
+              text: widget.approve ? 'Setujui perubahan' : 'Tolak permintaan',
+              icon: widget.approve ? Icons.check_rounded : Icons.close_rounded,
+              onPressed: _submit,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickTime(String type) async {
+    final selected = await showTimePicker(
+      context: context,
+      initialTime: type == 'start'
+          ? _start
+          : type == 'late'
+          ? _lateAfter
+          : _end,
+    );
+    if (selected == null) return;
+    setState(() {
+      if (type == 'start') _start = selected;
+      if (type == 'late') _lateAfter = selected;
+      if (type == 'end') _end = selected;
+    });
+  }
+
+  void _submit() {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    if (widget.approve &&
+        _assignment == 'custom' &&
+        !_isTimeInsideShift(_start, _lateAfter, _end)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Batas terlambat harus berada dalam jam kerja.'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
+    final payload = <String, dynamic>{
+      'decision': widget.approve ? 'approved' : 'rejected',
+      'response_notes': _notes.text.trim().isEmpty ? null : _notes.text.trim(),
+    };
+    if (widget.approve) {
+      payload['status'] =
+          _assignment.startsWith('shift:') || _assignment == 'custom'
+          ? 'scheduled'
+          : _assignment;
+      if (_assignment.startsWith('shift:')) {
+        payload['attendance_shift_id'] = int.parse(_assignment.split(':').last);
+      } else if (_assignment == 'custom') {
+        payload.addAll({
+          'custom_start_time': _formatTime(_start),
+          'custom_late_after_time': _formatTime(_lateAfter),
+          'custom_end_time': _formatTime(_end),
+        });
+      }
+    }
+    Navigator.pop(context, payload);
+  }
+}
+
 class _ScheduleForm extends StatefulWidget {
   const _ScheduleForm({
     required this.employees,
     required this.shifts,
     required this.outletId,
     required this.schedule,
+    this.initialEmployeeId,
+    this.initialDate,
   });
 
   final List<AttendanceEmployee> employees;
   final List<AttendanceShiftModel> shifts;
   final int outletId;
   final EmployeeScheduleModel? schedule;
+  final int? initialEmployeeId;
+  final DateTime? initialDate;
 
   @override
   State<_ScheduleForm> createState() => _ScheduleFormState();
@@ -1937,6 +3121,7 @@ class _ScheduleFormState extends State<_ScheduleForm> {
   late TimeOfDay _end;
   late final TextEditingController _name;
   late final TextEditingController _notes;
+  late final TextEditingController _changeReason;
   String _status = 'scheduled';
 
   @override
@@ -1945,9 +3130,11 @@ class _ScheduleFormState extends State<_ScheduleForm> {
     final schedule = widget.schedule;
     _employeeId =
         schedule?.employeeId ??
+        widget.initialEmployeeId ??
         (widget.employees.isEmpty ? null : widget.employees.first.id);
     _attendanceShiftId = schedule?.attendanceShiftId;
-    _date = schedule?.workDate.toLocal() ?? DateTime.now();
+    _date =
+        schedule?.workDate.toLocal() ?? widget.initialDate ?? DateTime.now();
     _start = schedule == null
         ? const TimeOfDay(hour: 8, minute: 0)
         : TimeOfDay.fromDateTime(schedule.startAt.toLocal());
@@ -1959,6 +3146,7 @@ class _ScheduleFormState extends State<_ScheduleForm> {
         : TimeOfDay.fromDateTime(schedule.endAt.toLocal());
     _name = TextEditingController(text: schedule?.shiftName ?? 'Reguler');
     _notes = TextEditingController(text: schedule?.notes);
+    _changeReason = TextEditingController(text: schedule?.changeReason);
     _status = schedule?.status ?? 'scheduled';
   }
 
@@ -1966,6 +3154,7 @@ class _ScheduleFormState extends State<_ScheduleForm> {
   void dispose() {
     _name.dispose();
     _notes.dispose();
+    _changeReason.dispose();
     super.dispose();
   }
 
@@ -2119,6 +3308,21 @@ class _ScheduleFormState extends State<_ScheduleForm> {
                 prefixIcon: Icon(Icons.notes_rounded),
               ),
             ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _changeReason,
+              maxLines: 2,
+              decoration: const InputDecoration(
+                labelText: 'Alasan perubahan',
+                prefixIcon: Icon(Icons.history_edu_outlined),
+              ),
+              validator: (value) =>
+                  _status == 'scheduled' &&
+                      _attendanceShiftId == null &&
+                      (value ?? '').trim().isEmpty
+                  ? 'Alasan wajib diisi untuk jam kerja khusus'
+                  : null,
+            ),
             const SizedBox(height: 18),
             AppButton(
               text: widget.schedule == null
@@ -2211,13 +3415,19 @@ class _ScheduleFormState extends State<_ScheduleForm> {
       'employee_id': _employeeId,
       'outlet_id': widget.outletId,
       'work_date': DateFormat('yyyy-MM-dd').format(_date),
-      'attendance_shift_id': _attendanceShiftId,
+      'attendance_shift_id': _status == 'scheduled' ? _attendanceShiftId : null,
       'start_at': start.toUtc().toIso8601String(),
       'late_after_at': lateAfter.toUtc().toIso8601String(),
       'end_at': end.toUtc().toIso8601String(),
-      'shift_name': _name.text.trim(),
+      'shift_name': _status == 'scheduled'
+          ? _name.text.trim()
+          : _scheduleStatusLabel(_status),
       'status': _status,
       'notes': _notes.text.trim().isEmpty ? null : _notes.text.trim(),
+      'publication_status': widget.schedule?.publicationStatus ?? 'draft',
+      'change_reason': _changeReason.text.trim().isEmpty
+          ? null
+          : _changeReason.text.trim(),
     });
   }
 }
@@ -2369,6 +3579,100 @@ class _ReviewFormState extends State<_ReviewForm> {
         'check_out_at': _checkOut!.toUtc().toIso8601String(),
     });
   }
+}
+
+List<DateTime> _datesBetween(DateTime from, DateTime to) {
+  final dates = <DateTime>[];
+  var date = DateTime(from.year, from.month, from.day);
+  final end = DateTime(to.year, to.month, to.day);
+  while (!date.isAfter(end)) {
+    dates.add(date);
+    date = date.add(const Duration(days: 1));
+  }
+  return dates;
+}
+
+DateTimeRange _weekRange(DateTime anchor) {
+  final date = DateTime(anchor.year, anchor.month, anchor.day);
+  final start = date.subtract(Duration(days: date.weekday - 1));
+  return DateTimeRange(start: start, end: start.add(const Duration(days: 6)));
+}
+
+DateTimeRange _monthRange(DateTime anchor) {
+  final start = DateTime(anchor.year, anchor.month, 1);
+  return DateTimeRange(
+    start: start,
+    end: DateTime(anchor.year, anchor.month + 1, 0),
+  );
+}
+
+String _dateKey(DateTime value) {
+  final date = value.toLocal();
+  return '${date.year.toString().padLeft(4, '0')}-'
+      '${date.month.toString().padLeft(2, '0')}-'
+      '${date.day.toString().padLeft(2, '0')}';
+}
+
+String _rangeTitle(DateTime from, DateTime to) {
+  if (from.year == to.year && from.month == to.month) {
+    return AppDateFormatter.longDate(from).replaceFirst('${from.day} ', '');
+  }
+  return '${AppDateFormatter.dayMonth(from)} - '
+      '${AppDateFormatter.shortDate(to)}';
+}
+
+Color _rosterStatusColor(String status) {
+  return switch (status) {
+    'off' => AppColors.textSecondary,
+    'leave' => AppColors.info,
+    'sick' => AppColors.warning,
+    'cancelled' => AppColors.error,
+    _ => AppColors.success,
+  };
+}
+
+String _scheduleStatusLabel(String status) {
+  return switch (status) {
+    'off' => 'Off',
+    'leave' => 'Cuti',
+    'sick' => 'Sakit',
+    'cancelled' => 'Dibatalkan',
+    _ => 'Dijadwalkan',
+  };
+}
+
+String _scheduleLabel(EmployeeScheduleModel schedule) {
+  return schedule.status == 'scheduled'
+      ? schedule.shiftName
+      : _scheduleStatusLabel(schedule.status);
+}
+
+String _requestedAssignmentLabel(ShiftChangeRequestModel request) {
+  if (request.requestedStatus != 'scheduled') {
+    return _scheduleStatusLabel(request.requestedStatus);
+  }
+  if (request.requestedAttendanceShift != null) {
+    return request.requestedAttendanceShift!.name;
+  }
+  String shortTime(String? value) {
+    if (value == null) return '--:--';
+    return value.length >= 5 ? value.substring(0, 5) : value;
+  }
+
+  return 'Jam khusus ${shortTime(request.requestedStartTime)}-'
+      '${shortTime(request.requestedEndTime)} '
+      '(terlambat ${shortTime(request.requestedLateAfterTime)})';
+}
+
+String _auditActionLabel(String action) {
+  return switch (action) {
+    'created' => 'Jadwal dibuat',
+    'published' => 'Roster diterbitkan',
+    'copied' => 'Disalin dari periode sebelumnya',
+    'request_approved' => 'Diubah dari permintaan karyawan',
+    'imported' => 'Diimpor dari CSV',
+    _ => 'Jadwal diperbarui',
+  };
 }
 
 TimeOfDay _parseTime(String value) {

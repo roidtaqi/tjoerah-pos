@@ -36,7 +36,21 @@ void main() {
           },
         ],
       },
-      'schedules': <Map<String, dynamic>>[],
+      'schedules': [
+        {
+          'id': 41,
+          'employee_id': 12,
+          'outlet_id': 7,
+          'work_date': '2026-08-03',
+          'start_at': '2026-08-02T23:30:00Z',
+          'late_after_at': '2026-08-02T23:45:00Z',
+          'end_at': '2026-08-03T07:30:00Z',
+          'shift_name': 'Shift Pagi',
+          'status': 'scheduled',
+          'publication_status': 'draft',
+          'attendance_exists': true,
+        },
+      ],
       'shifts': [
         {
           'id': 4,
@@ -47,6 +61,18 @@ void main() {
           'end_time': '15:30',
         },
       ],
+      'change_requests': [
+        {
+          'id': 51,
+          'employee_id': 12,
+          'outlet_id': 7,
+          'requested_work_date': '2026-08-03',
+          'requested_status': 'off',
+          'reason': 'Ada keperluan keluarga',
+          'status': 'pending',
+          'employee': {'id': 12, 'name': 'Ayu', 'outlet_id': 7},
+        },
+      ],
     });
 
     expect(snapshot.selectedOutlet.name, 'Tjoerah Renon');
@@ -54,5 +80,8 @@ void main() {
     expect(snapshot.summary.late, 1);
     expect(snapshot.records.single.lateMinutes, 8);
     expect(snapshot.shifts.single.lateAfterTime, '07:45');
+    expect(snapshot.schedules.single.publicationStatus, 'draft');
+    expect(snapshot.schedules.single.attendanceExists, isTrue);
+    expect(snapshot.changeRequests.single.reason, 'Ada keperluan keluarga');
   });
 }

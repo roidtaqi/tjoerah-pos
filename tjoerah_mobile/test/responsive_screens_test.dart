@@ -182,6 +182,31 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('inventory item form stays stable behind tablet keyboard', (
+    tester,
+  ) async {
+    await _render(
+      tester,
+      size: const Size(1007, 553),
+      screen: const InventoryScreen(),
+      overrides: [
+        authProvider.overrideWith(_PreviewOwnerAuthNotifier.new),
+        inventoryProvider.overrideWith(_PreviewInventoryNotifier.new),
+      ],
+    );
+
+    await tester.tap(find.text('Tambah bahan'));
+    await tester.pumpAndSettle();
+    tester.view.viewInsets = const FakeViewPadding(bottom: 310);
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(find.text('Bahan baru'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    tester.view.viewInsets = FakeViewPadding.zero;
+    await tester.pump(const Duration(milliseconds: 250));
+  });
+
   testWidgets('table, recipe, payment, and settings screens stay responsive', (
     tester,
   ) async {

@@ -27,6 +27,9 @@ void main() {
     expect(find.text('Rani Kasir'), findsOneWidget);
     expect(find.text('Tjoerah Utama - Kasir'), findsOneWidget);
     expect(find.text('Absen masuk'), findsOneWidget);
+    expect(find.text('Jadwal mendatang'), findsOneWidget);
+    expect(find.text('Ajukan perubahan'), findsOneWidget);
+    expect(find.text('Status pengajuan'), findsOneWidget);
     expect(find.text('Terlambat'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -49,20 +52,32 @@ void main() {
 
     expect(find.text('Manajemen absensi'), findsOneWidget);
     expect(find.text('Laporan'), findsOneWidget);
-    expect(find.text('Jadwal'), findsOneWidget);
+    expect(find.text('Roster'), findsOneWidget);
+    expect(find.text('Permintaan'), findsOneWidget);
     expect(find.text('Shift'), findsOneWidget);
     expect(find.text('Kebijakan'), findsOneWidget);
     expect(find.text('Hadir'), findsOneWidget);
     expect(find.text('Rani Kasir'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
-    await tester.tap(find.text('Jadwal'));
+    await tester.tap(find.text('Roster'));
     await tester.pumpAndSettle();
-    expect(find.text('Jadwal karyawan'), findsOneWidget);
+    expect(find.text('Terbitkan'), findsOneWidget);
     expect(find.byTooltip('Unduh template jadwal'), findsOneWidget);
     expect(find.byTooltip('Impor jadwal CSV'), findsOneWidget);
+    expect(find.text('Draft'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
+    await tester.ensureVisible(find.text('Permintaan'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Permintaan'));
+    await tester.pumpAndSettle();
+    expect(find.text('Butuh tukar jadwal keluarga'), findsOneWidget);
+    expect(find.text('Tinjau & setujui'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.ensureVisible(find.text('Shift'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Shift'));
     await tester.pumpAndSettle();
     expect(find.text('Shift absensi'), findsOneWidget);
@@ -126,7 +141,7 @@ void main() {
     expect(find.text('Manajemen absensi'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
-    for (final tab in ['Jadwal', 'Shift', 'Kebijakan']) {
+    for (final tab in ['Roster', 'Permintaan', 'Shift', 'Kebijakan']) {
       await tester.tap(find.text(tab));
       await tester.pumpAndSettle();
       expect(
@@ -230,6 +245,9 @@ final _context = AttendanceContextModel(
   scheduledEndAt: DateTime.utc(2026, 7, 24, 9),
   serverTime: DateTime.utc(2026, 7, 24),
   recentAttendance: [_record],
+  availableShifts: const [_shift],
+  upcomingSchedules: [_publishedSchedule],
+  changeRequests: [_changeRequest],
 );
 
 final _adminState = AttendanceAdminState(
@@ -244,8 +262,52 @@ final _adminState = AttendanceAdminState(
     lateMinutes: 10,
   ),
   records: [_record],
-  schedules: const [],
+  schedules: [_draftSchedule],
   shifts: const [_shift],
+  changeRequests: [_changeRequest],
   dateFrom: DateTime(2026, 7, 1),
   dateTo: DateTime(2026, 7, 31),
+);
+
+final _publishedSchedule = EmployeeScheduleModel(
+  id: 11,
+  employeeId: 1,
+  outletId: 1,
+  workDate: DateTime(2026, 8, 3),
+  startAt: DateTime.utc(2026, 8, 2, 23, 30),
+  lateAfterAt: DateTime.utc(2026, 8, 2, 23, 45),
+  endAt: DateTime.utc(2026, 8, 3, 7, 30),
+  shiftName: 'Shift Pagi',
+  status: 'scheduled',
+  employee: _employee,
+  attendanceShiftId: 1,
+  attendanceShift: _shift,
+);
+
+final _draftSchedule = EmployeeScheduleModel(
+  id: 12,
+  employeeId: 1,
+  outletId: 1,
+  workDate: DateTime(2026, 7, 1),
+  startAt: DateTime.utc(2026, 6, 30, 23, 30),
+  lateAfterAt: DateTime.utc(2026, 6, 30, 23, 45),
+  endAt: DateTime.utc(2026, 7, 1, 7, 30),
+  shiftName: 'Shift Pagi',
+  status: 'scheduled',
+  employee: _employee,
+  attendanceShiftId: 1,
+  attendanceShift: _shift,
+  publicationStatus: 'draft',
+);
+
+final _changeRequest = ShiftChangeRequestModel(
+  id: 21,
+  employeeId: 1,
+  outletId: 1,
+  requestedWorkDate: DateTime(2026, 8, 3),
+  requestedStatus: 'off',
+  reason: 'Butuh tukar jadwal keluarga',
+  status: 'pending',
+  employee: _employee,
+  schedule: _publishedSchedule,
 );

@@ -15,6 +15,9 @@ class EmployeeSchedule extends Model
         'start_at' => 'datetime',
         'late_after_at' => 'datetime',
         'end_at' => 'datetime',
+        'published_at' => 'datetime',
+        'is_custom_time' => 'boolean',
+        'revision' => 'integer',
     ];
 
     public function employee()
@@ -37,8 +40,23 @@ class EmployeeSchedule extends Model
         return $this->belongsTo(User::class, 'created_by');
     }
 
+    public function publisher()
+    {
+        return $this->belongsTo(User::class, 'published_by');
+    }
+
     public function attendance()
     {
         return $this->hasOne(AttendanceLog::class);
+    }
+
+    public function audits()
+    {
+        return $this->hasMany(EmployeeScheduleAudit::class)->latest('created_at');
+    }
+
+    public function changeRequests()
+    {
+        return $this->hasMany(ShiftChangeRequest::class);
     }
 }

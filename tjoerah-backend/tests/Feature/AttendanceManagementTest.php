@@ -262,6 +262,7 @@ class AttendanceManagementTest extends TestCase
         $this->actingAs($cashier, 'api')
             ->getJson('/api/attendance/context')
             ->assertOk()
+            ->assertJsonCount(2, 'available_shifts')
             ->assertJsonPath('attendance_shift.name', 'Shift Pagi')
             ->assertJsonPath('scheduled_start_at', '2026-07-23T23:30:00.000000Z')
             ->assertJsonPath('scheduled_late_after_at', '2026-07-23T23:45:00.000000Z');
@@ -327,7 +328,7 @@ class AttendanceManagementTest extends TestCase
         $csv = implode("\n", [
             'work_date,employee_number,employee_name,shift_name,status,notes',
             "2026-07-30,{$employee->employee_number},{$employee->name},Shift Pagi,scheduled,Opening",
-            "2026-07-31,{$employee->employee_number},{$employee->name},Shift Pagi,scheduled,Regular",
+            "2026-07-31,{$employee->employee_number},{$employee->name},,off,Libur",
         ]);
         $this->post('/api/attendance/schedules/import', [
             'outlet_id' => $outlet->id,
@@ -346,7 +347,195 @@ class AttendanceManagementTest extends TestCase
             'attendance_shift_id' => $shift['id'],
             'work_date' => '2026-07-30 00:00:00',
             'shift_name' => 'Shift Pagi',
+            'publication_status' => 'draft',
         ]);
+        $this->assertDatabaseHas('employee_schedules', [
+            'employee_id' => $employee->id,
+            'attendance_shift_id' => null,
+            'work_date' => '2026-07-31 00:00:00',
+            'shift_name' => 'Off',
+            'is_custom_time' => false,
+        ]);
+
+        $this->postJson('/api/attendance/schedules/publish', [
+            'outlet_id' => $outlet->id,
+            'date_from' => '2026-07-30',
+            'date_to' => '2026-07-31',
+        ])->assertOk()->assertJsonPath('published_schedules', 2);
+        $this->post('/api/attendance/schedules/import', [
+            'outlet_id' => $outlet->id,
+            'file' => UploadedFile::fake()->createWithContent(
+                'jadwal-update.csv',
+                $csv,
+            ),
+        ], ['Accept' => 'application/json'])
+            ->assertOk()
+            ->assertJsonPath('updated', 2);
+        $this->assertDatabaseCount('employee_schedules', 2);
+        $this->assertSame(
+            2,
+            EmployeeSchedule::where('publication_status', 'published')->count(),
+        );
+    }
+
+    public function test_owner_can_build_publish_and_copy_a_weekly_roster(): void
+    {
+        [$cashier, $employee, $outlet, $company] = $this->attendanceFixture();
+        $owner = User::factory()->create([
+            'company_id' => $company->id,
+            'role' => 'owner',
+        ]);
+        $owner->outlets()->attach($outlet);
+        $this->actingAs($owner, 'api');
+        $shiftOne = $this->postJson('/api/attendance/shifts', [
+            'outlet_id' => $outlet->id,
+            'name' => 'Shift 1',
+            'start_time' => '07:30',
+            'late_after_time' => '07:45',
+            'end_time' => '15:30',
+            'check_in_open_minutes' => 60,
+            'is_active' => true,
+            'sort_order' => 1,
+        ])->assertCreated()->json();
+        $shiftTwo = $this->postJson('/api/attendance/shifts', [
+            'outlet_id' => $outlet->id,
+            'name' => 'Shift 2',
+            'start_time' => '15:30',
+            'late_after_time' => '15:45',
+            'end_time' => '23:30',
+            'check_in_open_minutes' => 60,
+            'is_active' => true,
+            'sort_order' => 2,
+        ])->assertCreated()->json();
+        $pattern = [
+            ['attendance_shift_id' => $shiftOne['id'], 'status' => 'scheduled'],
+            ['attendance_shift_id' => $shiftTwo['id'], 'status' => 'scheduled'],
+            ['attendance_shift_id' => null, 'status' => 'off'],
+            ['attendance_shift_id' => $shiftOne['id'], 'status' => 'scheduled'],
+            ['attendance_shift_id' => $shiftTwo['id'], 'status' => 'scheduled'],
+            ['attendance_shift_id' => $shiftTwo['id'], 'status' => 'scheduled'],
+            ['attendance_shift_id' => $shiftTwo['id'], 'status' => 'scheduled'],
+        ];
+        $assignments = collect($pattern)->map(fn (array $assignment, int $index) => [
+            'employee_id' => $employee->id,
+            'work_date' => CarbonImmutable::parse('2026-08-03')->addDays($index)->toDateString(),
+            ...$assignment,
+        ])->all();
+
+        $this->postJson('/api/attendance/schedules/bulk', [
+            'outlet_id' => $outlet->id,
+            'publication_status' => 'draft',
+            'assignments' => $assignments,
+        ])->assertOk()
+            ->assertJsonPath('updated_schedules', 7);
+
+        $this->actingAs($cashier, 'api')
+            ->getJson('/api/attendance/my-schedule?date_from=2026-08-03&date_to=2026-08-09')
+            ->assertOk()
+            ->assertJsonCount(0);
+
+        $this->actingAs($owner, 'api')
+            ->postJson('/api/attendance/schedules/publish', [
+                'outlet_id' => $outlet->id,
+                'date_from' => '2026-08-03',
+                'date_to' => '2026-08-09',
+            ])->assertOk()
+            ->assertJsonPath('published_schedules', 7);
+
+        $this->actingAs($cashier, 'api')
+            ->getJson('/api/attendance/my-schedule?date_from=2026-08-03&date_to=2026-08-09')
+            ->assertOk()
+            ->assertJsonCount(7)
+            ->assertJsonPath('0.attendance_shift.name', 'Shift 1')
+            ->assertJsonPath('1.attendance_shift.name', 'Shift 2')
+            ->assertJsonPath('2.status', 'off');
+
+        $this->actingAs($owner, 'api')
+            ->postJson('/api/attendance/schedules/copy', [
+                'outlet_id' => $outlet->id,
+                'source_start_date' => '2026-08-03',
+                'target_start_date' => '2026-08-10',
+                'days' => 7,
+            ])->assertOk()
+            ->assertJsonPath('copied_schedules', 7);
+
+        $this->assertDatabaseHas('employee_schedules', [
+            'employee_id' => $employee->id,
+            'work_date' => '2026-08-12 00:00:00',
+            'status' => 'off',
+            'publication_status' => 'draft',
+        ]);
+        $this->assertDatabaseCount('employee_schedule_audits', 21);
+    }
+
+    public function test_employee_can_request_change_and_admin_can_approve_custom_hours(): void
+    {
+        [$cashier, $employee, $outlet, $company] = $this->attendanceFixture();
+        $owner = User::factory()->create([
+            'company_id' => $company->id,
+            'role' => 'admin',
+        ]);
+        $owner->outlets()->attach($outlet);
+        $shift = $this->actingAs($owner, 'api')
+            ->postJson('/api/attendance/shifts', [
+                'outlet_id' => $outlet->id,
+                'name' => 'Shift 1',
+                'start_time' => '07:30',
+                'late_after_time' => '07:45',
+                'end_time' => '15:30',
+                'check_in_open_minutes' => 60,
+                'is_active' => true,
+                'sort_order' => 1,
+            ])->assertCreated()->json();
+        $schedule = $this->postJson('/api/attendance/schedules/bulk', [
+            'outlet_id' => $outlet->id,
+            'publication_status' => 'published',
+            'assignments' => [[
+                'employee_id' => $employee->id,
+                'work_date' => '2026-08-05',
+                'attendance_shift_id' => $shift['id'],
+                'status' => 'scheduled',
+            ]],
+        ])->assertOk()->json('schedules.0');
+
+        CarbonImmutable::setTestNow('2026-08-01 00:00:00 UTC');
+        $changeRequest = $this->actingAs($cashier, 'api')
+            ->postJson('/api/attendance/change-requests', [
+                'requested_work_date' => '2026-08-05',
+                'requested_status' => 'scheduled',
+                'requested_attendance_shift_id' => $shift['id'],
+                'reason' => 'Perlu mengganti jam kerja pada hari tersebut.',
+            ])->assertCreated()
+            ->assertJsonPath('request.employee_schedule_id', $schedule['id'])
+            ->json('request');
+
+        $this->actingAs($owner, 'api')
+            ->getJson("/api/attendance/admin/change-requests?outlet_id={$outlet->id}")
+            ->assertOk()
+            ->assertJsonPath('0.id', $changeRequest['id']);
+
+        $this->patchJson("/api/attendance/admin/change-requests/{$changeRequest['id']}/review", [
+            'decision' => 'approved',
+            'status' => 'scheduled',
+            'custom_start_time' => '10:00',
+            'custom_late_after_time' => '10:15',
+            'custom_end_time' => '18:00',
+            'response_notes' => 'Disetujui sebagai jam kerja cadangan.',
+        ])->assertOk()
+            ->assertJsonPath('request.status', 'approved')
+            ->assertJsonPath('schedule.shift_name', 'Jam khusus')
+            ->assertJsonPath('schedule.is_custom_time', true);
+
+        $this->assertDatabaseHas('employee_schedules', [
+            'id' => $schedule['id'],
+            'publication_status' => 'published',
+            'is_custom_time' => true,
+            'change_reason' => 'Disetujui sebagai jam kerja cadangan.',
+        ]);
+        $this->actingAs($cashier, 'api')
+            ->getJson('/api/attendance/change-requests')
+            ->assertOk()
+            ->assertJsonPath('0.status', 'approved');
     }
 
     public function test_employee_cannot_view_another_company_attendance_photo(): void

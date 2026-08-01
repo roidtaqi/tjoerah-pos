@@ -56,6 +56,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen>
     final showTextActions = MediaQuery.sizeOf(context).width >= 760;
 
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
         title: const Text('Persediaan'),
         actions: [

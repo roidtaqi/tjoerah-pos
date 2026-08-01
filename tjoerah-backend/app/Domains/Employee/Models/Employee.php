@@ -44,4 +44,9 @@ class Employee extends Model
     {
         return $this->hasMany(AttendanceLog::class);
     }
+
+    public function shiftChangeRequests()
+    {
+        return $this->hasMany(ShiftChangeRequest::class);
+    }
 }

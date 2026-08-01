@@ -18,6 +18,7 @@ class AttendanceAdminState {
     required this.shifts,
     required this.dateFrom,
     required this.dateTo,
+    this.changeRequests = const [],
     this.status = 'all',
     this.isRefreshing = false,
   });
@@ -30,6 +31,7 @@ class AttendanceAdminState {
   final List<AttendanceRecord> records;
   final List<EmployeeScheduleModel> schedules;
   final List<AttendanceShiftModel> shifts;
+  final List<ShiftChangeRequestModel> changeRequests;
   final DateTime dateFrom;
   final DateTime dateTo;
   final String status;
@@ -43,6 +45,7 @@ class AttendanceAdminState {
     List<AttendanceRecord>? records,
     List<EmployeeScheduleModel>? schedules,
     List<AttendanceShiftModel>? shifts,
+    List<ShiftChangeRequestModel>? changeRequests,
     DateTime? dateFrom,
     DateTime? dateTo,
     String? status,
@@ -57,6 +60,7 @@ class AttendanceAdminState {
       records: records ?? this.records,
       schedules: schedules ?? this.schedules,
       shifts: shifts ?? this.shifts,
+      changeRequests: changeRequests ?? this.changeRequests,
       dateFrom: dateFrom ?? this.dateFrom,
       dateTo: dateTo ?? this.dateTo,
       status: status ?? this.status,
@@ -274,6 +278,111 @@ class AttendanceAdminNotifier extends AsyncNotifier<AttendanceAdminState> {
     }
   }
 
+  Future<AttendanceAdminResult> saveRoster(
+    List<Map<String, dynamic>> assignments, {
+    String? changeReason,
+  }) async {
+    try {
+      final current = state.requireValue;
+      final count = await _repository.bulkUpsertSchedules(
+        outletId: current.selectedOutlet.id,
+        assignments: assignments,
+        changeReason: changeReason,
+      );
+      await refresh();
+      return AttendanceAdminResult(
+        true,
+        '$count jadwal berhasil disimpan. Jadwal baru tetap draft hingga diterbitkan.',
+      );
+    } on AttendanceApiException catch (error) {
+      return AttendanceAdminResult(false, error.message);
+    } catch (_) {
+      return const AttendanceAdminResult(
+        false,
+        'Roster belum dapat disimpan. Periksa koneksi server.',
+      );
+    }
+  }
+
+  Future<AttendanceAdminResult> publishRoster() async {
+    try {
+      final current = state.requireValue;
+      final count = await _repository.publishSchedules(
+        outletId: current.selectedOutlet.id,
+        dateFrom: current.dateFrom,
+        dateTo: current.dateTo,
+      );
+      await refresh();
+      return AttendanceAdminResult(
+        true,
+        count == 0
+            ? 'Semua jadwal pada periode ini sudah terbit.'
+            : '$count jadwal berhasil diterbitkan.',
+      );
+    } on AttendanceApiException catch (error) {
+      return AttendanceAdminResult(false, error.message);
+    } catch (_) {
+      return const AttendanceAdminResult(
+        false,
+        'Roster belum dapat diterbitkan.',
+      );
+    }
+  }
+
+  Future<AttendanceAdminResult> copyRoster({
+    required DateTime sourceStartDate,
+    required DateTime targetStartDate,
+    required int days,
+  }) async {
+    try {
+      final current = state.requireValue;
+      final count = await _repository.copySchedules(
+        outletId: current.selectedOutlet.id,
+        sourceStartDate: sourceStartDate,
+        targetStartDate: targetStartDate,
+        days: days,
+      );
+      await refresh();
+      return AttendanceAdminResult(
+        true,
+        '$count jadwal disalin sebagai draft.',
+      );
+    } on AttendanceApiException catch (error) {
+      return AttendanceAdminResult(false, error.message);
+    } catch (_) {
+      return const AttendanceAdminResult(
+        false,
+        'Jadwal periode sebelumnya belum dapat disalin.',
+      );
+    }
+  }
+
+  Future<AttendanceAdminResult> reviewShiftChangeRequest(
+    ShiftChangeRequestModel changeRequest,
+    Map<String, dynamic> data,
+  ) async {
+    try {
+      await _repository.reviewShiftChangeRequest(
+        requestId: changeRequest.id,
+        data: data,
+      );
+      await refresh();
+      return AttendanceAdminResult(
+        true,
+        data['decision'] == 'approved'
+            ? 'Permintaan disetujui dan jadwal diperbarui.'
+            : 'Permintaan perubahan ditolak.',
+      );
+    } on AttendanceApiException catch (error) {
+      return AttendanceAdminResult(false, error.message);
+    } catch (_) {
+      return const AttendanceAdminResult(
+        false,
+        'Permintaan belum dapat diproses.',
+      );
+    }
+  }
+
   Future<AttendanceAdminResult> review(
     AttendanceRecord attendance,
     Map<String, dynamic> data,
@@ -318,6 +427,7 @@ class AttendanceAdminNotifier extends AsyncNotifier<AttendanceAdminState> {
         records: snapshot.records,
         schedules: snapshot.schedules,
         shifts: snapshot.shifts,
+        changeRequests: snapshot.changeRequests,
         dateFrom: dateFrom,
         dateTo: dateTo,
         status: status,

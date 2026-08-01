@@ -9,6 +9,7 @@ use App\Domains\Employee\Models\AttendancePolicy;
 use App\Domains\Employee\Models\AttendanceShift;
 use App\Domains\Employee\Models\Employee;
 use App\Domains\Employee\Models\EmployeeSchedule;
+use App\Domains\Employee\Models\ShiftChangeRequest;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -30,6 +31,9 @@ class AttendanceService
             ->whereNull('check_out_at')
             ->latest('check_in_at')
             ->first();
+        $localToday = CarbonImmutable::now($policy->timezone)->toDateString();
+        $upcomingDate = CarbonImmutable::parse($localToday)->addDays(30)->toDateString();
+        $upcomingDateExclusive = CarbonImmutable::parse($upcomingDate)->addDay()->toDateString();
 
         return [
             'employee' => $employee->load(['outlet', 'attendanceShift']),
@@ -37,6 +41,12 @@ class AttendanceService
             'policy' => $policy,
             'schedule' => $window['schedule'],
             'attendance_shift' => $window['shift'],
+            'available_shifts' => AttendanceShift::query()
+                ->where('outlet_id', $outlet->id)
+                ->where('is_active', true)
+                ->orderBy('sort_order')
+                ->orderBy('start_time')
+                ->get(),
             'scheduled_start_at' => $window['start'],
             'scheduled_late_after_at' => $window['late_after'],
             'scheduled_end_at' => $window['end'],
@@ -44,6 +54,22 @@ class AttendanceService
             'recent_attendance' => $employee->attendanceLogs()
                 ->with('attendanceShift')
                 ->latest('check_in_at')
+                ->limit(10)
+                ->get(),
+            'upcoming_schedules' => $employee->schedules()
+                ->with('attendanceShift')
+                ->where('publication_status', 'published')
+                ->where('work_date', '>=', $localToday)
+                ->where('work_date', '<', $upcomingDateExclusive)
+                ->orderBy('work_date')
+                ->get(),
+            'change_requests' => ShiftChangeRequest::with([
+                'schedule.attendanceShift',
+                'requestedAttendanceShift',
+                'resultingSchedule.attendanceShift',
+            ])
+                ->where('employee_id', $employee->id)
+                ->latest()
                 ->limit(10)
                 ->get(),
             'server_time' => now()->utc(),
@@ -307,6 +333,7 @@ class AttendanceService
         $localDate = $now->setTimezone($policy->timezone)->toDateString();
         $schedule = EmployeeSchedule::where('employee_id', $employee->id)
             ->whereDate('work_date', $localDate)
+            ->where('publication_status', 'published')
             ->orderByRaw("CASE WHEN status = 'scheduled' THEN 0 ELSE 1 END")
             ->orderBy('start_at')
             ->first();

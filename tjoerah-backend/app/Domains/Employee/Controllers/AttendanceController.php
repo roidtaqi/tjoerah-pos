@@ -9,6 +9,8 @@ use App\Domains\Employee\Models\AttendancePolicy;
 use App\Domains\Employee\Models\AttendanceShift;
 use App\Domains\Employee\Models\Employee;
 use App\Domains\Employee\Models\EmployeeSchedule;
+use App\Domains\Employee\Models\EmployeeScheduleAudit;
+use App\Domains\Employee\Models\ShiftChangeRequest;
 use App\Domains\Employee\Services\AttendanceService;
 use App\Http\Controllers\Controller;
 use App\Support\CsvTable;
@@ -109,6 +111,16 @@ class AttendanceController extends Controller
                 $dateTo,
             )->get(),
             'shifts' => $this->attendanceShiftsForOutlet($outlet->id),
+            'change_requests' => ShiftChangeRequest::with([
+                'employee',
+                'schedule.attendanceShift',
+                'requestedAttendanceShift',
+                'reviewer',
+            ])
+                ->where('outlet_id', $outlet->id)
+                ->where('status', 'pending')
+                ->orderBy('requested_work_date')
+                ->get(),
         ]);
     }
 
@@ -564,12 +576,14 @@ class AttendanceController extends Controller
                 }
                 $seen[$key] = true;
 
-                $shift = $shiftName !== ''
-                    ? AttendanceShift::query()
-                        ->where('outlet_id', $outlet->id)
-                        ->whereRaw('LOWER(name) = ?', [mb_strtolower($shiftName)])
-                        ->first()
-                    : $employee->attendanceShift;
+                $shift = $status === 'scheduled'
+                    ? ($shiftName !== ''
+                        ? AttendanceShift::query()
+                            ->where('outlet_id', $outlet->id)
+                            ->whereRaw('LOWER(name) = ?', [mb_strtolower($shiftName)])
+                            ->first()
+                        : $employee->attendanceShift)
+                    : null;
                 if ($status === 'scheduled' && ! $shift) {
                     $this->scheduleImportError(
                         $line,
@@ -582,9 +596,21 @@ class AttendanceController extends Controller
                     'outlet_id' => $outlet->id,
                     'attendance_shift_id' => $shift?->id,
                     'work_date' => $workDate,
-                    'shift_name' => $shift?->name ?? 'Reguler',
+                    'shift_name' => $status === 'scheduled'
+                        ? ($shift?->name ?? 'Reguler')
+                        : match ($status) {
+                            'off' => 'Off',
+                            'leave' => 'Cuti',
+                            'sick' => 'Sakit',
+                            'cancelled' => 'Dibatalkan',
+                            default => 'Jadwal',
+                        },
                     'status' => $status,
                     'notes' => trim($row['notes'] ?? '') ?: null,
+                    'publication_status' => 'draft',
+                    'published_at' => null,
+                    'published_by' => null,
+                    'change_reason' => 'Diimpor dari template CSV.',
                 ];
                 if (! $shift) {
                     $policy = $this->attendanceService->policyForOutlet($outlet);
@@ -623,15 +649,33 @@ class AttendanceController extends Controller
                     );
                 }
                 if ($schedule) {
+                    $before = $this->scheduleSnapshot($schedule);
+                    if ($schedule->publication_status === 'published') {
+                        $scheduleData['publication_status'] = 'published';
+                        $scheduleData['published_at'] = $schedule->published_at;
+                        $scheduleData['published_by'] = $schedule->published_by;
+                    }
+                    $scheduleData['is_custom_time'] = false;
+                    $scheduleData['revision'] = $schedule->revision + 1;
                     $schedule->update($scheduleData);
                     $updated++;
                 } else {
-                    EmployeeSchedule::create([
+                    $before = null;
+                    $schedule = EmployeeSchedule::create([
                         ...$scheduleData,
                         'created_by' => $request->user()->id,
                     ]);
                     $created++;
                 }
+                EmployeeScheduleAudit::create([
+                    'employee_schedule_id' => $schedule->id,
+                    'employee_id' => $schedule->employee_id,
+                    'actor_id' => $request->user()->id,
+                    'action' => $before ? 'import_updated' : 'import_created',
+                    'before' => $before,
+                    'after' => $this->scheduleSnapshot($schedule->fresh()),
+                    'reason' => 'Diimpor dari template CSV.',
+                ]);
             }
         });
 
@@ -649,11 +693,32 @@ class AttendanceController extends Controller
         $employee = $this->accessibleEmployee($request, (int) $validated['employee_id']);
         $outlet = $this->accessibleOutlet($request, (int) $validated['outlet_id']);
         abort_if($employee->outlet_id && $employee->outlet_id !== $outlet->id, 422, 'Karyawan tidak terhubung dengan outlet tersebut.');
+        abort_if(
+            EmployeeSchedule::where('employee_id', $employee->id)
+                ->whereDate('work_date', $validated['work_date'])
+                ->exists(),
+            422,
+            'Karyawan sudah memiliki jadwal pada tanggal tersebut.',
+        );
 
         $scheduleData = $this->prepareScheduleData($request, $validated, $outlet);
         $schedule = EmployeeSchedule::create([
             ...$scheduleData,
             'created_by' => $request->user()->id,
+            'publication_status' => $validated['publication_status'] ?? 'published',
+            'published_at' => ($validated['publication_status'] ?? 'published') === 'published' ? now() : null,
+            'published_by' => ($validated['publication_status'] ?? 'published') === 'published' ? $request->user()->id : null,
+            'is_custom_time' => $validated['status'] === 'scheduled'
+                && empty($validated['attendance_shift_id']),
+            'change_reason' => trim($validated['change_reason'] ?? '') ?: null,
+        ]);
+        EmployeeScheduleAudit::create([
+            'employee_schedule_id' => $schedule->id,
+            'employee_id' => $schedule->employee_id,
+            'actor_id' => $request->user()->id,
+            'action' => 'created',
+            'after' => $this->scheduleSnapshot($schedule),
+            'reason' => $schedule->change_reason,
         ]);
 
         return response()->json(
@@ -665,6 +730,12 @@ class AttendanceController extends Controller
     public function updateSchedule(Request $request, EmployeeSchedule $schedule)
     {
         $this->ensureScheduleAccessible($request, $schedule);
+        abort_if(
+            $schedule->attendance()->exists(),
+            422,
+            'Jadwal sudah memiliki catatan absensi dan tidak dapat diubah.',
+        );
+        $before = $this->scheduleSnapshot($schedule);
         $validated = $request->validate($this->scheduleRules(partial: true));
         if (isset($validated['employee_id'])) {
             $employee = $this->accessibleEmployee($request, (int) $validated['employee_id']);
@@ -701,6 +772,28 @@ class AttendanceController extends Controller
             $outlet,
         );
         $schedule->update($scheduleData);
+        $schedule->update([
+            'is_custom_time' => $scheduleData['status'] === 'scheduled'
+                && empty($scheduleData['attendance_shift_id']),
+            'change_reason' => trim($validated['change_reason'] ?? '') ?: $schedule->change_reason,
+            'revision' => $schedule->revision + 1,
+            ...(($validated['publication_status'] ?? null) === 'published'
+                ? [
+                    'publication_status' => 'published',
+                    'published_at' => now(),
+                    'published_by' => $request->user()->id,
+                ]
+                : []),
+        ]);
+        EmployeeScheduleAudit::create([
+            'employee_schedule_id' => $schedule->id,
+            'employee_id' => $schedule->employee_id,
+            'actor_id' => $request->user()->id,
+            'action' => 'updated',
+            'before' => $before,
+            'after' => $this->scheduleSnapshot($schedule->fresh()),
+            'reason' => $schedule->change_reason,
+        ]);
 
         return response()->json(
             $schedule->fresh()->load(['employee', 'outlet', 'attendanceShift']),
@@ -827,6 +920,8 @@ class AttendanceController extends Controller
             'shift_name' => [$required, 'string', 'max:100'],
             'status' => [$required, Rule::in(['scheduled', 'leave', 'sick', 'off', 'cancelled'])],
             'notes' => 'nullable|string|max:2000',
+            'publication_status' => ['nullable', Rule::in(['draft', 'published'])],
+            'change_reason' => 'nullable|string|max:2000',
         ];
     }
 
@@ -1012,6 +1107,7 @@ class AttendanceController extends Controller
             ->toDateString();
 
         return EmployeeSchedule::with(['employee', 'outlet', 'attendanceShift'])
+            ->withExists('attendance')
             ->where('work_date', '>=', $dateFrom)
             ->where('work_date', '<', $dateToExclusive)
             ->when($request->user()->company_id, function ($query, $companyId) {
@@ -1171,6 +1267,26 @@ class AttendanceController extends Controller
     {
         throw ValidationException::withMessages([
             'file' => "Baris {$line}: {$message}",
+        ]);
+    }
+
+    private function scheduleSnapshot(EmployeeSchedule $schedule): array
+    {
+        return $schedule->only([
+            'employee_id',
+            'outlet_id',
+            'attendance_shift_id',
+            'work_date',
+            'start_at',
+            'late_after_at',
+            'end_at',
+            'shift_name',
+            'status',
+            'publication_status',
+            'is_custom_time',
+            'notes',
+            'change_reason',
+            'revision',
         ]);
     }
 }

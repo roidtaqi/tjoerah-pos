@@ -6,6 +6,7 @@ use App\Domains\Core\Controllers\OutletController;
 use App\Domains\Core\Controllers\RbacController;
 use App\Domains\CRM\Controllers\CustomerController;
 use App\Domains\Employee\Controllers\AttendanceController;
+use App\Domains\Employee\Controllers\AttendanceRosterController;
 use App\Domains\Employee\Controllers\EmployeeController;
 use App\Domains\Inventory\Controllers\InventoryController;
 use App\Domains\Inventory\Controllers\PurchaseController;
@@ -134,6 +135,10 @@ Route::middleware('auth:api')->group(function () {
 
     Route::get('/attendance/context', [AttendanceController::class, 'context']);
     Route::get('/attendance/my-history', [AttendanceController::class, 'myHistory']);
+    Route::get('/attendance/my-schedule', [AttendanceRosterController::class, 'mySchedule']);
+    Route::get('/attendance/change-requests', [AttendanceRosterController::class, 'myRequests']);
+    Route::post('/attendance/change-requests', [AttendanceRosterController::class, 'storeRequest']);
+    Route::patch('/attendance/change-requests/{changeRequest}/cancel', [AttendanceRosterController::class, 'cancelRequest']);
     Route::post('/attendance/check-in', [AttendanceController::class, 'checkIn']);
     Route::post('/attendance/check-out', [AttendanceController::class, 'checkOut']);
     Route::post('/attendance/checkin', [AttendanceController::class, 'checkIn']);
@@ -160,9 +165,15 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/attendance/schedules', [AttendanceController::class, 'schedules']);
         Route::get('/attendance/schedules/template', [AttendanceController::class, 'scheduleTemplate']);
         Route::post('/attendance/schedules/import', [AttendanceController::class, 'importSchedules']);
+        Route::post('/attendance/schedules/bulk', [AttendanceRosterController::class, 'bulkUpsert']);
+        Route::post('/attendance/schedules/publish', [AttendanceRosterController::class, 'publish']);
+        Route::post('/attendance/schedules/copy', [AttendanceRosterController::class, 'copy']);
         Route::post('/attendance/schedules', [AttendanceController::class, 'storeSchedule']);
         Route::match(['put', 'patch'], '/attendance/schedules/{schedule}', [AttendanceController::class, 'updateSchedule']);
         Route::delete('/attendance/schedules/{schedule}', [AttendanceController::class, 'destroySchedule']);
+        Route::get('/attendance/schedules/{schedule}/audits', [AttendanceRosterController::class, 'audits']);
+        Route::get('/attendance/admin/change-requests', [AttendanceRosterController::class, 'adminRequests']);
+        Route::patch('/attendance/admin/change-requests/{changeRequest}/review', [AttendanceRosterController::class, 'reviewRequest']);
         Route::patch('/attendance/records/{attendance}/review', [AttendanceController::class, 'review']);
     });
 

@@ -25,6 +25,7 @@ class AttendanceAdminSnapshot {
     required this.records,
     required this.schedules,
     required this.shifts,
+    this.changeRequests = const [],
   });
 
   factory AttendanceAdminSnapshot.fromJson(Map<String, dynamic> body) {
@@ -72,6 +73,14 @@ class AttendanceAdminSnapshot {
                 AttendanceShiftModel.fromJson(Map<String, dynamic>.from(row)),
           )
           .toList(),
+      changeRequests: (body['change_requests'] as List? ?? const [])
+          .whereType<Map>()
+          .map(
+            (row) => ShiftChangeRequestModel.fromJson(
+              Map<String, dynamic>.from(row),
+            ),
+          )
+          .toList(),
     );
   }
 
@@ -83,6 +92,7 @@ class AttendanceAdminSnapshot {
   final List<AttendanceRecord> records;
   final List<EmployeeScheduleModel> schedules;
   final List<AttendanceShiftModel> shifts;
+  final List<ShiftChangeRequestModel> changeRequests;
 }
 
 class AttendanceRepository {
@@ -434,6 +444,110 @@ class AttendanceRepository {
     if (response.statusCode != 204) {
       throw _apiError(response.body, response.statusCode);
     }
+  }
+
+  Future<int> bulkUpsertSchedules({
+    required int outletId,
+    required List<Map<String, dynamic>> assignments,
+    String publicationStatus = 'draft',
+    String? changeReason,
+  }) async {
+    final response = await ApiClient.post('/attendance/schedules/bulk', {
+      'outlet_id': outletId,
+      'publication_status': publicationStatus,
+      'change_reason': changeReason,
+      'assignments': assignments,
+    });
+    if (response.statusCode != 200) {
+      throw _apiError(response.body, response.statusCode);
+    }
+    final body = Map<String, dynamic>.from(jsonDecode(response.body) as Map);
+    return _asInt(body['updated_schedules']);
+  }
+
+  Future<int> publishSchedules({
+    required int outletId,
+    required DateTime dateFrom,
+    required DateTime dateTo,
+  }) async {
+    final response = await ApiClient.post('/attendance/schedules/publish', {
+      'outlet_id': outletId,
+      'date_from': _dateOnly(dateFrom),
+      'date_to': _dateOnly(dateTo),
+    });
+    if (response.statusCode != 200) {
+      throw _apiError(response.body, response.statusCode);
+    }
+    final body = Map<String, dynamic>.from(jsonDecode(response.body) as Map);
+    return _asInt(body['published_schedules']);
+  }
+
+  Future<int> copySchedules({
+    required int outletId,
+    required DateTime sourceStartDate,
+    required DateTime targetStartDate,
+    required int days,
+  }) async {
+    final response = await ApiClient.post('/attendance/schedules/copy', {
+      'outlet_id': outletId,
+      'source_start_date': _dateOnly(sourceStartDate),
+      'target_start_date': _dateOnly(targetStartDate),
+      'days': days,
+    });
+    if (response.statusCode != 200) {
+      throw _apiError(response.body, response.statusCode);
+    }
+    final body = Map<String, dynamic>.from(jsonDecode(response.body) as Map);
+    return _asInt(body['copied_schedules']);
+  }
+
+  Future<List<EmployeeScheduleAuditModel>> getScheduleAudits(
+    int scheduleId,
+  ) async {
+    final response = await ApiClient.get(
+      '/attendance/schedules/$scheduleId/audits',
+    );
+    if (response.statusCode != 200) {
+      throw _apiError(response.body, response.statusCode);
+    }
+    return (jsonDecode(response.body) as List)
+        .whereType<Map>()
+        .map(
+          (row) => EmployeeScheduleAuditModel.fromJson(
+            Map<String, dynamic>.from(row),
+          ),
+        )
+        .toList();
+  }
+
+  Future<ShiftChangeRequestModel> createShiftChangeRequest(
+    Map<String, dynamic> data,
+  ) async {
+    final response = await ApiClient.post('/attendance/change-requests', data);
+    if (response.statusCode != 201) {
+      throw _apiError(response.body, response.statusCode);
+    }
+    final body = Map<String, dynamic>.from(jsonDecode(response.body) as Map);
+    return ShiftChangeRequestModel.fromJson(
+      Map<String, dynamic>.from(body['request'] as Map),
+    );
+  }
+
+  Future<ShiftChangeRequestModel> reviewShiftChangeRequest({
+    required int requestId,
+    required Map<String, dynamic> data,
+  }) async {
+    final response = await ApiClient.patch(
+      '/attendance/admin/change-requests/$requestId/review',
+      data,
+    );
+    if (response.statusCode != 200) {
+      throw _apiError(response.body, response.statusCode);
+    }
+    final body = Map<String, dynamic>.from(jsonDecode(response.body) as Map);
+    return ShiftChangeRequestModel.fromJson(
+      Map<String, dynamic>.from(body['request'] as Map),
+    );
   }
 
   Future<AttendanceRecord> reviewAttendance(
