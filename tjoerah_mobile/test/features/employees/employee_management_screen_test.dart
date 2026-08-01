@@ -9,7 +9,7 @@ import 'package:tjoerah_mobile/features/employees/screens/employee_management_sc
 
 void main() {
   testWidgets('owner can browse and open the employee form', (tester) async {
-    await _render(tester, role: 'owner');
+    await _render(tester, role: 'owner', size: const Size(390, 2400));
 
     expect(find.text('Karyawan & akses'), findsOneWidget);
     expect(find.text('Ayu Lestari'), findsOneWidget);
@@ -21,6 +21,20 @@ void main() {
     expect(find.text('Karyawan baru'), findsOneWidget);
     expect(find.text('Data kerja'), findsOneWidget);
     expect(find.text('Akses aplikasi'), findsOneWidget);
+    expect(find.text('Nomor karyawan *'), findsOneWidget);
+    expect(find.text('Jabatan (opsional)'), findsOneWidget);
+    expect(find.text('Shift absensi'), findsNothing);
+    expect(tester.takeException(), isNull);
+
+    await tester.ensureVisible(find.text('Tambahkan karyawan'));
+    await tester.tap(find.text('Tambahkan karyawan'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Karyawan baru'), findsOneWidget);
+    expect(find.text('Lengkapi data wajib'), findsOneWidget);
+    expect(find.textContaining('Nomor karyawan'), findsWidgets);
+    expect(find.text('Kolom ini wajib diisi.'), findsWidgets);
+    expect(find.text('Lengkapi kolom wajib yang ditandai *.'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

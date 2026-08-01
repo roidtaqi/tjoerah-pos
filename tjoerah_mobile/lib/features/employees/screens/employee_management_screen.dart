@@ -373,11 +373,6 @@ class _EmployeeCard extends StatelessWidget {
                         text: employee.outletName!,
                         icon: Icons.store_outlined,
                       ),
-                    if (employee.shiftName != null)
-                      AppBadge(
-                        text: employee.shiftName!,
-                        icon: Icons.schedule_outlined,
-                      ),
                     AppBadge(
                       text: employee.isActive ? 'Aktif' : 'Nonaktif',
                       color: employee.isActive
@@ -436,6 +431,13 @@ class _EmployeeForm extends StatefulWidget {
 
 class _EmployeeFormState extends State<_EmployeeForm> {
   final _formKey = GlobalKey<FormState>();
+  final _numberFocus = FocusNode();
+  final _nameFocus = FocusNode();
+  final _outletFocus = FocusNode();
+  final _roleFocus = FocusNode();
+  final _emailFocus = FocusNode();
+  final _pinFocus = FocusNode();
+  final _passwordFocus = FocusNode();
   late final TextEditingController _number;
   late final TextEditingController _name;
   late final TextEditingController _email;
@@ -449,7 +451,6 @@ class _EmployeeFormState extends State<_EmployeeForm> {
   late final TextEditingController _pin;
   late String? _role;
   late int? _outletId;
-  late int? _shiftId;
   late String _employmentStatus;
   late String? _gender;
   late DateTime? _hireDate;
@@ -457,11 +458,9 @@ class _EmployeeFormState extends State<_EmployeeForm> {
   late bool _isActive;
   bool _obscurePassword = true;
   bool _obscurePin = true;
+  bool _showValidation = false;
 
   bool get _isNew => widget.employee == null;
-
-  EmployeeOutletOption? get _outlet =>
-      widget.data.outlets.where((outlet) => outlet.id == _outletId).firstOrNull;
 
   @override
   void initState() {
@@ -482,11 +481,13 @@ class _EmployeeFormState extends State<_EmployeeForm> {
     );
     _password = TextEditingController();
     _pin = TextEditingController();
+    for (final controller in [_number, _name, _email, _pin, _password]) {
+      controller.addListener(_refreshValidationSummary);
+    }
     _role =
         employee?.role ??
         widget.data.roles.where((role) => role.assignable).firstOrNull?.value;
     _outletId = employee?.outletId ?? widget.data.outlets.firstOrNull?.id;
-    _shiftId = employee?.attendanceShiftId ?? _outlet?.shifts.firstOrNull?.id;
     _employmentStatus =
         employee?.employmentStatus ??
         widget.data.employmentStatuses.firstOrNull?.value ??
@@ -514,6 +515,17 @@ class _EmployeeFormState extends State<_EmployeeForm> {
     ]) {
       controller.dispose();
     }
+    for (final focusNode in [
+      _numberFocus,
+      _nameFocus,
+      _outletFocus,
+      _roleFocus,
+      _emailFocus,
+      _pinFocus,
+      _passwordFocus,
+    ]) {
+      focusNode.dispose();
+    }
     super.dispose();
   }
 
@@ -521,15 +533,24 @@ class _EmployeeFormState extends State<_EmployeeForm> {
   Widget build(BuildContext context) {
     return Form(
       key: _formKey,
+      autovalidateMode: _showValidation
+          ? AutovalidateMode.always
+          : AutovalidateMode.disabled,
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
         children: [
           const _FormSection(title: 'Data kerja'),
+          const SizedBox(height: 4),
+          Text(
+            'Kolom bertanda * wajib diisi',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
           const SizedBox(height: 10),
           TextFormField(
             controller: _number,
+            focusNode: _numberFocus,
             decoration: const InputDecoration(
-              labelText: 'Nomor karyawan',
+              labelText: 'Nomor karyawan *',
               prefixIcon: Icon(Icons.badge_outlined),
             ),
             textCapitalization: TextCapitalization.characters,
@@ -538,8 +559,9 @@ class _EmployeeFormState extends State<_EmployeeForm> {
           const SizedBox(height: 12),
           TextFormField(
             controller: _name,
+            focusNode: _nameFocus,
             decoration: const InputDecoration(
-              labelText: 'Nama lengkap',
+              labelText: 'Nama lengkap *',
               prefixIcon: Icon(Icons.person_outline_rounded),
             ),
             textCapitalization: TextCapitalization.words,
@@ -547,10 +569,11 @@ class _EmployeeFormState extends State<_EmployeeForm> {
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<int>(
+            focusNode: _outletFocus,
             isExpanded: true,
             initialValue: _outletId,
             decoration: const InputDecoration(
-              labelText: 'Outlet',
+              labelText: 'Outlet *',
               prefixIcon: Icon(Icons.store_outlined),
             ),
             items: widget.data.outlets
@@ -561,41 +584,14 @@ class _EmployeeFormState extends State<_EmployeeForm> {
                   ),
                 )
                 .toList(),
-            onChanged: (value) => setState(() {
-              _outletId = value;
-              _shiftId = _outlet?.shifts.firstOrNull?.id;
-            }),
+            onChanged: (value) => setState(() => _outletId = value),
             validator: (value) => value == null ? 'Pilih outlet.' : null,
-          ),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<int?>(
-            isExpanded: true,
-            initialValue: _shiftId,
-            decoration: const InputDecoration(
-              labelText: 'Shift absensi',
-              prefixIcon: Icon(Icons.schedule_outlined),
-            ),
-            items: [
-              const DropdownMenuItem<int?>(
-                value: null,
-                child: Text('Belum ditetapkan'),
-              ),
-              ...?_outlet?.shifts.map(
-                (shift) => DropdownMenuItem<int?>(
-                  value: shift.id,
-                  child: Text(
-                    '${shift.name} (${shift.startTime}-${shift.endTime})',
-                  ),
-                ),
-              ),
-            ],
-            onChanged: (value) => setState(() => _shiftId = value),
           ),
           const SizedBox(height: 12),
           TextFormField(
             controller: _position,
             decoration: const InputDecoration(
-              labelText: 'Jabatan',
+              labelText: 'Jabatan (opsional)',
               prefixIcon: Icon(Icons.work_outline_rounded),
             ),
             textCapitalization: TextCapitalization.words,
@@ -605,7 +601,7 @@ class _EmployeeFormState extends State<_EmployeeForm> {
             isExpanded: true,
             initialValue: _employmentStatus,
             decoration: const InputDecoration(
-              labelText: 'Status kerja',
+              labelText: 'Status kerja *',
               prefixIcon: Icon(Icons.assignment_ind_outlined),
             ),
             items: widget.data.employmentStatuses
@@ -618,10 +614,11 @@ class _EmployeeFormState extends State<_EmployeeForm> {
                 .toList(),
             onChanged: (value) =>
                 setState(() => _employmentStatus = value ?? 'permanent'),
+            validator: (value) => value == null ? 'Pilih status kerja.' : null,
           ),
           const SizedBox(height: 12),
           _DateField(
-            label: 'Tanggal mulai kerja',
+            label: 'Tanggal mulai kerja (opsional)',
             value: _hireDate,
             onChanged: (value) => setState(() => _hireDate = value),
           ),
@@ -629,10 +626,11 @@ class _EmployeeFormState extends State<_EmployeeForm> {
           const _FormSection(title: 'Akses aplikasi'),
           const SizedBox(height: 10),
           DropdownButtonFormField<String>(
+            focusNode: _roleFocus,
             isExpanded: true,
             initialValue: _role,
             decoration: const InputDecoration(
-              labelText: 'Role',
+              labelText: 'Role *',
               prefixIcon: Icon(Icons.admin_panel_settings_outlined),
             ),
             items: widget.data.roles
@@ -661,8 +659,9 @@ class _EmployeeFormState extends State<_EmployeeForm> {
           const SizedBox(height: 12),
           TextFormField(
             controller: _email,
+            focusNode: _emailFocus,
             decoration: const InputDecoration(
-              labelText: 'Email login',
+              labelText: 'Email login *',
               prefixIcon: Icon(Icons.mail_outline_rounded),
             ),
             keyboardType: TextInputType.emailAddress,
@@ -675,8 +674,9 @@ class _EmployeeFormState extends State<_EmployeeForm> {
           const SizedBox(height: 12),
           TextFormField(
             controller: _pin,
+            focusNode: _pinFocus,
             decoration: InputDecoration(
-              labelText: _isNew ? 'PIN login' : 'PIN baru (opsional)',
+              labelText: _isNew ? 'PIN login *' : 'PIN baru (opsional)',
               prefixIcon: const Icon(Icons.pin_outlined),
               suffixIcon: IconButton(
                 tooltip: _obscurePin ? 'Tampilkan PIN' : 'Sembunyikan PIN',
@@ -703,8 +703,9 @@ class _EmployeeFormState extends State<_EmployeeForm> {
           const SizedBox(height: 12),
           TextFormField(
             controller: _password,
+            focusNode: _passwordFocus,
             decoration: InputDecoration(
-              labelText: _isNew ? 'Password' : 'Password baru (opsional)',
+              labelText: _isNew ? 'Password *' : 'Password baru (opsional)',
               prefixIcon: const Icon(Icons.lock_outline_rounded),
               suffixIcon: IconButton(
                 tooltip: _obscurePassword
@@ -737,14 +738,14 @@ class _EmployeeFormState extends State<_EmployeeForm> {
           TextFormField(
             controller: _phone,
             decoration: const InputDecoration(
-              labelText: 'Nomor telepon',
+              labelText: 'Nomor telepon (opsional)',
               prefixIcon: Icon(Icons.phone_outlined),
             ),
             keyboardType: TextInputType.phone,
           ),
           const SizedBox(height: 12),
           _DateField(
-            label: 'Tanggal lahir',
+            label: 'Tanggal lahir (opsional)',
             value: _birthDate,
             lastDate: DateTime.now().subtract(const Duration(days: 1)),
             onChanged: (value) => setState(() => _birthDate = value),
@@ -754,7 +755,7 @@ class _EmployeeFormState extends State<_EmployeeForm> {
             isExpanded: true,
             initialValue: _gender,
             decoration: const InputDecoration(
-              labelText: 'Jenis kelamin',
+              labelText: 'Jenis kelamin (opsional)',
               prefixIcon: Icon(Icons.person_search_outlined),
             ),
             items: const [
@@ -772,7 +773,7 @@ class _EmployeeFormState extends State<_EmployeeForm> {
           TextFormField(
             controller: _identityNumber,
             decoration: const InputDecoration(
-              labelText: 'Nomor identitas',
+              labelText: 'Nomor identitas (opsional)',
               prefixIcon: Icon(Icons.credit_card_outlined),
             ),
           ),
@@ -780,7 +781,7 @@ class _EmployeeFormState extends State<_EmployeeForm> {
           TextFormField(
             controller: _address,
             decoration: const InputDecoration(
-              labelText: 'Alamat',
+              labelText: 'Alamat (opsional)',
               prefixIcon: Icon(Icons.home_outlined),
               alignLabelWithHint: true,
             ),
@@ -793,7 +794,7 @@ class _EmployeeFormState extends State<_EmployeeForm> {
           TextFormField(
             controller: _emergencyName,
             decoration: const InputDecoration(
-              labelText: 'Nama kontak',
+              labelText: 'Nama kontak (opsional)',
               prefixIcon: Icon(Icons.contact_emergency_outlined),
             ),
             textCapitalization: TextCapitalization.words,
@@ -802,7 +803,7 @@ class _EmployeeFormState extends State<_EmployeeForm> {
           TextFormField(
             controller: _emergencyPhone,
             decoration: const InputDecoration(
-              labelText: 'Nomor kontak',
+              labelText: 'Nomor kontak (opsional)',
               prefixIcon: Icon(Icons.phone_callback_outlined),
             ),
             keyboardType: TextInputType.phone,
@@ -816,6 +817,10 @@ class _EmployeeFormState extends State<_EmployeeForm> {
             onChanged: (value) => setState(() => _isActive = value),
           ),
           const SizedBox(height: 16),
+          if (_showValidation && _validationIssues.isNotEmpty) ...[
+            _ValidationSummary(issues: _validationIssues),
+            const SizedBox(height: 12),
+          ],
           AppButton(
             text: _isNew ? 'Tambahkan karyawan' : 'Simpan perubahan',
             icon: _isNew
@@ -829,9 +834,16 @@ class _EmployeeFormState extends State<_EmployeeForm> {
   }
 
   Future<void> _submit() async {
-    if (!(_formKey.currentState?.validate() ?? false) ||
-        _role == null ||
-        _outletId == null) {
+    setState(() => _showValidation = true);
+    final isValid = _formKey.currentState?.validate() ?? false;
+    if (!isValid || _role == null || _outletId == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _focusFirstInvalid());
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Lengkapi kolom wajib yang ditandai *.'),
+          backgroundColor: AppColors.error,
+        ),
+      );
       return;
     }
     Navigator.pop(
@@ -842,7 +854,7 @@ class _EmployeeFormState extends State<_EmployeeForm> {
         email: _email.text.trim(),
         role: _role!,
         outletId: _outletId!,
-        attendanceShiftId: _shiftId,
+        attendanceShiftId: null,
         phone: _nullable(_phone.text),
         position: _nullable(_position.text),
         employmentStatus: _employmentStatus,
@@ -866,6 +878,61 @@ class _EmployeeFormState extends State<_EmployeeForm> {
         : null;
   }
 
+  List<String> get _validationIssues {
+    final issues = <String>[];
+    if (_number.text.trim().isEmpty) issues.add('Nomor karyawan');
+    if (_name.text.trim().isEmpty) issues.add('Nama lengkap');
+    if (_outletId == null) issues.add('Outlet');
+    if (_employmentStatus.trim().isEmpty) issues.add('Status kerja');
+    if (_role == null) issues.add('Role');
+    final email = _email.text.trim();
+    if (email.isEmpty) {
+      issues.add('Email login');
+    } else if (!email.contains('@')) {
+      issues.add('Format email login');
+    }
+    final pin = _pin.text.trim();
+    if (_isNew && pin.isEmpty) {
+      issues.add('PIN login');
+    } else if (pin.isNotEmpty && !RegExp(r'^\d{4,6}$').hasMatch(pin)) {
+      issues.add('PIN 4-6 angka');
+    }
+    final password = _password.text;
+    if (_isNew && password.isEmpty) {
+      issues.add('Password');
+    } else if (password.isNotEmpty && password.length < 8) {
+      issues.add('Password minimal 8 karakter');
+    }
+    return issues;
+  }
+
+  void _focusFirstInvalid() {
+    if (!mounted) return;
+    if (_number.text.trim().isEmpty) {
+      _numberFocus.requestFocus();
+    } else if (_name.text.trim().isEmpty) {
+      _nameFocus.requestFocus();
+    } else if (_outletId == null) {
+      _outletFocus.requestFocus();
+    } else if (_role == null) {
+      _roleFocus.requestFocus();
+    } else if (_email.text.trim().isEmpty ||
+        !_email.text.trim().contains('@')) {
+      _emailFocus.requestFocus();
+    } else if ((_isNew && _pin.text.trim().isEmpty) ||
+        (_pin.text.trim().isNotEmpty &&
+            !RegExp(r'^\d{4,6}$').hasMatch(_pin.text.trim()))) {
+      _pinFocus.requestFocus();
+    } else if ((_isNew && _password.text.isEmpty) ||
+        (_password.text.isNotEmpty && _password.text.length < 8)) {
+      _passwordFocus.requestFocus();
+    }
+  }
+
+  void _refreshValidationSummary() {
+    if (_showValidation && mounted) setState(() {});
+  }
+
   String? _nullable(String value) {
     final trimmed = value.trim();
     return trimmed.isEmpty ? null : trimmed;
@@ -880,6 +947,49 @@ class _FormSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Text(title, style: Theme.of(context).textTheme.titleMedium);
+  }
+}
+
+class _ValidationSummary extends StatelessWidget {
+  const _ValidationSummary({required this.issues});
+
+  final List<String> issues;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.errorSoft,
+        border: Border.all(color: AppColors.error),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.error_outline_rounded, color: AppColors.error),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Lengkapi data wajib',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(color: AppColors.error),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  issues.join(', '),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
