@@ -9,14 +9,31 @@ flutter pub get
 flutter run
 ```
 
-Secara default aplikasi memakai API lokal di `http://127.0.0.1:8000/api`.
-Gunakan `adb reverse tcp:8000 tcp:8000` sebelum `flutter run` pada perangkat
-Android melalui USB.
+Secara default aplikasi memakai API produksi di
+`https://api.tjoerahpos.com/api`. Karena itu `flutter run` biasa dapat langsung
+terhubung ke server produksi.
 
 URL API lain dapat diberikan tanpa mengubah source code:
 
 ```bash
 flutter run --dart-define=API_BASE_URL=http://HOST:8000/api
+```
+
+Untuk memakai backend lokal melalui perangkat Android USB, jalankan:
+
+```bash
+adb reverse tcp:8000 tcp:8000
+flutter run --dart-define=API_BASE_URL=http://127.0.0.1:8000/api
+```
+
+## Build produksi
+
+Build release harus memakai `android/key.properties` dan keystore produksi.
+Keduanya sengaja diabaikan Git dan wajib dicadangkan secara terpisah. Gradle
+akan menghentikan build release jika konfigurasi signing tersebut tidak ada.
+
+```bash
+flutter build apk --release
 ```
 
 ## Printer Bluetooth

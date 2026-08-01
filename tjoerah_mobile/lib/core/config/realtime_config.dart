@@ -9,7 +9,7 @@ class RealtimeConfig {
   );
   static const String appKey = String.fromEnvironment(
     'REVERB_APP_KEY',
-    defaultValue: 'tjoerah-reverb-key',
+    defaultValue: '53969f520a258257e8302998693045d5',
   );
   static const String _definedHost = String.fromEnvironment('REVERB_HOST');
   static const String _definedPort = String.fromEnvironment('REVERB_PORT');

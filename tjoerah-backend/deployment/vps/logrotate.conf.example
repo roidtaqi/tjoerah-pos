@@ -1,0 +1,10 @@
+/var/www/tjoerah-pos/tjoerah-backend/storage/logs/*.log {
+    daily
+    rotate 14
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+    su www-data www-data
+}

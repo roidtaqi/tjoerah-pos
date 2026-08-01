@@ -1,0 +1,1 @@
+15 2 * * * root /usr/local/sbin/tjoerah-backup-postgresql

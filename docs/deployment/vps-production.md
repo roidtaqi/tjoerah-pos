@@ -36,6 +36,11 @@ Untuk VPS RAM 1 GB atau 2 GB, terapkan template PHP-FPM yang sesuai agar worker
 hanya dibuat ketika ada request dan berhenti kembali saat idle. Jangan memasang
 Docker, database, Redis, atau control panel pada VPS 1 GB.
 
+Pada VPS 2 GB, PostgreSQL boleh dijalankan pada mesin yang sama untuk profil
+hemat hingga sekitar 20 perangkat aktif. Batasi `max_connections`, gunakan
+`shared_buffers` yang konservatif, dan siapkan backup di lokasi lain. Database
+terkelola tetap lebih tahan terhadap kegagalan satu VPS.
+
 Tambahkan swap 2 GB sebagai pengaman lonjakan memori:
 
 ```bash
@@ -58,6 +63,20 @@ Tambahkan scheduler Laravel ke crontab pengguna `www-data`:
 ```
 
 Scheduler ini juga membersihkan foto absensi yang melewati masa retensi.
+
+Template `nginx-http.conf.example` hanya dipakai untuk pengujian awal melalui
+alamat IP. Setelah DNS domain mengarah ke VPS, gunakan
+`nginx.conf.example`, pasang sertifikat Let's Encrypt, dan jangan menjalankan
+aplikasi produksi melalui HTTP.
+
+## Backup database
+
+Untuk PostgreSQL pada VPS yang sama, pasang
+`backup-postgresql.sh.example` sebagai `/usr/local/sbin/tjoerah-backup-postgresql`
+dan `database-backup.cron.example` ke `/etc/cron.d`. Backup lokal tujuh hari
+berguna untuk kesalahan aplikasi, tetapi tidak melindungi dari kerusakan atau
+hilangnya VPS. Salin backup harian ke object storage atau komputer lain dan
+uji proses restore secara berkala.
 
 ## Deploy backend
 
