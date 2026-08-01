@@ -1,15 +1,3 @@
-[program:tjoerah-queue]
-command=php /var/www/tjoerah-pos/tjoerah-backend/artisan queue:work --sleep=1 --tries=3 --timeout=90 --max-time=3600
-directory=/var/www/tjoerah-pos/tjoerah-backend
-autostart=true
-autorestart=true
-stopasgroup=true
-killasgroup=true
-user=www-data
-redirect_stderr=true
-stdout_logfile=/var/log/supervisor/tjoerah-queue.log
-stopwaitsecs=100
-
 [program:tjoerah-reverb]
 command=php /var/www/tjoerah-pos/tjoerah-backend/artisan reverb:start --host=127.0.0.1 --port=8080
 directory=/var/www/tjoerah-pos/tjoerah-backend
@@ -18,5 +6,8 @@ autorestart=true
 stopasgroup=true
 killasgroup=true
 user=www-data
+environment=MALLOC_ARENA_MAX="2"
 redirect_stderr=true
 stdout_logfile=/var/log/supervisor/tjoerah-reverb.log
+stdout_logfile_maxbytes=10MB
+stdout_logfile_backups=3
