@@ -638,27 +638,63 @@ class _OrderTotalsState extends ConsumerState<_OrderTotals> {
               value: currency.format(cart.total),
               emphasize: true,
             ),
+            if (cart.isEditingOpenBill) ...[
+              const SizedBox(height: 10),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.bookmark_added_outlined,
+                    size: 18,
+                    color: theme.colorScheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${cart.items.length} item baru akan disimpan ke '
+                      '${cart.openBill!.receiptNumber}.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _isSavingOpenBill ? null : _saveOpenBill,
-                icon: _isSavingOpenBill
-                    ? const SizedBox.square(
-                        dimension: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.bookmark_add_outlined),
-                label: Text(
-                  _isSavingOpenBill
-                      ? cart.isEditingOpenBill
-                            ? 'Mengirim tambahan...'
-                            : 'Menyimpan open bill...'
-                      : cart.isEditingOpenBill
-                      ? 'Kirim tambahan ke produksi'
-                      : 'Simpan sebagai open bill',
-                ),
-              ),
+              child: cart.isEditingOpenBill
+                  ? FilledButton.icon(
+                      onPressed: _isSavingOpenBill || cart.items.isEmpty
+                          ? null
+                          : _saveOpenBill,
+                      icon: _isSavingOpenBill
+                          ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.bookmark_add_outlined),
+                      label: Text(
+                        _isSavingOpenBill
+                            ? 'Menyimpan tambahan...'
+                            : 'Simpan tambahan ke open bill',
+                      ),
+                    )
+                  : OutlinedButton.icon(
+                      onPressed: _isSavingOpenBill ? null : _saveOpenBill,
+                      icon: _isSavingOpenBill
+                          ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.bookmark_add_outlined),
+                      label: Text(
+                        _isSavingOpenBill
+                            ? 'Menyimpan open bill...'
+                            : 'Simpan sebagai open bill',
+                      ),
+                    ),
             ),
             if (!cart.isEditingOpenBill) ...[
               const SizedBox(height: 8),
@@ -810,11 +846,11 @@ class _OrderTotalsState extends ConsumerState<_OrderTotals> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Kirim tambahan?'),
+        title: const Text('Simpan tambahan ke open bill?'),
         content: Text(
-          '${cart.items.length} item baru akan ditambahkan ke '
-          '${cart.openBill!.receiptNumber}. Produk bar atau dapur dikirim ke '
-          'stasiun produksi.',
+          '${cart.items.length} item baru akan disimpan pada '
+          '${cart.openBill!.receiptNumber}. Item bar atau dapur juga dikirim '
+          'ke stasiun produksi sebagai batch baru.',
         ),
         actions: [
           TextButton(
@@ -824,7 +860,7 @@ class _OrderTotalsState extends ConsumerState<_OrderTotals> {
           FilledButton.icon(
             onPressed: () => Navigator.pop(dialogContext, true),
             icon: const Icon(Icons.send_outlined),
-            label: const Text('Kirim'),
+            label: const Text('Simpan & kirim'),
           ),
         ],
       ),
@@ -879,7 +915,7 @@ class _OrderTotalsState extends ConsumerState<_OrderTotals> {
         SnackBar(
           content: Text(
             printResult.failures.isEmpty
-                ? 'Tambahan batch $batch dikirim ke ${cart.openBill!.receiptNumber}.'
+                ? 'Tambahan batch $batch tersimpan di ${cart.openBill!.receiptNumber} dan dikirim ke produksi.'
                 : 'Tambahan batch $batch tersimpan. ${printResult.message}',
           ),
         ),

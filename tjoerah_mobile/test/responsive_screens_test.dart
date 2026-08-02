@@ -32,6 +32,7 @@ import 'package:tjoerah_mobile/features/pos/screens/payment_screen.dart';
 import 'package:tjoerah_mobile/features/pos/screens/pos_screen.dart';
 import 'package:tjoerah_mobile/features/pos/screens/table_selection_screen.dart';
 import 'package:tjoerah_mobile/features/pos/screens/table_management_screen.dart';
+import 'package:tjoerah_mobile/features/pos/widgets/order_cart.dart';
 import 'package:tjoerah_mobile/features/recipe/models/recipe_models.dart';
 import 'package:tjoerah_mobile/features/recipe/providers/recipe_provider.dart';
 import 'package:tjoerah_mobile/features/recipe/screens/recipe_screen.dart';
@@ -123,6 +124,29 @@ void main() {
 
     expect(find.text('Biaya dekorasi'), findsOneWidget);
     expect(find.text('Item manual'), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('restored open bill exposes a clear save action', (tester) async {
+    await _render(
+      tester,
+      size: const Size(390, 844),
+      screen: const Scaffold(body: OrderCart()),
+      overrides: [cartProvider.overrideWith(_PreviewOpenBillCartNotifier.new)],
+    );
+
+    expect(find.text('Tambah TJ-OPEN-001'), findsOneWidget);
+    expect(
+      find.text('1 item baru akan disimpan ke TJ-OPEN-001.'),
+      findsOneWidget,
+    );
+    expect(find.text('Simpan tambahan ke open bill'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.text('Simpan tambahan ke open bill'));
+    await tester.pumpAndSettle();
+    expect(find.text('Simpan tambahan ke open bill?'), findsOneWidget);
+    expect(find.text('Simpan & kirim'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -709,6 +733,38 @@ class _PreviewCartNotifier extends CartNotifier {
       ),
       CartItem(productId: '4', name: 'Matcha Latte', price: 34000),
       CartItem(productId: '9', name: 'Croissant Butter', price: 26000),
+    ],
+  );
+}
+
+class _PreviewOpenBillCartNotifier extends CartNotifier {
+  @override
+  CartState build() => CartState(
+    orderType: 'dine_in',
+    tableId: '7',
+    tableName: 'Meja 07',
+    openBill: OpenBillCartContext(
+      serverId: 'server-open-1',
+      receiptNumber: 'TJ-OPEN-001',
+      createdAt: DateTime(2026, 8, 2, 10),
+    ),
+    submittedItems: [
+      SubmittedCartItem(
+        productId: '1',
+        name: 'Kopi Susu Tjoerah',
+        price: 28000,
+        quantity: 1,
+        station: 'bar',
+        submittedAt: DateTime(2026, 8, 2, 10),
+      ),
+    ],
+    items: const [
+      CartItem(
+        productId: '2',
+        name: 'Croissant Butter',
+        price: 26000,
+        station: 'kitchen',
+      ),
     ],
   );
 }
