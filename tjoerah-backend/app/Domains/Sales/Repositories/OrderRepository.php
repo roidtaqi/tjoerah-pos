@@ -47,6 +47,8 @@ class OrderRepository
                 'station' => $item['station'] ?? null,
                 'modifiers' => $item['modifiers'] ?? null,
                 'notes' => $item['notes'] ?? null,
+                'submission_batch' => 1,
+                'submitted_at' => now(),
             ]);
         }
 

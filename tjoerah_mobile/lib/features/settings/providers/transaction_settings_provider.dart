@@ -33,6 +33,7 @@ class TransactionSettingsNotifier extends AsyncNotifier<TransactionSettings> {
             outletId: outletId,
             taxEnabled: true,
             taxRate: 11,
+            kdsMode: 'manual',
           );
     }
   }
@@ -40,6 +41,7 @@ class TransactionSettingsNotifier extends AsyncNotifier<TransactionSettings> {
   Future<String?> updateTax({
     required bool enabled,
     required double rate,
+    String? kdsMode,
   }) async {
     final current = state.asData?.value;
     final outletId = current?.outletId ?? await _resolveOutletId();
@@ -48,13 +50,14 @@ class TransactionSettingsNotifier extends AsyncNotifier<TransactionSettings> {
         'outlet_id': outletId,
         'tax_enabled': enabled,
         'tax_rate': rate,
+        'kds_mode': kdsMode ?? current?.kdsMode ?? 'manual',
       });
       final decoded = Map<String, dynamic>.from(
         jsonDecode(response.body) as Map,
       );
       if (response.statusCode != 200) {
         return decoded['message']?.toString() ??
-            'Pengaturan pajak belum dapat disimpan.';
+            'Pengaturan transaksi belum dapat disimpan.';
       }
       final settings = TransactionSettings.fromJson(
         Map<String, dynamic>.from(decoded['data'] as Map),
@@ -63,7 +66,7 @@ class TransactionSettingsNotifier extends AsyncNotifier<TransactionSettings> {
       state = AsyncValue.data(settings);
       return null;
     } catch (_) {
-      return 'Pengaturan pajak memerlukan koneksi ke server.';
+      return 'Pengaturan transaksi memerlukan koneksi ke server.';
     }
   }
 

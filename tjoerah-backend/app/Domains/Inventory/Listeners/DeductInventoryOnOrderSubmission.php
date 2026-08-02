@@ -23,11 +23,17 @@ class DeductInventoryOnOrderSubmission
                 ->lockForUpdate()
                 ->find($event->order->id);
 
-            if (! $order || $order->inventory_deducted_at) {
+            if (! $order) {
                 return;
             }
 
-            $order->load('items');
+            $items = $order->items()
+                ->whereNull('inventory_deducted_at')
+                ->lockForUpdate()
+                ->get();
+            if ($items->isEmpty()) {
+                return;
+            }
 
             // 1. Get the primary active warehouse for this order's outlet
             $warehouse = Warehouse::where('outlet_id', $order->outlet_id)
@@ -39,10 +45,13 @@ class DeductInventoryOnOrderSubmission
             }
 
             // 2. Loop over order items to find recipes and deduct raw materials
-            foreach ($order->items as $orderItem) {
+            foreach ($items as $orderItem) {
                 $cogsTotal = 0.0;
                 if (! $warehouse) {
-                    $orderItem->update(['cogs_total' => $cogsTotal]);
+                    $orderItem->update([
+                        'cogs_total' => $cogsTotal,
+                        'inventory_deducted_at' => now(),
+                    ]);
 
                     continue;
                 }
@@ -51,7 +60,10 @@ class DeductInventoryOnOrderSubmission
                     ->where('status', 'active')
                     ->first();
                 if (! $recipe) {
-                    $orderItem->update(['cogs_total' => $cogsTotal]);
+                    $orderItem->update([
+                        'cogs_total' => $cogsTotal,
+                        'inventory_deducted_at' => now(),
+                    ]);
 
                     continue; // No recipe defined for this product
                 }
@@ -62,7 +74,10 @@ class DeductInventoryOnOrderSubmission
                     ->first();
 
                 if (! $version) {
-                    $orderItem->update(['cogs_total' => $cogsTotal]);
+                    $orderItem->update([
+                        'cogs_total' => $cogsTotal,
+                        'inventory_deducted_at' => now(),
+                    ]);
 
                     continue; // No active version found
                 }
@@ -96,6 +111,7 @@ class DeductInventoryOnOrderSubmission
                 // Write final computed COGS to the order item
                 $orderItem->update([
                     'cogs_total' => $cogsTotal,
+                    'inventory_deducted_at' => now(),
                 ]);
             }
 
@@ -108,7 +124,7 @@ class DeductInventoryOnOrderSubmission
             $order->update([
                 'cogs_total' => $totalCogs,
                 'gross_profit' => $grossProfit,
-                'inventory_deducted_at' => now(),
+                'inventory_deducted_at' => $order->inventory_deducted_at ?? now(),
             ]);
         });
     }

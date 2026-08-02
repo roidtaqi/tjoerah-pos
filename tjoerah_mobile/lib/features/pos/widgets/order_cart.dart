@@ -38,7 +38,12 @@ class OrderCart extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Pesanan saat ini', style: theme.textTheme.titleLarge),
+                    Text(
+                      cart.isEditingOpenBill
+                          ? 'Tambah ${cart.openBill!.receiptNumber}'
+                          : 'Pesanan saat ini',
+                      style: theme.textTheme.titleLarge,
+                    ),
                     const SizedBox(height: 6),
                     Wrap(
                       spacing: 6,
@@ -53,12 +58,17 @@ class OrderCart extends ConsumerWidget {
                             text: cart.tableName!,
                             icon: Icons.table_restaurant_outlined,
                           ),
+                        if (cart.isEditingOpenBill)
+                          const AppBadge(
+                            text: 'Open bill',
+                            icon: Icons.bookmark_added_outlined,
+                          ),
                       ],
                     ),
                   ],
                 ),
               ),
-              if (cart.items.isNotEmpty)
+              if (cart.items.isNotEmpty || cart.submittedItems.isNotEmpty)
                 IconButton(
                   tooltip: 'Kosongkan pesanan',
                   onPressed: () => _confirmClear(context, ref),
@@ -74,7 +84,7 @@ class OrderCart extends ConsumerWidget {
           ),
         ),
         Divider(color: theme.colorScheme.outline),
-        if (cart.items.isEmpty)
+        if (cart.items.isEmpty && cart.submittedItems.isEmpty)
           Expanded(
             child: Center(
               child: Padding(
@@ -127,6 +137,50 @@ class OrderCart extends ConsumerWidget {
   }
 
   Widget _buildItemList(CartState cart, ThemeData theme) {
+    if (cart.submittedItems.isNotEmpty) {
+      return ListView(
+        controller: scrollController,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        children: [
+          Text('Sudah dikirim', style: theme.textTheme.labelLarge),
+          const SizedBox(height: 8),
+          ...cart.submittedItems.map(
+            (item) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _SubmittedCartItemRow(item: item),
+            ),
+          ),
+          Divider(height: 24, color: theme.colorScheme.outlineVariant),
+          Row(
+            children: [
+              Expanded(
+                child: Text('Tambahan baru', style: theme.textTheme.labelLarge),
+              ),
+              AppBadge(
+                text: '${cart.items.length} item',
+                icon: Icons.add_shopping_cart_rounded,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (cart.items.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Text(
+                'Belum ada tambahan.',
+                style: theme.textTheme.bodySmall,
+              ),
+            )
+          else
+            ...cart.items.map(
+              (item) => Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _CartItemRow(item: item),
+              ),
+            ),
+        ],
+      );
+    }
     return ListView.separated(
       controller: scrollController,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -162,6 +216,44 @@ class OrderCart extends ConsumerWidget {
       ),
     );
     if (confirmed == true) ref.read(cartProvider.notifier).clearCart();
+  }
+}
+
+class _SubmittedCartItemRow extends StatelessWidget {
+  const _SubmittedCartItemRow({required this.item});
+
+  final SubmittedCartItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final currency = NumberFormat.currency(
+      locale: 'id_ID',
+      symbol: 'Rp ',
+      decimalDigits: 0,
+    );
+    final time = DateFormat('HH:mm').format(item.submittedAt.toLocal());
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(width: 32, child: Text('${item.quantity}x')),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(item.name, style: theme.textTheme.titleSmall),
+              const SizedBox(height: 4),
+              Text(
+                'Batch ${item.submissionBatch} · dikirim $time',
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(currency.format(item.total), style: theme.textTheme.bodyMedium),
+      ],
+    );
   }
 }
 
@@ -552,17 +644,23 @@ class _OrderTotalsState extends ConsumerState<_OrderTotals> {
                     : const Icon(Icons.bookmark_add_outlined),
                 label: Text(
                   _isSavingOpenBill
-                      ? 'Menyimpan open bill...'
+                      ? cart.isEditingOpenBill
+                            ? 'Mengirim tambahan...'
+                            : 'Menyimpan open bill...'
+                      : cart.isEditingOpenBill
+                      ? 'Kirim tambahan ke produksi'
                       : 'Simpan sebagai open bill',
                 ),
               ),
             ),
-            const SizedBox(height: 8),
-            AppButton(
-              text: 'Bayar ${currency.format(cart.total)}',
-              icon: Icons.arrow_forward_rounded,
-              onPressed: () => showPaymentFlow(context),
-            ),
+            if (!cart.isEditingOpenBill) ...[
+              const SizedBox(height: 8),
+              AppButton(
+                text: 'Bayar ${currency.format(cart.total)}',
+                icon: Icons.arrow_forward_rounded,
+                onPressed: () => showPaymentFlow(context),
+              ),
+            ],
           ],
         ),
       ),
@@ -571,6 +669,10 @@ class _OrderTotalsState extends ConsumerState<_OrderTotals> {
 
   Future<void> _saveOpenBill() async {
     final cart = widget.cart;
+    if (cart.isEditingOpenBill) {
+      await _appendOpenBill(cart);
+      return;
+    }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -685,6 +787,100 @@ class _OrderTotalsState extends ConsumerState<_OrderTotals> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Open bill belum dapat disimpan: $error')),
+      );
+    } finally {
+      if (mounted) setState(() => _isSavingOpenBill = false);
+    }
+  }
+
+  Future<void> _appendOpenBill(CartState cart) async {
+    if (cart.items.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Tambahkan setidaknya satu produk baru.')),
+      );
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Kirim tambahan?'),
+        content: Text(
+          '${cart.items.length} item baru akan ditambahkan ke '
+          '${cart.openBill!.receiptNumber} dan dikirim ke stasiun produksi.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Batal'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            icon: const Icon(Icons.send_outlined),
+            label: const Text('Kirim'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _isSavingOpenBill = true);
+    try {
+      final newItems = [...cart.items];
+      final batch = await OrderRepository().appendOpenBill(
+        serverId: cart.openBill!.serverId,
+        receiptNumber: cart.openBill!.receiptNumber,
+        items: newItems,
+      );
+      final newSubtotal = newItems.fold<double>(
+        0,
+        (sum, item) => sum + item.total,
+      );
+      final printData = TransactionPrintData(
+        orderId: cart.openBill!.serverId,
+        receiptNumber: cart.openBill!.receiptNumber,
+        createdAt: DateTime.now(),
+        orderTypeLabel: cart.orderTypeLabel,
+        tableName: cart.tableName,
+        customerName: cart.customerName,
+        note: 'Tambahan batch $batch',
+        paymentMethod: 'open_bill',
+        paymentBreakdown: const {},
+        items: newItems
+            .map(
+              (item) => PrintOrderItem(
+                name: item.name,
+                quantity: item.quantity,
+                unitPrice: item.price,
+                station: item.station,
+              ),
+            )
+            .toList(),
+        subtotal: newSubtotal,
+        discount: 0,
+        tax: 0,
+        total: newSubtotal,
+        isSynced: true,
+      );
+      final printResult = await ref
+          .read(printerProvider.notifier)
+          .autoPrintKitchenTickets(printData);
+      ref.read(cartProvider.notifier).clearCart();
+      await ref.read(orderHistoryProvider.notifier).refresh();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            printResult.failures.isEmpty
+                ? 'Tambahan batch $batch dikirim ke ${cart.openBill!.receiptNumber}.'
+                : 'Tambahan batch $batch tersimpan. ${printResult.message}',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      final message = error.toString().replaceFirst('Bad state: ', '');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Tambahan belum dapat dikirim: $message')),
       );
     } finally {
       if (mounted) setState(() => _isSavingOpenBill = false);

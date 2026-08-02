@@ -69,6 +69,7 @@ Route::middleware('auth:api')->group(function () {
     Route::get('/orders', [OrderController::class, 'index']);
     Route::post('/orders', [OrderController::class, 'store']);
     Route::get('/orders/{order}', [OrderController::class, 'show']);
+    Route::post('/orders/{order}/items', [OrderController::class, 'appendItems']);
     Route::post('/orders/{order}/hold', [OrderController::class, 'hold']);
     Route::post('/orders/{order}/resume', [OrderController::class, 'resume']);
     Route::post('/orders/{order}/void', [OrderController::class, 'void'])

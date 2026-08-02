@@ -78,6 +78,18 @@ class OrderHistoryItem {
     'refunded',
   }.contains(orderStatus);
   int get itemCount => items.fold(0, (sum, item) => sum + item.quantity);
+  double get taxRate {
+    final taxable = subtotal - discount;
+    return taxable > 0 ? (tax / taxable) * 100 : 0;
+  }
+
+  List<String> get paymentMethods => paymentBreakdown.keys.isNotEmpty
+      ? paymentBreakdown.keys.toList()
+      : [paymentMethod];
+
+  String get paymentSummary => isOpenBill
+      ? 'Belum dibayar'
+      : paymentMethods.map(_paymentMethodLabel).join(' + ');
 
   TransactionPrintData toPrintData({
     String? paymentMethod,
@@ -153,6 +165,10 @@ class OrderHistoryItem {
             price: _number(item['snapshot_price']),
             total: _number(item['total']),
             station: item['station']?.toString(),
+            submissionBatch: _batch(item['submission_batch']),
+            submittedAt: DateTime.tryParse(
+              item['submitted_at']?.toString() ?? '',
+            ),
           ),
         )
         .toList();
@@ -231,6 +247,8 @@ class OrderHistoryItem {
         price: _number(item['snapshot_price']),
         total: _number(item['total']),
         station: item['station']?.toString(),
+        submissionBatch: _batch(item['submission_batch']),
+        submittedAt: DateTime.tryParse(item['submitted_at']?.toString() ?? ''),
       );
     }).toList();
     final rawRefunds = json['refunds'] is List ? json['refunds'] as List : [];
@@ -282,6 +300,11 @@ class OrderHistoryItem {
 
   static int _integer(Object? value) =>
       value is num ? value.toInt() : int.tryParse('$value') ?? 0;
+
+  static int _batch(Object? value) {
+    final parsed = _integer(value);
+    return parsed < 1 ? 1 : parsed;
+  }
 }
 
 class OrderHistoryLine {
@@ -293,6 +316,8 @@ class OrderHistoryLine {
     required this.price,
     required this.total,
     this.station,
+    this.submissionBatch = 1,
+    this.submittedAt,
   });
 
   final String? id;
@@ -302,4 +327,14 @@ class OrderHistoryLine {
   final double price;
   final double total;
   final String? station;
+  final int submissionBatch;
+  final DateTime? submittedAt;
 }
+
+String _paymentMethodLabel(String method) => switch (method.toLowerCase()) {
+  'cash' => 'Tunai',
+  'qris' => 'QRIS',
+  'debit' || 'debit_card' || 'card' => 'Kartu debit',
+  'open_bill' => 'Belum dibayar',
+  _ => method.replaceAll('_', ' '),
+};

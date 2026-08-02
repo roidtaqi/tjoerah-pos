@@ -118,6 +118,24 @@ void main() {
     expect(order.isPending, isFalse);
   });
 
+  test('summarizes split payment methods for cashier history', () {
+    final order = OrderHistoryItem.fromApi({
+      'id': 'split-order',
+      'receipt_number': 'TJ-SPLIT-001',
+      'status': 'paid',
+      'total': 50000,
+      'created_at': '2026-08-02T10:00:00Z',
+      'items': const [],
+      'payments': [
+        {'method': 'cash', 'amount': 20000},
+        {'method': 'qris', 'amount': 30000},
+      ],
+    });
+
+    expect(order.paymentSummary, 'Tunai + QRIS');
+    expect(order.paymentMethods, ['cash', 'qris']);
+  });
+
   test('recognizes a local open bill separately from sync status', () {
     final order = OrderHistoryItem.fromRow({
       'id': 'open-order',

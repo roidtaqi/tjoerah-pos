@@ -17,10 +17,11 @@ class RoleDestination {
 }
 
 AppRole appRoleForUser(Map<String, dynamic>? user) {
-  final candidates = <String>[];
   final directRole = user?['role'];
-  if (directRole != null) candidates.add(directRole.toString());
+  final direct = _appRoleFromValue(directRole?.toString());
+  if (direct != null) return direct;
 
+  final candidates = <String>[];
   final assignedRoles = user?['roles'];
   if (assignedRoles is List) {
     for (final role in assignedRoles) {
@@ -33,13 +34,20 @@ AppRole appRoleForUser(Map<String, dynamic>? user) {
     }
   }
 
-  final normalized = candidates
-      .join(' ')
-      .toLowerCase()
-      .replaceAll(RegExp(r'[-_]'), ' ');
+  for (final candidate in candidates) {
+    final role = _appRoleFromValue(candidate);
+    if (role != null) return role;
+  }
+  return AppRole.outletManager;
+}
 
-  if (normalized.contains('admin')) return AppRole.admin;
+AppRole? _appRoleFromValue(String? value) {
+  final normalized = (value ?? '').toLowerCase().replaceAll(
+    RegExp(r'[-_]'),
+    ' ',
+  );
   if (normalized.contains('owner')) return AppRole.owner;
+  if (normalized.contains('admin')) return AppRole.admin;
   if (normalized.contains('area manager')) return AppRole.areaManager;
   if (normalized.contains('cashier') || normalized.contains('kasir')) {
     return AppRole.cashier;
@@ -50,8 +58,26 @@ AppRole appRoleForUser(Map<String, dynamic>? user) {
       normalized.contains('dapur')) {
     return AppRole.production;
   }
-  return AppRole.outletManager;
+  if (normalized.contains('outlet manager')) return AppRole.outletManager;
+  return null;
 }
+
+Set<String> roleSlugsForUser(Map<String, dynamic>? user) {
+  final roles = <String>{};
+  final direct = user?['role']?.toString();
+  if (direct != null) roles.add(_normalizedRoleSlug(direct));
+  final assigned = user?['roles'];
+  if (assigned is List) {
+    for (final raw in assigned) {
+      final value = raw is Map ? raw['slug'] ?? raw['name'] : raw;
+      if (value != null) roles.add(_normalizedRoleSlug(value.toString()));
+    }
+  }
+  return roles;
+}
+
+String _normalizedRoleSlug(String role) =>
+    role.trim().toLowerCase().replaceAll(RegExp(r'[- ]'), '_');
 
 String roleLabel(AppRole role) => switch (role) {
   AppRole.owner => 'Owner',
@@ -209,9 +235,33 @@ List<RoleDestination> destinationsForRole(AppRole role) => switch (role) {
   ],
 };
 
+List<RoleDestination> destinationsForUser(Map<String, dynamic>? user) {
+  final primary = destinationsForRole(appRoleForUser(user));
+  final roles = roleSlugsForUser(user);
+  final hasProductionRole = roles.any(
+    (role) => const {'barista', 'kitchen_staff', 'production'}.contains(role),
+  );
+  if (!hasProductionRole || primary.any((item) => item.path == '/kds')) {
+    return primary;
+  }
+
+  final result = [...primary];
+  final settingsIndex = result.indexWhere((item) => item.path == '/settings');
+  const production = RoleDestination(
+    path: '/kds',
+    label: 'Produksi',
+    icon: Icons.soup_kitchen_outlined,
+    selectedIcon: Icons.soup_kitchen_rounded,
+  );
+  settingsIndex < 0
+      ? result.add(production)
+      : result.insert(settingsIndex, production);
+  return result;
+}
+
 bool canManageCatalogForUser(Map<String, dynamic>? user) {
-  final role = appRoleForUser(user);
-  return role == AppRole.owner || role == AppRole.admin;
+  final roles = roleSlugsForUser(user);
+  return roles.contains('owner') || roles.contains('admin');
 }
 
 bool canManageProductsForUser(Map<String, dynamic>? user) =>

@@ -28,6 +28,40 @@ class CartItem {
   }
 }
 
+class SubmittedCartItem {
+  const SubmittedCartItem({
+    required this.name,
+    required this.price,
+    required this.quantity,
+    required this.submittedAt,
+    this.productId,
+    this.station,
+    this.submissionBatch = 1,
+  });
+
+  final String? productId;
+  final String name;
+  final double price;
+  final int quantity;
+  final String? station;
+  final int submissionBatch;
+  final DateTime submittedAt;
+
+  double get total => price * quantity;
+}
+
+class OpenBillCartContext {
+  const OpenBillCartContext({
+    required this.serverId,
+    required this.receiptNumber,
+    required this.createdAt,
+  });
+
+  final String serverId;
+  final String receiptNumber;
+  final DateTime createdAt;
+}
+
 class CartState {
   const CartState({
     this.items = const [],
@@ -40,6 +74,8 @@ class CartState {
     this.customerName,
     this.taxEnabled = true,
     this.taxRate = 11,
+    this.submittedItems = const [],
+    this.openBill,
   });
 
   final List<CartItem> items;
@@ -52,15 +88,23 @@ class CartState {
   final String? customerName;
   final bool taxEnabled;
   final double taxRate;
+  final List<SubmittedCartItem> submittedItems;
+  final OpenBillCartContext? openBill;
 
-  double get subtotal => items.fold(0, (sum, item) => sum + item.total);
+  bool get isEditingOpenBill => openBill != null;
+  double get newItemsSubtotal => items.fold(0, (sum, item) => sum + item.total);
+  double get submittedSubtotal =>
+      submittedItems.fold(0, (sum, item) => sum + item.total);
+  double get subtotal => submittedSubtotal + newItemsSubtotal;
   double get discount => subtotal * (discountPercent / 100);
   double get taxableAmount => subtotal - discount;
   double get tax => taxEnabled
       ? (taxableAmount * (taxRate / 100) * 100).roundToDouble() / 100
       : 0;
   double get total => taxableAmount + tax;
-  int get itemCount => items.fold(0, (sum, item) => sum + item.quantity);
+  int get itemCount =>
+      items.fold(0, (sum, item) => sum + item.quantity) +
+      submittedItems.fold(0, (sum, item) => sum + item.quantity);
 
   String get orderTypeLabel => switch (orderType) {
     'dine_in' => 'Makan di tempat',
@@ -82,6 +126,9 @@ class CartState {
     bool clearCustomerId = false,
     bool? taxEnabled,
     double? taxRate,
+    List<SubmittedCartItem>? submittedItems,
+    OpenBillCartContext? openBill,
+    bool clearOpenBill = false,
   }) {
     return CartState(
       items: items ?? this.items,
@@ -96,6 +143,10 @@ class CartState {
       customerName: clearCustomer ? null : (customerName ?? this.customerName),
       taxEnabled: taxEnabled ?? this.taxEnabled,
       taxRate: taxRate ?? this.taxRate,
+      submittedItems: clearOpenBill
+          ? const []
+          : (submittedItems ?? this.submittedItems),
+      openBill: clearOpenBill ? null : (openBill ?? this.openBill),
     );
   }
 }
@@ -134,6 +185,40 @@ class CartNotifier extends Notifier<CartState> {
             customerName: name.trim(),
             clearCustomerId: id == null,
           );
+  }
+
+  void startOpenBillEdit({
+    required String serverId,
+    required String receiptNumber,
+    required DateTime createdAt,
+    required List<SubmittedCartItem> submittedItems,
+    required String orderType,
+    required double discountPercent,
+    required bool taxEnabled,
+    required double taxRate,
+    String? tableId,
+    String? tableName,
+    String? customerId,
+    String? customerName,
+    String note = '',
+  }) {
+    state = CartState(
+      orderType: orderType,
+      tableId: tableId,
+      tableName: tableName,
+      discountPercent: discountPercent,
+      note: note,
+      customerId: customerId,
+      customerName: customerName,
+      taxEnabled: taxEnabled,
+      taxRate: taxRate,
+      submittedItems: submittedItems,
+      openBill: OpenBillCartContext(
+        serverId: serverId,
+        receiptNumber: receiptNumber,
+        createdAt: createdAt,
+      ),
+    );
   }
 
   void addItem(String productId, String name, double price, {String? station}) {

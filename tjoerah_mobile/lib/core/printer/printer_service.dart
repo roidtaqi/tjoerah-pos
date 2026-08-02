@@ -448,7 +448,7 @@ class PrinterService {
   static String _paymentLabel(String method) => switch (method) {
     'cash' => 'Tunai',
     'qris' => 'QRIS',
-    'card' => 'Kartu',
+    'card' || 'debit_card' || 'debit' => 'Kartu debit',
     _ => method,
   };
 

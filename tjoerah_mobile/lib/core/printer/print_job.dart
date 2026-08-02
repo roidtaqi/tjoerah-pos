@@ -67,7 +67,7 @@ class TransactionPrintData {
   String get paymentMethodLabel => switch (paymentMethod) {
     'cash' => 'Tunai',
     'qris' => 'QRIS',
-    'card' => 'Kartu',
+    'card' || 'debit_card' || 'debit' => 'Kartu debit',
     'split' => 'Pembayaran terpisah',
     'open_bill' => 'Belum dibayar',
     _ => paymentMethod,

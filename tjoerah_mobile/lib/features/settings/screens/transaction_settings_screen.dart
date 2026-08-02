@@ -17,12 +17,12 @@ class TransactionSettingsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(transactionSettingsProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('Pajak transaksi')),
+      appBar: AppBar(title: const Text('Pengaturan transaksi')),
       body: settings.when(
         loading: () =>
-            const AppLoadingState(message: 'Memuat pengaturan pajak...'),
+            const AppLoadingState(message: 'Memuat pengaturan transaksi...'),
         error: (_, _) => AppErrorState(
-          message: 'Pengaturan pajak belum dapat dimuat.',
+          message: 'Pengaturan transaksi belum dapat dimuat.',
           onRetry: () =>
               ref.read(transactionSettingsProvider.notifier).refresh(),
         ),
@@ -43,6 +43,7 @@ class _TaxForm extends ConsumerStatefulWidget {
 
 class _TaxFormState extends ConsumerState<_TaxForm> {
   late bool _enabled;
+  late bool _manualKds;
   late final TextEditingController _rate;
   bool _saving = false;
 
@@ -50,6 +51,7 @@ class _TaxFormState extends ConsumerState<_TaxForm> {
   void initState() {
     super.initState();
     _enabled = widget.settings.taxEnabled;
+    _manualKds = widget.settings.manualKds;
     _rate = TextEditingController(text: _formatRate(widget.settings.taxRate));
   }
 
@@ -109,6 +111,21 @@ class _TaxFormState extends ConsumerState<_TaxForm> {
                 ),
               ),
               const SizedBox(height: 14),
+              AppCard(
+                padding: EdgeInsets.zero,
+                child: SwitchListTile(
+                  value: _manualKds,
+                  title: const Text('Konfirmasi KDS manual'),
+                  subtitle: Text(
+                    _manualKds
+                        ? 'Tim produksi mengubah status pesanan dari antrean hingga selesai.'
+                        : 'Tiket produksi langsung dicatat selesai tanpa konfirmasi status.',
+                  ),
+                  secondary: const Icon(Icons.soup_kitchen_outlined),
+                  onChanged: (value) => setState(() => _manualKds = value),
+                ),
+              ),
+              const SizedBox(height: 14),
               Text(
                 _enabled
                     ? 'Contoh: subtotal setelah diskon Rp 100.000 dengan tarif ${_rate.text}% menghasilkan pajak sesuai tarif tersebut.'
@@ -141,12 +158,16 @@ class _TaxFormState extends ConsumerState<_TaxForm> {
     setState(() => _saving = true);
     final error = await ref
         .read(transactionSettingsProvider.notifier)
-        .updateTax(enabled: _enabled, rate: value ?? 0);
+        .updateTax(
+          enabled: _enabled,
+          rate: value ?? 0,
+          kdsMode: _manualKds ? 'manual' : 'automatic',
+        );
     if (!mounted) return;
     setState(() => _saving = false);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(error ?? 'Pengaturan pajak berhasil disimpan.'),
+        content: Text(error ?? 'Pengaturan transaksi berhasil disimpan.'),
         backgroundColor: error == null
             ? null
             : Theme.of(context).colorScheme.error,

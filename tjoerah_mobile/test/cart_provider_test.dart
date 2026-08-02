@@ -65,4 +65,43 @@ void main() {
     expect(container.read(cartProvider).taxEnabled, isFalse);
     expect(container.read(cartProvider).taxRate, 8.5);
   });
+
+  test('restored open bill separates submitted and new items', () {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    final cart = container.read(cartProvider.notifier);
+
+    cart.startOpenBillEdit(
+      serverId: 'server-order',
+      receiptNumber: 'TJ-OPEN-001',
+      createdAt: DateTime(2026, 8, 2, 10),
+      submittedItems: [
+        SubmittedCartItem(
+          productId: '1',
+          name: 'Nasi Goreng',
+          price: 35000,
+          quantity: 1,
+          station: 'kitchen',
+          submissionBatch: 1,
+          submittedAt: DateTime(2026, 8, 2, 10),
+        ),
+      ],
+      orderType: 'dine_in',
+      discountPercent: 10,
+      taxEnabled: true,
+      taxRate: 11,
+      tableId: '4',
+      tableName: 'Meja 4',
+    );
+    cart.addItem('2', 'Es Kopi', 25000, station: 'bar');
+
+    final state = container.read(cartProvider);
+    expect(state.isEditingOpenBill, isTrue);
+    expect(state.submittedItems, hasLength(1));
+    expect(state.items, hasLength(1));
+    expect(state.subtotal, 60000);
+    expect(state.discount, 6000);
+    expect(state.tax, 5940);
+    expect(state.total, 59940);
+  });
 }

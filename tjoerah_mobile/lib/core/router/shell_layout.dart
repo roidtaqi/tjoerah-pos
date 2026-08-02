@@ -18,8 +18,8 @@ class ShellLayout extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final role = appRoleForUser(ref.watch(authProvider).user);
-    final destinations = destinationsForRole(role);
+    final user = ref.watch(authProvider).user;
+    final destinations = destinationsForUser(user);
     final currentIndex = _selectedIndex(destinations);
     final width = MediaQuery.sizeOf(context).width;
     final showRail = width >= AppBreakpoints.tablet;

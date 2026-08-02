@@ -2,6 +2,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tjoerah_mobile/core/printer/printer_profile.dart';
 
 void main() {
+  test('production stations never fall back to another printer profile', () {
+    expect(printerDestinationForStation('bar'), PrinterDestination.bar);
+    expect(printerDestinationForStation('kitchen'), PrinterDestination.kitchen);
+  });
+
   test('printer profile round-trips detailed settings', () {
     final profile = PrinterProfile.defaults(PrinterDestination.kitchen)
         .copyWith(

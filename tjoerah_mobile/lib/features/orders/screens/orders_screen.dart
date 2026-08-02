@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/router/role_navigation.dart';
@@ -22,6 +23,7 @@ import '../../auth/providers/auth_provider.dart';
 import '../../customers/providers/customer_provider.dart';
 import '../../kds/providers/kds_provider.dart';
 import '../../pos/providers/table_provider.dart';
+import '../../pos/providers/cart_provider.dart';
 import '../../settings/providers/printer_provider.dart';
 import '../models/order_history_model.dart';
 import '../providers/order_history_provider.dart';
@@ -238,6 +240,15 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
                     textColor: AppColors.error,
                     icon: Icons.cancel_outlined,
                   ),
+                if (!order.isOpenBill)
+                  AppBadge(
+                    text: order.paymentSummary,
+                    color: _paymentColor(order.paymentMethods.firstOrNull),
+                    textColor: _paymentTextColor(
+                      order.paymentMethods.firstOrNull,
+                    ),
+                    icon: _paymentIcon(order.paymentMethods.firstOrNull),
+                  ),
                 AppBadge(
                   text: order.isPending ? 'Belum sinkron' : 'Tersimpan',
                   color: order.isPending
@@ -269,7 +280,22 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     SizedBox(width: 32, child: Text('${item.quantity}x')),
-                    Expanded(child: Text(item.name)),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(item.name),
+                          if (order.isOpenBill) ...[
+                            const SizedBox(height: 3),
+                            Text(
+                              'Batch ${item.submissionBatch} · '
+                              '${AppDateFormatter.dayMonthTime(item.submittedAt ?? order.createdAt)}',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
                     const SizedBox(width: 12),
                     Text(_currency.format(item.total)),
                   ],
@@ -277,12 +303,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
               ),
             ),
             const Divider(height: 28),
-            _DetailLine(
-              label: 'Pembayaran',
-              value: order.isOpenBill
-                  ? 'Belum dibayar'
-                  : _paymentLabel(order.paymentMethod),
-            ),
+            _DetailLine(label: 'Pembayaran', value: order.paymentSummary),
             const SizedBox(height: 10),
             _DetailLine(
               label: 'Total',
@@ -329,6 +350,17 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
             ],
             if (order.isOpenBill) ...[
               const SizedBox(height: 18),
+              OutlinedButton.icon(
+                onPressed: order.isPending || order.serverId == null
+                    ? null
+                    : () {
+                        Navigator.pop(context);
+                        _returnOpenBillToCart(order);
+                      },
+                icon: const Icon(Icons.add_shopping_cart_rounded),
+                label: const Text('Tambah item ke open bill'),
+              ),
+              const SizedBox(height: 10),
               AppButton(
                 text: order.isPending || order.serverId == null
                     ? 'Sinkronkan sebelum membayar'
@@ -424,6 +456,42 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
     );
   }
 
+  void _returnOpenBillToCart(OrderHistoryItem order) {
+    final discountPercent = order.subtotal > 0
+        ? (order.discount / order.subtotal * 100).clamp(0, 100).toDouble()
+        : 0.0;
+    ref
+        .read(cartProvider.notifier)
+        .startOpenBillEdit(
+          serverId: order.serverId!,
+          receiptNumber: order.receiptNumber,
+          createdAt: order.createdAt,
+          submittedItems: order.items
+              .map(
+                (item) => SubmittedCartItem(
+                  productId: item.productId,
+                  name: item.name,
+                  price: item.price,
+                  quantity: item.quantity,
+                  station: item.station,
+                  submissionBatch: item.submissionBatch,
+                  submittedAt: item.submittedAt ?? order.createdAt,
+                ),
+              )
+              .toList(),
+          orderType: order.orderType,
+          discountPercent: discountPercent,
+          taxEnabled: order.taxRate > 0,
+          taxRate: order.taxRate,
+          tableId: order.tableId,
+          tableName: order.tableName,
+          customerId: order.customerId,
+          customerName: order.customerName,
+          note: order.note ?? '',
+        );
+    context.go('/pos');
+  }
+
   Future<void> _openOpenBillPayment(OrderHistoryItem order) async {
     final draft = await AppBottomSheet.show<_OpenBillPaymentDraft>(
       context,
@@ -469,6 +537,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
         backgroundColor: result.isSuccess ? null : AppColors.error,
       ),
     );
+    if (result.isSuccess && mounted) context.go('/pos');
   }
 
   Future<void> _openCancellation(OrderHistoryItem order) async {
@@ -1080,9 +1149,9 @@ class _OpenBillPaymentFormState extends State<_OpenBillPaymentForm> {
                 label: Text('QRIS'),
               ),
               ButtonSegment(
-                value: 'card',
+                value: 'debit_card',
                 icon: Icon(Icons.credit_card_outlined),
-                label: Text('Kartu'),
+                label: Text('Kartu debit'),
               ),
             ],
             selected: {_method},
@@ -1307,6 +1376,17 @@ class _OrderRow extends StatelessWidget {
                     icon: Icons.cloud_upload_outlined,
                   ),
                 ],
+                if (!order.isOpenBill && !order.isVoided) ...[
+                  const SizedBox(height: 7),
+                  AppBadge(
+                    text: order.paymentSummary,
+                    color: _paymentColor(order.paymentMethods.firstOrNull),
+                    textColor: _paymentTextColor(
+                      order.paymentMethods.firstOrNull,
+                    ),
+                    icon: _paymentIcon(order.paymentMethods.firstOrNull),
+                  ),
+                ],
                 if (order.isOpenBill) ...[
                   const SizedBox(height: 7),
                   const AppBadge(
@@ -1370,14 +1450,23 @@ String _orderTypeLabel(String value) => switch (value) {
   _ => 'Bawa pulang',
 };
 
-String _paymentLabel(String value) => switch (value) {
-  'cash' => 'Tunai',
-  'qris' => 'QRIS',
-  'card' => 'Kartu',
-  'debit' => 'Kartu debit',
-  'credit_card' => 'Kartu kredit',
-  'ewallet' => 'Dompet digital',
-  'split' => 'Pembayaran terpisah',
-  'open_bill' => 'Belum dibayar',
-  _ => value.toUpperCase(),
+IconData _paymentIcon(String? method) => switch (method) {
+  'cash' => Icons.payments_outlined,
+  'qris' => Icons.qr_code_2_rounded,
+  'debit' || 'debit_card' || 'card' => Icons.credit_card_outlined,
+  _ => Icons.account_balance_wallet_outlined,
+};
+
+Color _paymentColor(String? method) => switch (method) {
+  'cash' => AppColors.successSoft,
+  'qris' => AppColors.infoSoft,
+  'debit' || 'debit_card' || 'card' => AppColors.warningSoft,
+  _ => AppColors.surfaceMuted,
+};
+
+Color _paymentTextColor(String? method) => switch (method) {
+  'cash' => AppColors.success,
+  'qris' => AppColors.info,
+  'debit' || 'debit_card' || 'card' => AppColors.warning,
+  _ => AppColors.textSecondary,
 };

@@ -1,5 +1,10 @@
 enum PrinterDestination { cashier, kitchen, bar }
 
+PrinterDestination printerDestinationForStation(String station) =>
+    station.trim().toLowerCase() == 'bar'
+    ? PrinterDestination.bar
+    : PrinterDestination.kitchen;
+
 extension PrinterDestinationDetails on PrinterDestination {
   String get title => switch (this) {
     PrinterDestination.cashier => 'Printer kasir',

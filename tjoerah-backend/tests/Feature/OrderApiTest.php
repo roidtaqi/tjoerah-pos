@@ -215,11 +215,42 @@ class OrderApiTest extends TestCase
         $this->assertNotNull(Order::find($orderId)->inventory_deducted_at);
         $this->assertSame(0, $customer->fresh()->visit_count);
 
+        $appendPayload = [
+            'client_append_id' => 'append-open-001',
+            'items' => [[
+                'product_id' => $product->id,
+                'snapshot_name' => 'Latte tambahan',
+                'snapshot_price' => 35000,
+                'qty' => 1,
+                'total' => 35000,
+                'station' => 'bar',
+            ]],
+        ];
+        $this->postJson("/api/orders/{$orderId}/items", $appendPayload)
+            ->assertCreated()
+            ->assertJsonPath('submission_batch', 2)
+            ->assertJsonPath('data.total', 70000)
+            ->assertJsonCount(2, 'data.items');
+        $this->postJson("/api/orders/{$orderId}/items", $appendPayload)
+            ->assertOk()
+            ->assertJsonPath('submission_batch', 2)
+            ->assertJsonCount(2, 'data.items');
+        $this->assertDatabaseCount('kitchen_tickets', 2);
+        $this->assertDatabaseHas('order_items', [
+            'order_id' => $orderId,
+            'snapshot_name' => 'Latte tambahan',
+            'submission_batch' => 2,
+        ]);
+        $this->assertSame(
+            2,
+            Order::find($orderId)->items()->whereNotNull('inventory_deducted_at')->count(),
+        );
+
         $this->postJson("/api/orders/{$orderId}/pay", [
             'method' => 'cash',
-            'payment_breakdown' => ['cash' => 35000],
-            'amount_received' => 50000,
-            'change' => 15000,
+            'payment_breakdown' => ['cash' => 70000],
+            'amount_received' => 100000,
+            'change' => 30000,
         ])->assertCreated()
             ->assertJsonPath('data.status', 'paid')
             ->assertJsonCount(1, 'data.payments');
@@ -227,17 +258,47 @@ class OrderApiTest extends TestCase
         $this->assertDatabaseHas('payments', [
             'order_id' => $orderId,
             'method' => 'cash',
-            'amount' => 35000,
+            'amount' => 70000,
         ]);
         $this->assertSame(1, $customer->fresh()->visit_count);
 
         $this->postJson("/api/orders/{$orderId}/pay", [
             'method' => 'cash',
-            'payment_breakdown' => ['cash' => 35000],
+            'payment_breakdown' => ['cash' => 70000],
         ])->assertOk()
             ->assertJsonPath('message', 'Open bill ini sudah dibayar.');
         $this->assertDatabaseCount('payments', 1);
         $this->assertSame(1, $customer->fresh()->visit_count);
+        $this->assertSame(70000.0, (float) $customer->fresh()->total_spent);
+    }
+
+    public function test_automatic_kds_mode_completes_tickets_without_confirmation(): void
+    {
+        [$user, $outlet, $product] = $this->createOrderContext();
+        $user->update(['role' => 'owner']);
+        $this->actingAs($user, 'api');
+
+        $this->putJson('/api/transaction-settings', [
+            'outlet_id' => $outlet->id,
+            'tax_enabled' => false,
+            'tax_rate' => 0,
+            'kds_mode' => 'automatic',
+        ])->assertOk()
+            ->assertJsonPath('data.kds_mode', 'automatic');
+
+        $this->postJson('/api/orders', $this->orderPayload(
+            $outlet->id,
+            $product->id,
+            'RCP-AUTO-KDS',
+            'client-auto-kds',
+        ))->assertCreated()
+            ->assertJsonPath('data.kitchen_tickets.0.status', 'completed')
+            ->assertJsonPath('data.kitchen_tickets.0.items.0.status', 'completed');
+
+        $this->assertDatabaseHas('kitchen_tickets', [
+            'outlet_id' => $outlet->id,
+            'status' => 'completed',
+        ]);
     }
 
     public function test_outlet_tax_setting_is_used_as_server_source_of_truth(): void

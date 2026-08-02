@@ -222,6 +222,48 @@ class OrderRepository {
     );
   }
 
+  Future<int> appendOpenBill({
+    required String serverId,
+    required String receiptNumber,
+    required List<CartItem> items,
+  }) async {
+    final clientAppendId = _uuid.v4();
+    final itemPayloads = items
+        .map(
+          (item) => <String, dynamic>{
+            'product_id': int.tryParse(item.productId) ?? item.productId,
+            'snapshot_name': item.name,
+            'snapshot_price': item.price,
+            'qty': item.quantity,
+            'total': item.total,
+            if (item.station != null && item.station!.isNotEmpty)
+              'station': item.station,
+          },
+        )
+        .toList();
+    final response = await ApiClient.post('/orders/$serverId/items', {
+      'client_append_id': clientAppendId,
+      'items': itemPayloads,
+    });
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      throw StateError(_responseMessage(response.statusCode, response.body));
+    }
+
+    final decoded = Map<String, dynamic>.from(jsonDecode(response.body) as Map);
+    final batch =
+        int.tryParse(decoded['submission_batch']?.toString() ?? '') ?? 1;
+    final serverOrder = decoded['data'] is Map
+        ? Map<String, dynamic>.from(decoded['data'] as Map)
+        : <String, dynamic>{};
+    await _appendLocalOpenBill(
+      receiptNumber: receiptNumber,
+      itemPayloads: itemPayloads,
+      submissionBatch: batch,
+      serverOrder: serverOrder,
+    );
+    return batch;
+  }
+
   Future<void> _recordLocalCustomerVisit(
     String? customerId,
     double total,
@@ -287,6 +329,54 @@ class OrderRepository {
       payload['payment_method'] = method;
       payload['paymentMethod'] = method;
       payload['is_open_bill'] = false;
+      await database.update(
+        'offline_orders',
+        {'payload': jsonEncode(payload), 'status': 'synced'},
+        where: 'id = ?',
+        whereArgs: [row['id']],
+      );
+      return;
+    }
+  }
+
+  Future<void> _appendLocalOpenBill({
+    required String receiptNumber,
+    required List<Map<String, dynamic>> itemPayloads,
+    required int submissionBatch,
+    required Map<String, dynamic> serverOrder,
+  }) async {
+    final database = await DatabaseHelper.instance.database;
+    final rows = await database.query('offline_orders');
+    final submittedAt = DateTime.now().toIso8601String();
+    for (final row in rows) {
+      final payload = Map<String, dynamic>.from(
+        jsonDecode(row['payload']?.toString() ?? '{}') as Map,
+      );
+      if (payload['receipt_number']?.toString() != receiptNumber) continue;
+      final existing = (payload['items'] as List? ?? const [])
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList();
+      payload['items'] = [
+        ...existing,
+        ...itemPayloads.map(
+          (item) => {
+            ...item,
+            'submission_batch': submissionBatch,
+            'submitted_at': submittedAt,
+          },
+        ),
+      ];
+      for (final key in [
+        'subtotal',
+        'discount_total',
+        'tax',
+        'tax_rate',
+        'service_charge',
+        'total',
+      ]) {
+        if (serverOrder.containsKey(key)) payload[key] = serverOrder[key];
+      }
       await database.update(
         'offline_orders',
         {'payload': jsonEncode(payload), 'status': 'synced'},

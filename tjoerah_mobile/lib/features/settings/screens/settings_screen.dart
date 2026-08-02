@@ -71,10 +71,9 @@ class SettingsScreen extends ConsumerWidget {
                         ),
                         const Divider(),
                         AppListTile(
-                          title: 'Pajak transaksi',
-                          subtitle:
-                              'Aktifkan pajak dan atur tarif untuk outlet ini',
-                          icon: Icons.percent_rounded,
+                          title: 'Transaksi & KDS',
+                          subtitle: 'Atur pajak dan alur konfirmasi produksi',
+                          icon: Icons.tune_rounded,
                           onTap: () => context.push('/transaction-settings'),
                         ),
                       ],

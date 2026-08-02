@@ -14,6 +14,8 @@ class OrderItem extends Model
 
     protected $casts = [
         'modifiers' => 'array',
+        'submitted_at' => 'datetime',
+        'inventory_deducted_at' => 'datetime',
     ];
 
     public function order()

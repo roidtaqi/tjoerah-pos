@@ -3,11 +3,15 @@ class TransactionSettings {
     required this.outletId,
     required this.taxEnabled,
     required this.taxRate,
+    required this.kdsMode,
   });
 
   final int outletId;
   final bool taxEnabled;
   final double taxRate;
+  final String kdsMode;
+
+  bool get manualKds => kdsMode == 'manual';
 
   double get effectiveTaxRate => taxEnabled ? taxRate : 0;
 
@@ -16,6 +20,7 @@ class TransactionSettings {
       outletId: _integer(json['outlet_id']),
       taxEnabled: _boolean(json['tax_enabled'], fallback: true),
       taxRate: _number(json['tax_rate'], fallback: 11).clamp(0, 100),
+      kdsMode: json['kds_mode']?.toString() ?? 'manual',
     );
   }
 
@@ -23,6 +28,7 @@ class TransactionSettings {
     'outlet_id': outletId,
     'tax_enabled': taxEnabled,
     'tax_rate': taxRate,
+    'kds_mode': kdsMode,
   };
 }
 

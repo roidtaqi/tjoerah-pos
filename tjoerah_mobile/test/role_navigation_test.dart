@@ -28,7 +28,26 @@ void main() {
           {'slug': 'admin'},
         ],
       }),
-      AppRole.admin,
+      AppRole.cashier,
+    );
+    expect(
+      destinationsForUser({
+        'role': 'cashier',
+        'roles': [
+          {'slug': 'cashier'},
+          {'slug': 'barista'},
+        ],
+      }).map((item) => item.path),
+      ['/pos', '/orders', '/customers', '/kds', '/settings'],
+    );
+    expect(
+      canManageProductsForUser({
+        'role': 'cashier',
+        'roles': [
+          {'slug': 'admin'},
+        ],
+      }),
+      isTrue,
     );
   });
 

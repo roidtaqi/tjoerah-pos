@@ -3,6 +3,7 @@
 namespace App\Domains\Employee\Controllers;
 
 use App\Domains\Core\Models\Outlet;
+use App\Domains\Core\Models\Role;
 use App\Domains\Core\Models\User;
 use App\Domains\Employee\Models\AttendanceLog;
 use App\Domains\Employee\Models\AttendanceShift;
@@ -27,14 +28,18 @@ class EmployeeController extends Controller
             'per_page' => 'nullable|integer|min:1|max:100',
         ]);
 
-        return Employee::with(['user', 'outlet', 'attendanceShift'])
+        return Employee::with(['user.roles', 'outlet', 'attendanceShift'])
             ->when(
                 $request->user()?->company_id,
                 fn ($query, $companyId) => $query->where('company_id', $companyId),
                 fn ($query) => $query->whereIn('outlet_id', $this->assignedOutletIds($request)),
             )
             ->when($validated['outlet_id'] ?? null, fn ($query, $outletId) => $query->where('outlet_id', $outletId))
-            ->when($validated['role'] ?? null, fn ($query, $role) => $query->whereHas('user', fn ($user) => $user->where('role', $role)))
+            ->when($validated['role'] ?? null, fn ($query, $role) => $query->whereHas(
+                'user',
+                fn ($user) => $user->where('role', $role)
+                    ->orWhereHas('roles', fn ($roles) => $roles->where('slug', $role)),
+            ))
             ->when(
                 ($validated['status'] ?? 'all') !== 'all',
                 fn ($query) => $query->where('is_active', $validated['status'] === 'active'),
@@ -128,6 +133,8 @@ class EmployeeController extends Controller
             'password' => 'required_without:user_id|string|min:8|max:255',
             'pin' => ['required_without:user_id', 'digits_between:4,6'],
             'role' => ['required_without:user_id', Rule::in(array_keys($this->roleOptions()))],
+            'roles' => 'nullable|array|min:1',
+            'roles.*' => [Rule::in(array_keys($this->roleOptions()))],
             'position' => 'nullable|string|max:100',
             'employment_status' => ['required', Rule::in(['permanent', 'contract', 'part_time', 'intern'])],
             'hire_date' => 'nullable|date',
@@ -139,7 +146,10 @@ class EmployeeController extends Controller
             'emergency_contact_phone' => 'nullable|string|max:50',
             'is_active' => 'boolean',
         ]);
-        $this->ensureRoleCanBeAssigned($request, $validated['role'] ?? null);
+        $roleSlugs = $this->selectedRoles($validated);
+        foreach ($roleSlugs as $role) {
+            $this->ensureRoleCanBeAssigned($request, $role);
+        }
         $outlet = $this->accessibleOutlet($request, (int) $validated['outlet_id']);
         $companyId = $request->user()?->company_id ?? $outlet->company_id;
         $this->ensureShiftMatchesOutlet(
@@ -151,6 +161,7 @@ class EmployeeController extends Controller
             $validated,
             $companyId,
             $outlet,
+            $roleSlugs,
         ) {
             if (isset($validated['user_id'])) {
                 $user = $this->accessibleUser($request, (int) $validated['user_id']);
@@ -174,6 +185,7 @@ class EmployeeController extends Controller
                 ]);
             }
             $user->outlets()->syncWithoutDetaching([$outlet->id]);
+            $this->syncUserRoles($user, $roleSlugs, $outlet);
 
             return Employee::create([
                 ...$this->employeeData($validated),
@@ -183,7 +195,7 @@ class EmployeeController extends Controller
         });
 
         return response()->json(
-            $employee->load(['user', 'outlet', 'attendanceShift']),
+            $employee->load(['user.roles', 'outlet', 'attendanceShift']),
             201,
         );
     }
@@ -229,6 +241,8 @@ class EmployeeController extends Controller
             'password' => 'nullable|string|min:8|max:255',
             'pin' => ['sometimes', 'digits_between:4,6'],
             'role' => ['sometimes', Rule::in(array_keys($this->roleOptions()))],
+            'roles' => 'sometimes|array|min:1',
+            'roles.*' => [Rule::in(array_keys($this->roleOptions()))],
             'position' => 'nullable|string|max:100',
             'employment_status' => ['sometimes', Rule::in(['permanent', 'contract', 'part_time', 'intern'])],
             'hire_date' => 'nullable|date',
@@ -240,11 +254,13 @@ class EmployeeController extends Controller
             'emergency_contact_phone' => 'nullable|string|max:50',
             'is_active' => 'boolean',
         ]);
-        $this->ensureRoleCanBeAssigned(
-            $request,
-            $validated['role'] ?? null,
-            $employee,
+        $roleSlugs = $this->selectedRoles(
+            $validated,
+            $employee->user?->roles()->pluck('slug')->all() ?: [$employee->user?->role],
         );
+        foreach ($roleSlugs as $role) {
+            $this->ensureRoleCanBeAssigned($request, $role, $employee);
+        }
         $outlet = null;
         if (isset($validated['outlet_id'])) {
             $outlet = $this->accessibleOutlet($request, (int) $validated['outlet_id']);
@@ -253,7 +269,7 @@ class EmployeeController extends Controller
             $validated['attendance_shift_id'] ?? $employee->attendance_shift_id,
             $validated['outlet_id'] ?? $employee->outlet_id,
         );
-        DB::transaction(function () use ($validated, $employee, $outlet): void {
+        DB::transaction(function () use ($validated, $employee, $outlet, $roleSlugs): void {
             $employee->update($this->employeeData($validated));
             if ($employee->user) {
                 $userData = collect($validated)
@@ -264,10 +280,18 @@ class EmployeeController extends Controller
                 if (isset($outlet)) {
                     $employee->user->outlets()->sync([$outlet->id]);
                 }
+                $targetOutlet = $outlet ?? $employee->outlet;
+                if ($targetOutlet && (
+                    array_key_exists('roles', $validated)
+                    || array_key_exists('role', $validated)
+                    || array_key_exists('outlet_id', $validated)
+                )) {
+                    $this->syncUserRoles($employee->user, $roleSlugs, $targetOutlet);
+                }
             }
         });
 
-        return response()->json($employee->fresh()->load(['user', 'outlet', 'attendanceShift']));
+        return response()->json($employee->fresh()->load(['user.roles', 'outlet', 'attendanceShift']));
     }
 
     public function destroy(Request $request, Employee $employee)
@@ -412,6 +436,48 @@ class EmployeeController extends Controller
         ) {
             throw ValidationException::withMessages([
                 'role' => 'Hanya owner yang dapat menunjuk admin baru.',
+            ]);
+        }
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function selectedRoles(array $validated, array $fallback = []): array
+    {
+        $primary = $validated['role'] ?? null;
+        $roles = array_key_exists('roles', $validated)
+            ? $validated['roles']
+            : ($primary ? [] : $fallback);
+        if ($primary) {
+            array_unshift($roles, $primary);
+        }
+
+        return collect($roles)
+            ->filter()
+            ->map(fn ($role) => (string) $role)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function syncUserRoles(User $user, array $roleSlugs, Outlet $outlet): void
+    {
+        DB::table('user_roles')
+            ->where('user_id', $user->id)
+            ->where('outlet_id', $outlet->id)
+            ->delete();
+
+        foreach ($roleSlugs as $slug) {
+            $details = $this->roleOptions()[$slug];
+            $role = Role::firstOrCreate(
+                ['company_id' => $user->company_id, 'slug' => $slug],
+                ['name' => $details['label'], 'scope' => 'outlet'],
+            );
+            $user->roles()->attach($role->id, [
+                'company_id' => $user->company_id,
+                'brand_id' => $outlet->brand_id,
+                'outlet_id' => $outlet->id,
             ]);
         }
     }

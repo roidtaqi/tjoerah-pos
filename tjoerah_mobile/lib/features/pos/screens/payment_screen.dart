@@ -207,9 +207,9 @@ class _PaymentPanelState extends ConsumerState<_PaymentPanel> {
                   label: Text('QRIS'),
                 ),
                 ButtonSegment(
-                  value: 'card',
+                  value: 'debit_card',
                   icon: Icon(Icons.credit_card_outlined),
-                  label: Text('Kartu'),
+                  label: Text('Kartu debit'),
                 ),
               ],
               selected: {_method},
@@ -223,7 +223,10 @@ class _PaymentPanelState extends ConsumerState<_PaymentPanel> {
               expandedInsets: EdgeInsets.zero,
               segments: const [
                 ButtonSegment(value: 'qris', label: Text('Tunai + QRIS')),
-                ButtonSegment(value: 'card', label: Text('Tunai + Kartu')),
+                ButtonSegment(
+                  value: 'debit_card',
+                  label: Text('Tunai + Debit'),
+                ),
               ],
               selected: {_secondaryMethod},
               onSelectionChanged: (selection) {
@@ -285,7 +288,7 @@ class _PaymentPanelState extends ConsumerState<_PaymentPanel> {
                   _PaymentRow(label: 'Tunai', value: currency.format(cash)),
                   const SizedBox(height: 8),
                   _PaymentRow(
-                    label: _secondaryMethod == 'qris' ? 'QRIS' : 'Kartu',
+                    label: _secondaryMethod == 'qris' ? 'QRIS' : 'Kartu debit',
                     value: currency.format(secondaryAmount),
                   ),
                 ] else if (_method == 'cash') ...[
@@ -690,7 +693,7 @@ class _PaymentSuccessDialogState extends ConsumerState<_PaymentSuccessDialog> {
       actions: [
         FilledButton.tonal(
           onPressed: printer.isPrinting ? null : () => Navigator.pop(context),
-          child: const Text('Pesanan baru'),
+          child: const Text('Kembali ke POS'),
         ),
       ],
     );

@@ -231,7 +231,7 @@ class _ShiftReportScreenState extends ConsumerState<ShiftReportScreen> {
 String _paymentLabel(String method) => switch (method.toLowerCase()) {
   'cash' => 'Tunai',
   'qris' => 'QRIS',
-  'card' => 'Kartu',
+  'card' || 'debit_card' || 'debit' => 'Kartu debit',
   'split' => 'Pembayaran terbagi',
   _ => method,
 };
@@ -239,7 +239,7 @@ String _paymentLabel(String method) => switch (method.toLowerCase()) {
 IconData _paymentIcon(String method) => switch (method.toLowerCase()) {
   'cash' => Icons.payments_outlined,
   'qris' => Icons.qr_code_2_rounded,
-  'card' => Icons.credit_card_outlined,
+  'card' || 'debit_card' || 'debit' => Icons.credit_card_outlined,
   _ => Icons.account_balance_wallet_outlined,
 };
 

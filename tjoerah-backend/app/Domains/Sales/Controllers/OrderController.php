@@ -132,6 +132,38 @@ class OrderController extends Controller
         ], 201);
     }
 
+    public function appendItems(Request $request, Order $order)
+    {
+        $this->ensureOrderIsAccessible($request, $order);
+        $validated = $request->validate([
+            'client_append_id' => 'required|string|max:100',
+            'items' => 'required|array|min:1',
+            'items.*.product_id' => 'required|integer|exists:products,id',
+            'items.*.product_variant_id' => 'nullable|integer|exists:product_variants,id',
+            'items.*.snapshot_name' => 'required|string|max:255',
+            'items.*.snapshot_price' => 'required|numeric|min:0',
+            'items.*.qty' => 'required|integer|min:1',
+            'items.*.total' => 'required|numeric|min:0',
+            'items.*.station' => 'nullable|string|max:50',
+            'items.*.modifiers' => 'nullable|array',
+            'items.*.notes' => 'nullable|string|max:1000',
+        ]);
+
+        $result = $this->orderService->appendOpenBill(
+            $order,
+            $validated['items'],
+            $validated['client_append_id'],
+        );
+
+        return response()->json([
+            'message' => $result['duplicate']
+                ? 'Tambahan open bill ini sudah diterima sebelumnya.'
+                : 'Tambahan open bill berhasil dikirim ke produksi.',
+            'data' => $result['order'],
+            'submission_batch' => $result['batch'],
+        ], $result['duplicate'] ? 200 : 201);
+    }
+
     private function findExistingOrder(Request $request): ?Order
     {
         $outletId = $request->integer('outlet_id');

@@ -24,16 +24,18 @@ class TransactionSettingsController extends Controller
             'outlet_id' => 'required|integer|exists:outlets,id',
             'tax_enabled' => 'required|boolean',
             'tax_rate' => 'required|numeric|min:0|max:100',
+            'kds_mode' => 'sometimes|string|in:manual,automatic',
         ]);
 
         $outlet = $this->resolveOutlet($request);
         $outlet->update([
             'tax_enabled' => $validated['tax_enabled'],
             'tax_rate' => $validated['tax_rate'],
+            'kds_mode' => $validated['kds_mode'] ?? $outlet->kds_mode,
         ]);
 
         return response()->json([
-            'message' => 'Pengaturan pajak berhasil disimpan.',
+            'message' => 'Pengaturan transaksi berhasil disimpan.',
             'data' => $this->settings($outlet->refresh()),
         ]);
     }
@@ -66,6 +68,7 @@ class TransactionSettingsController extends Controller
             'outlet_id' => $outlet->id,
             'tax_enabled' => (bool) $outlet->tax_enabled,
             'tax_rate' => (float) $outlet->tax_rate,
+            'kds_mode' => $outlet->kds_mode ?: 'manual',
         ];
     }
 }

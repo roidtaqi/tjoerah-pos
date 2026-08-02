@@ -334,16 +334,9 @@ class PrinterNotifier extends Notifier<PrinterState> {
     final tasks = <_PrintTask>[];
     final failures = <String>[];
     for (final station in order.itemsByStation.keys) {
-      final preferred = station == 'bar'
-          ? PrinterDestination.bar
-          : PrinterDestination.kitchen;
-      var profile = state.profile(preferred);
-      var destination = preferred;
-
-      if (!profile.isConfigured && preferred == PrinterDestination.bar) {
-        destination = PrinterDestination.kitchen;
-        profile = state.profile(destination);
-      }
+      final preferred = printerDestinationForStation(station);
+      final profile = state.profile(preferred);
+      final destination = preferred;
       if (!profile.isConfigured) {
         failures.add(
           'Printer untuk tiket ${productionStationLabel(station)} belum diatur.',

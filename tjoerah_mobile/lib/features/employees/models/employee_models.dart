@@ -110,6 +110,7 @@ class EmployeeProfile {
     this.address,
     this.emergencyContactName,
     this.emergencyContactPhone,
+    this.roles = const [],
   });
 
   factory EmployeeProfile.fromJson(Map<String, dynamic> json) {
@@ -128,6 +129,7 @@ class EmployeeProfile {
       name: json['name']?.toString() ?? '',
       email: user['email']?.toString() ?? json['email']?.toString() ?? '',
       role: user['role']?.toString() ?? 'cashier',
+      roles: _roleSlugs(user),
       outletId: _asInt(json['outlet_id']),
       attendanceShiftId: _nullableInt(json['attendance_shift_id']),
       username: _nullableString(user['username']),
@@ -152,6 +154,7 @@ class EmployeeProfile {
   final String name;
   final String email;
   final String role;
+  final List<String> roles;
   final int outletId;
   final int? attendanceShiftId;
   final String? username;
@@ -176,6 +179,7 @@ class EmployeeDraft {
     required this.name,
     required this.email,
     required this.role,
+    required this.roles,
     required this.outletId,
     required this.employmentStatus,
     required this.isActive,
@@ -198,6 +202,7 @@ class EmployeeDraft {
   final String name;
   final String email;
   final String role;
+  final List<String> roles;
   final int outletId;
   final int? attendanceShiftId;
   final String? username;
@@ -222,6 +227,7 @@ class EmployeeDraft {
       'email': email,
       'username': username,
       'role': role,
+      'roles': roles,
       'outlet_id': outletId,
       'attendance_shift_id': attendanceShiftId,
       'phone': phone,
@@ -239,6 +245,18 @@ class EmployeeDraft {
       'is_active': isActive,
     };
   }
+}
+
+List<String> _roleSlugs(Map<String, dynamic> user) {
+  final primary = user['role']?.toString();
+  final values = <String>[
+    if (primary != null && primary.isNotEmpty) primary,
+    ...(user['roles'] as List? ?? const []).map((raw) {
+      if (raw is Map) return (raw['slug'] ?? raw['name'])?.toString() ?? '';
+      return raw?.toString() ?? '';
+    }),
+  ];
+  return values.where((value) => value.isNotEmpty).toSet().toList();
 }
 
 int _asInt(dynamic value) => value is int ? value : int.tryParse('$value') ?? 0;
