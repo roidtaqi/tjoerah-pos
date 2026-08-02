@@ -231,4 +231,33 @@ void main() {
       expect(order.toPrintData().cancellationReason, 'Transaksi salah input.');
     },
   );
+
+  test('cached cancellation remains excluded from paid sales', () {
+    final order = OrderHistoryItem.fromRow({
+      'id': 'local-voided-order',
+      'status': 'synced',
+      'created_at': '2026-08-02T10:00:00.000000Z',
+      'payload': jsonEncode({
+        'receipt_number': 'TJ-VOID-CACHED',
+        'order_type': 'dine_in',
+        'total': 20000,
+        'items': const [],
+        'meta': {
+          'server_order_id': 'server-voided-order',
+          'server_order_status': 'voided',
+          'refunded_amount': 20000,
+          'cancellation': {
+            'reason': 'Transaksi salah input.',
+            'inventory_outcome': 'no_stock_return',
+            'cancelled_at': '2026-08-02T10:05:00+08:00',
+          },
+        },
+      }),
+    });
+
+    expect(order.isVoided, isTrue);
+    expect(order.isPaid, isFalse);
+    expect(order.refundedAmount, 20000);
+    expect(order.cancellationReason, 'Transaksi salah input.');
+  });
 }

@@ -192,7 +192,19 @@ class OrderHistoryNotifier extends AsyncNotifier<List<OrderHistoryItem>> {
         );
       }
 
-      await refresh();
+      final serverData = body['data'];
+      if (serverData is Map) {
+        final rawOrder = Map<String, dynamic>.from(serverData);
+        final cancelledOrder = OrderHistoryItem.fromApi(rawOrder);
+        _replaceOrder(cancelledOrder);
+        try {
+          await _cacheServerOrderUpdate(rawOrder, cancelledOrder);
+        } catch (_) {
+          // The server is authoritative; a later refresh can repair the cache.
+        }
+      } else {
+        await refresh();
+      }
       return OrderHistoryMutationResult(
         isSuccess: true,
         message: body['message']?.toString() ?? 'Pesanan berhasil dibatalkan.',
@@ -203,6 +215,70 @@ class OrderHistoryNotifier extends AsyncNotifier<List<OrderHistoryItem>> {
         message:
             'Pesanan belum dapat dibatalkan. Periksa koneksi lalu coba lagi.',
       );
+    }
+  }
+
+  void _replaceOrder(OrderHistoryItem updated) {
+    final current = state.asData?.value ?? const <OrderHistoryItem>[];
+    var replaced = false;
+    final next = current.map((order) {
+      final isMatch =
+          (updated.serverId != null && order.serverId == updated.serverId) ||
+          order.receiptNumber == updated.receiptNumber;
+      if (!isMatch) return order;
+      replaced = true;
+      return updated;
+    }).toList();
+    if (!replaced) next.add(updated);
+    next.sort((left, right) => right.createdAt.compareTo(left.createdAt));
+    state = AsyncValue.data(next);
+  }
+
+  Future<void> _cacheServerOrderUpdate(
+    Map<String, dynamic> serverData,
+    OrderHistoryItem updated,
+  ) async {
+    final database = await DatabaseHelper.instance.database;
+    final rows = await database.query('offline_orders');
+    for (final row in rows) {
+      final payload = Map<String, dynamic>.from(
+        jsonDecode(row['payload']?.toString() ?? '{}') as Map,
+      );
+      final existingMeta = payload['meta'] is Map
+          ? Map<String, dynamic>.from(payload['meta'] as Map)
+          : <String, dynamic>{};
+      final sameReceipt =
+          payload['receipt_number']?.toString() == updated.receiptNumber;
+      final sameServerId =
+          existingMeta['server_order_id']?.toString() == updated.serverId;
+      if (!sameReceipt && !sameServerId) continue;
+
+      final serverMeta = serverData['meta'] is Map
+          ? Map<String, dynamic>.from(serverData['meta'] as Map)
+          : <String, dynamic>{};
+      existingMeta.addAll(serverMeta);
+      existingMeta['server_order_id'] = updated.serverId;
+      existingMeta['server_order_status'] = updated.orderStatus;
+      existingMeta['refunded_amount'] = updated.refundedAmount;
+      payload['meta'] = existingMeta;
+      for (final key in [
+        'subtotal',
+        'discount_total',
+        'tax',
+        'service_charge',
+        'total',
+      ]) {
+        if (serverData.containsKey(key)) payload[key] = serverData[key];
+      }
+      if (serverData['items'] is List) payload['items'] = serverData['items'];
+
+      await database.update(
+        'offline_orders',
+        {'payload': jsonEncode(payload), 'status': 'synced'},
+        where: 'id = ?',
+        whereArgs: [row['id']],
+      );
+      return;
     }
   }
 
@@ -231,8 +307,16 @@ class OrderHistoryNotifier extends AsyncNotifier<List<OrderHistoryItem>> {
         order.receiptNumber: order,
     };
     for (final row in rows.whereType<Map>()) {
-      final order = OrderHistoryItem.fromApi(Map<String, dynamic>.from(row));
+      final rawOrder = Map<String, dynamic>.from(row);
+      final order = OrderHistoryItem.fromApi(rawOrder);
       merged[order.receiptNumber] = order;
+      if (order.isVoided) {
+        try {
+          await _cacheServerOrderUpdate(rawOrder, order);
+        } catch (_) {
+          // Keep remote history usable even when the local cache cannot update.
+        }
+      }
     }
     final orders = merged.values.toList()
       ..sort((left, right) => right.createdAt.compareTo(left.createdAt));

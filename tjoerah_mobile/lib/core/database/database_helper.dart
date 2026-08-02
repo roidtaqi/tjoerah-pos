@@ -363,6 +363,10 @@ class DatabaseHelper {
       FROM offline_orders
       WHERE created_at >= ? AND created_at <= ?
         AND COALESCE(json_extract(payload, '\$.is_open_bill'), 0) = 0
+        AND COALESCE(
+          json_extract(payload, '\$.meta.server_order_status'),
+          'completed'
+        ) != 'voided'
     ''',
       [startOfDay, endOfDay],
     );
@@ -376,6 +380,10 @@ class DatabaseHelper {
       FROM offline_orders
       WHERE created_at >= ? AND created_at <= ?
         AND COALESCE(json_extract(payload, '\$.is_open_bill'), 0) = 0
+        AND COALESCE(
+          json_extract(payload, '\$.meta.server_order_status'),
+          'completed'
+        ) != 'voided'
       GROUP BY payment_method
     ''',
       [startOfDay, endOfDay],
