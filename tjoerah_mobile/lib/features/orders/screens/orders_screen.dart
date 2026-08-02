@@ -20,6 +20,8 @@ import '../../../shared/components/app_metric_card.dart';
 import '../../../shared/components/app_search_bar.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../customers/providers/customer_provider.dart';
+import '../../kds/providers/kds_provider.dart';
+import '../../pos/providers/table_provider.dart';
 import '../../settings/providers/printer_provider.dart';
 import '../models/order_history_model.dart';
 import '../providers/order_history_provider.dart';
@@ -186,6 +188,11 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
   }
 
   void _showDetail(OrderHistoryItem order) {
+    final canCancel =
+        canCancelOrdersForUser(ref.read(authProvider).user) &&
+        order.canBeCancelled &&
+        !order.isPending &&
+        order.serverId != null;
     final canRefund =
         canManageCatalogForUser(ref.read(authProvider).user) &&
         order.isPaid &&
@@ -223,6 +230,13 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
                     color: AppColors.infoSoft,
                     textColor: AppColors.info,
                     icon: Icons.bookmark_added_outlined,
+                  ),
+                if (order.isVoided)
+                  const AppBadge(
+                    text: 'Dibatalkan',
+                    color: AppColors.errorSoft,
+                    textColor: AppColors.error,
+                    icon: Icons.cancel_outlined,
                   ),
                 AppBadge(
                   text: order.isPending ? 'Belum sinkron' : 'Tersimpan',
@@ -294,6 +308,25 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
               const SizedBox(height: 6),
               Text(order.note!),
             ],
+            if (order.isVoided) ...[
+              const SizedBox(height: 18),
+              Text(
+                'Pembatalan',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 10),
+              _DetailLine(
+                label: 'Alasan',
+                value: order.cancellationReason ?? '-',
+              ),
+              const SizedBox(height: 10),
+              _DetailLine(
+                label: 'Stok bahan',
+                value: order.cancellationInventoryOutcome == 'restore_stock'
+                    ? 'Dikembalikan'
+                    : 'Tetap terpakai',
+              ),
+            ],
             if (order.isOpenBill) ...[
               const SizedBox(height: 18),
               AppButton(
@@ -321,6 +354,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
                 return _OrderPrintActions(
                   state: printer,
                   isOpenBill: order.isOpenBill,
+                  isCancelled: order.isVoided,
                   onReceipt: () => _reprint(order, receiptOnly: true),
                   onKitchen: () => _reprint(order, kitchenOnly: true),
                   onAll: () => _reprint(order),
@@ -338,6 +372,20 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
                 },
                 icon: const Icon(Icons.currency_exchange_rounded),
                 label: const Text('Proses refund'),
+              ),
+            ],
+            if (canCancel) ...[
+              const SizedBox(height: 12),
+              AppButton(
+                text: 'Batalkan pesanan',
+                icon: Icons.cancel_outlined,
+                variant: AppButtonVariant.danger,
+                onPressed: () {
+                  Navigator.pop(context);
+                  Future<void>.delayed(const Duration(milliseconds: 180), () {
+                    if (mounted) _openCancellation(order);
+                  });
+                },
               ),
             ],
           ],
@@ -423,6 +471,46 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
     );
   }
 
+  Future<void> _openCancellation(OrderHistoryItem order) async {
+    final draft = await AppBottomSheet.show<_CancellationDraft>(
+      context,
+      title: 'Batalkan pesanan',
+      subtitle: order.receiptNumber,
+      child: _CancellationForm(order: order),
+    );
+    if (draft == null || !mounted) return;
+
+    setState(() => _isMutating = true);
+    final result = await ref
+        .read(orderHistoryProvider.notifier)
+        .cancelOrder(
+          order: order,
+          inventoryOutcome: draft.inventoryOutcome,
+          reason: draft.reason,
+        );
+    if (result.isSuccess) {
+      ref.invalidate(customerProvider);
+      ref.invalidate(kdsOverviewProvider);
+      ref.invalidate(kdsNotifierProvider);
+      if (order.customerId != null) {
+        ref.invalidate(customerOrderHistoryProvider(order.customerId!));
+      }
+      try {
+        await ref.read(tableProvider.notifier).syncFromServer();
+      } catch (_) {
+        // Order cancellation is already saved; table data can refresh later.
+      }
+    }
+    if (!mounted) return;
+    setState(() => _isMutating = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(result.message),
+        backgroundColor: result.isSuccess ? null : AppColors.error,
+      ),
+    );
+  }
+
   Future<void> _reprint(
     OrderHistoryItem order, {
     bool receiptOnly = false,
@@ -440,6 +528,157 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
       context,
     ).showSnackBar(SnackBar(content: Text(result.message)));
   }
+}
+
+class _CancellationForm extends StatefulWidget {
+  const _CancellationForm({required this.order});
+
+  final OrderHistoryItem order;
+
+  @override
+  State<_CancellationForm> createState() => _CancellationFormState();
+}
+
+class _CancellationFormState extends State<_CancellationForm> {
+  final _formKey = GlobalKey<FormState>();
+  final _reason = TextEditingController();
+  String _inventoryOutcome = 'no_stock_return';
+  bool _confirmed = false;
+
+  double get _automaticRefund =>
+      math.max(widget.order.total - widget.order.refundedAmount, 0).toDouble();
+
+  @override
+  void dispose() {
+    _reason.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final currency = NumberFormat.currency(
+      locale: 'id_ID',
+      symbol: 'Rp ',
+      decimalDigits: 0,
+    );
+    final financialMessage = widget.order.isOpenBill
+        ? 'Open bill belum memiliki pembayaran, jadi tidak ada refund.'
+        : _automaticRefund > 0
+        ? 'Sisa pembayaran ${currency.format(_automaticRefund)} akan dicatat sebagai refund otomatis.'
+        : 'Pembayaran pesanan ini sudah direfund penuh. Tidak ada refund tambahan.';
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            AppCard(
+              color: AppColors.errorSoft,
+              borderColor: AppColors.error,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(
+                    Icons.warning_amber_rounded,
+                    color: AppColors.error,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      financialMessage,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodyMedium?.copyWith(color: AppColors.error),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<String>(
+              initialValue: _inventoryOutcome,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Perlakuan stok bahan',
+                prefixIcon: Icon(Icons.inventory_2_outlined),
+              ),
+              items: const [
+                DropdownMenuItem(
+                  value: 'no_stock_return',
+                  child: Text('Bahan tetap terpakai'),
+                ),
+                DropdownMenuItem(
+                  value: 'restore_stock',
+                  child: Text('Kembalikan bahan ke stok'),
+                ),
+              ],
+              onChanged: (value) => setState(
+                () => _inventoryOutcome = value ?? _inventoryOutcome,
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextFormField(
+              controller: _reason,
+              minLines: 2,
+              maxLines: 4,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Alasan pembatalan',
+                prefixIcon: Icon(Icons.notes_rounded),
+                alignLabelWithHint: true,
+              ),
+              validator: (value) {
+                final reason = (value ?? '').trim();
+                if (reason.isEmpty) return 'Alasan wajib diisi';
+                if (reason.length < 3) return 'Alasan minimal 3 karakter';
+                return null;
+              },
+            ),
+            const SizedBox(height: 8),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              value: _confirmed,
+              controlAffinity: ListTileControlAffinity.leading,
+              title: const Text(
+                'Saya sudah memeriksa pesanan, pembayaran, dan kondisi bahan.',
+              ),
+              onChanged: (value) => setState(() => _confirmed = value ?? false),
+            ),
+            const SizedBox(height: 12),
+            AppButton(
+              text: 'Konfirmasi pembatalan',
+              icon: Icons.cancel_outlined,
+              variant: AppButtonVariant.danger,
+              onPressed: _confirmed ? _submit : null,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _submit() {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    Navigator.pop(
+      context,
+      _CancellationDraft(
+        inventoryOutcome: _inventoryOutcome,
+        reason: _reason.text.trim(),
+      ),
+    );
+  }
+}
+
+class _CancellationDraft {
+  const _CancellationDraft({
+    required this.inventoryOutcome,
+    required this.reason,
+  });
+
+  final String inventoryOutcome;
+  final String reason;
 }
 
 class _RefundForm extends StatefulWidget {
@@ -647,6 +886,7 @@ class _OrderPrintActions extends StatelessWidget {
   const _OrderPrintActions({
     required this.state,
     required this.isOpenBill,
+    required this.isCancelled,
     required this.onReceipt,
     required this.onKitchen,
     required this.onAll,
@@ -654,6 +894,7 @@ class _OrderPrintActions extends StatelessWidget {
 
   final PrinterState state;
   final bool isOpenBill;
+  final bool isCancelled;
   final VoidCallback onReceipt;
   final VoidCallback onKitchen;
   final VoidCallback onAll;
@@ -679,7 +920,9 @@ class _OrderPrintActions extends StatelessWidget {
         const SizedBox(height: 6),
         Text(
           state.hasAnyPrinter
-              ? isOpenBill
+              ? isCancelled
+                    ? 'Bukti pelanggan diberi penanda pembatalan.'
+                    : isOpenBill
                     ? 'Tagihan dicetak dengan status belum lunas.'
                     : 'Dokumen cetak ulang diberi penanda salinan.'
               : 'Atur printer kasir dan dapur dari menu Lainnya.',
@@ -702,10 +945,19 @@ class _OrderPrintActions extends StatelessWidget {
                   ? onReceipt
                   : null,
               icon: const Icon(Icons.receipt_long_outlined),
-              label: Text(isOpenBill ? 'Tagihan pelanggan' : 'Struk pelanggan'),
+              label: Text(
+                isCancelled
+                    ? 'Bukti pembatalan'
+                    : isOpenBill
+                    ? 'Tagihan pelanggan'
+                    : 'Struk pelanggan',
+              ),
             );
             final kitchenButton = OutlinedButton.icon(
-              onPressed: state.hasProductionPrinter && !state.isPrinting
+              onPressed:
+                  !isCancelled &&
+                      state.hasProductionPrinter &&
+                      !state.isPrinting
                   ? onKitchen
                   : null,
               icon: const Icon(Icons.restaurant_outlined),
@@ -730,7 +982,7 @@ class _OrderPrintActions extends StatelessWidget {
             );
           },
         ),
-        if (!isOpenBill) ...[
+        if (!isOpenBill && !isCancelled) ...[
           const SizedBox(height: 8),
           FilledButton.icon(
             onPressed: state.hasAnyPrinter && !state.isPrinting ? onAll : null,
@@ -1064,6 +1316,15 @@ class _OrderRow extends StatelessWidget {
                     icon: Icons.bookmark_added_outlined,
                   ),
                 ],
+                if (order.isVoided) ...[
+                  const SizedBox(height: 7),
+                  const AppBadge(
+                    text: 'Dibatalkan',
+                    color: AppColors.errorSoft,
+                    textColor: AppColors.error,
+                    icon: Icons.cancel_outlined,
+                  ),
+                ],
               ],
             ),
           ),
@@ -1095,7 +1356,9 @@ class _DetailLine extends StatelessWidget {
       children: [
         Expanded(child: Text(label, style: style)),
         const SizedBox(width: 12),
-        Text(value, style: style),
+        Expanded(
+          child: Text(value, textAlign: TextAlign.end, style: style),
+        ),
       ],
     );
   }

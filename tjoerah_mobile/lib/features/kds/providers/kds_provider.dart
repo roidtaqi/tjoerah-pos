@@ -139,7 +139,8 @@ class KdsNotifier extends AsyncNotifier<List<KitchenTicketModel>> {
     if (updatedTicket.station != currentStation) return;
 
     state = state.whenData((currentTickets) {
-      if (updatedTicket.status == 'completed') {
+      if (updatedTicket.status == 'completed' ||
+          updatedTicket.status == 'cancelled') {
         return currentTickets
             .where((ticket) => ticket.id != updatedTicket.id)
             .toList();

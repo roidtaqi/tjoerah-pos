@@ -15,7 +15,7 @@ class KdsController extends Controller
         $validated = $request->validate([
             'outlet_id' => 'nullable|integer|exists:outlets,id',
             'station' => 'nullable|string|max:50',
-            'status' => 'nullable|string|in:pending,accepted,preparing,ready,completed',
+            'status' => 'nullable|string|in:pending,accepted,preparing,ready,completed,cancelled',
             'per_page' => 'nullable|integer|min:1|max:100',
         ]);
         $outletIds = $this->accessibleOutletIds($request);

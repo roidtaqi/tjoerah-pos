@@ -154,4 +154,42 @@ void main() {
     expect(order.toPrintData().isOpenBill, isTrue);
     expect(order.toPrintData().paymentMethodLabel, 'Belum dibayar');
   });
+
+  test(
+    'parses cancellation audit and excludes voided order from paid status',
+    () {
+      final order = OrderHistoryItem.fromApi({
+        'id': 'voided-order',
+        'receipt_number': 'TJ-VOID-001',
+        'status': 'voided',
+        'subtotal': '20000.00',
+        'total': '20000.00',
+        'created_at': '2026-08-02T10:00:00.000000Z',
+        'items': const [],
+        'payments': [
+          {'method': 'cash', 'amount': '20000.00'},
+        ],
+        'refunds': [
+          {'status': 'approved', 'amount': '20000.00'},
+        ],
+        'meta': {
+          'cancellation': {
+            'reason': 'Transaksi salah input.',
+            'inventory_outcome': 'restore_stock',
+            'cancelled_at': '2026-08-02T10:05:00+08:00',
+          },
+        },
+      });
+
+      expect(order.isVoided, isTrue);
+      expect(order.isPaid, isFalse);
+      expect(order.canBeCancelled, isFalse);
+      expect(order.refundedAmount, 20000);
+      expect(order.cancellationReason, 'Transaksi salah input.');
+      expect(order.cancellationInventoryOutcome, 'restore_stock');
+      expect(order.cancelledAt, isNotNull);
+      expect(order.toPrintData().isCancelled, isTrue);
+      expect(order.toPrintData().cancellationReason, 'Transaksi salah input.');
+    },
+  );
 }

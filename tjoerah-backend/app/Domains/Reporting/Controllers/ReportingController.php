@@ -81,7 +81,12 @@ class ReportingController extends Controller
     private function baseOrderQuery(Request $request)
     {
         return Order::query()
-            ->whereIn('status', ['paid', 'completed', 'partially_refunded', 'refunded'])
+            ->where(function ($query) {
+                $query->whereIn('status', ['paid', 'completed', 'partially_refunded', 'refunded'])
+                    ->orWhere(fn ($voided) => $voided
+                        ->where('status', 'voided')
+                        ->whereHas('payments', fn ($payments) => $payments->where('status', 'completed')));
+            })
             ->when($request->integer('outlet_id'), fn ($query, $outletId) => $query->where('outlet_id', $outletId))
             ->when($request->date('from'), fn ($query, $from) => $query->whereDate('created_at', '>=', $from))
             ->when($request->date('to'), fn ($query, $to) => $query->whereDate('created_at', '<=', $to));

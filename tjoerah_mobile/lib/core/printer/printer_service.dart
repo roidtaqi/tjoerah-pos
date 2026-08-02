@@ -138,7 +138,9 @@ class PrinterService {
       await _printer.printNewLine();
       await _printer.printCustom('TJOERAH POS', 2, 1);
       await _printer.printCustom(
-        order.isOpenBill
+        order.isCancelled
+            ? 'BUKTI PEMBATALAN'
+            : order.isOpenBill
             ? order.isReprint
                   ? 'SALINAN TAGIHAN'
                   : 'TAGIHAN'
@@ -148,7 +150,9 @@ class PrinterService {
         1,
         1,
       );
-      if (order.isOpenBill) {
+      if (order.isCancelled) {
+        await _printer.printCustom('DIBATALKAN', 2, 1);
+      } else if (order.isOpenBill) {
         await _printer.printCustom('BELUM LUNAS', 2, 1);
       }
       await _printer.printNewLine();
@@ -205,9 +209,20 @@ class PrinterService {
       if (_hasText(order.note)) {
         await _printer.printCustom('Catatan: ${order.note}', 0, 0);
       }
+      if (order.isCancelled && _hasText(order.cancellationReason)) {
+        await _printer.printCustom(
+          'Alasan batal: ${order.cancellationReason}',
+          0,
+          0,
+        );
+      }
       await _printer.printNewLine();
       await _printer.printCustom(
-        order.isOpenBill ? 'Mohon simpan tagihan ini' : 'Terima kasih',
+        order.isCancelled
+            ? 'TRANSAKSI DIBATALKAN'
+            : order.isOpenBill
+            ? 'Mohon simpan tagihan ini'
+            : 'Terima kasih',
         0,
         1,
       );
@@ -224,6 +239,11 @@ class PrinterService {
     required PrinterPaperWidth paperWidth,
     required bool cutPaper,
   }) async {
+    if (order.isCancelled) {
+      throw PrinterException(
+        'Tiket dapur untuk pesanan yang dibatalkan tidak dapat dicetak.',
+      );
+    }
     await _ensureConnected();
     final items = order.itemsByStation[station] ?? const <PrintOrderItem>[];
     if (items.isEmpty) return;

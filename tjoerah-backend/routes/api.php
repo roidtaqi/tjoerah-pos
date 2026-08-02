@@ -71,7 +71,8 @@ Route::middleware('auth:api')->group(function () {
     Route::get('/orders/{order}', [OrderController::class, 'show']);
     Route::post('/orders/{order}/hold', [OrderController::class, 'hold']);
     Route::post('/orders/{order}/resume', [OrderController::class, 'resume']);
-    Route::post('/orders/{order}/void', [OrderController::class, 'void']);
+    Route::post('/orders/{order}/void', [OrderController::class, 'void'])
+        ->middleware('role:owner,admin');
     Route::post('/orders/{order}/refund', [OrderController::class, 'refund'])
         ->middleware('role:owner,admin');
     Route::post('/orders/{order}/complete', [OrderController::class, 'complete']);

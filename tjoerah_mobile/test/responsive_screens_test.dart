@@ -324,6 +324,7 @@ void main() {
       overrides: [
         orderHistoryProvider.overrideWith(_PreviewOrderHistoryNotifier.new),
         printerProvider.overrideWith(_PreviewPrinterNotifier.new),
+        authProvider.overrideWith(_PreviewOwnerAuthNotifier.new),
       ],
     );
     expect(find.text('Pesanan hari ini'), findsOneWidget);
@@ -336,6 +337,13 @@ void main() {
     expect(find.text('Struk pelanggan'), findsOneWidget);
     expect(find.text('Tiket dapur'), findsOneWidget);
     expect(find.text('Cetak semua dokumen'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.ensureVisible(find.text('Batalkan pesanan'));
+    await tester.tap(find.text('Batalkan pesanan'));
+    await tester.pumpAndSettle();
+    expect(find.text('Perlakuan stok bahan'), findsOneWidget);
+    expect(find.text('Konfirmasi pembatalan'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await _render(
@@ -952,6 +960,7 @@ class _PreviewOrderHistoryNotifier extends OrderHistoryNotifier {
   Future<List<OrderHistoryItem>> build() async => [
     OrderHistoryItem(
       id: 'order-1',
+      serverId: 'server-order-1',
       receiptNumber: 'TJ-260715-090001',
       orderType: 'dine_in',
       paymentMethod: 'cash',

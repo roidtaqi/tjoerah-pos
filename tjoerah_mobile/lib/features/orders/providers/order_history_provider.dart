@@ -133,6 +133,51 @@ class OrderHistoryNotifier extends AsyncNotifier<List<OrderHistoryItem>> {
     }
   }
 
+  Future<OrderHistoryMutationResult> cancelOrder({
+    required OrderHistoryItem order,
+    required String inventoryOutcome,
+    required String reason,
+  }) async {
+    if (order.serverId == null || order.isPending) {
+      return const OrderHistoryMutationResult(
+        isSuccess: false,
+        message: 'Sinkronkan pesanan terlebih dahulu sebelum membatalkan.',
+      );
+    }
+
+    try {
+      final response = await ApiClient.post('/orders/${order.serverId}/void', {
+        'inventory_outcome': inventoryOutcome,
+        'reason': reason.trim(),
+      });
+      final decoded = jsonDecode(response.body);
+      final body = decoded is Map
+          ? Map<String, dynamic>.from(decoded)
+          : <String, dynamic>{};
+      if (response.statusCode != 201) {
+        return OrderHistoryMutationResult(
+          isSuccess: false,
+          message:
+              _firstError(body) ??
+              body['message']?.toString() ??
+              'Pesanan belum dapat dibatalkan.',
+        );
+      }
+
+      await refresh();
+      return OrderHistoryMutationResult(
+        isSuccess: true,
+        message: body['message']?.toString() ?? 'Pesanan berhasil dibatalkan.',
+      );
+    } catch (_) {
+      return const OrderHistoryMutationResult(
+        isSuccess: false,
+        message:
+            'Pesanan belum dapat dibatalkan. Periksa koneksi lalu coba lagi.',
+      );
+    }
+  }
+
   Future<List<OrderHistoryItem>> _loadRemote(
     List<OrderHistoryItem> local,
   ) async {

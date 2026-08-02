@@ -8,8 +8,8 @@ use App\Domains\KDS\Models\KitchenTicket;
 use App\Domains\POS\Models\Order;
 use App\Domains\POS\Models\OrderItem;
 use App\Domains\POS\Models\Refund;
-use App\Domains\POS\Models\VoidTransaction;
 use App\Domains\Sales\DTOs\OrderData;
+use App\Domains\Sales\Services\OrderCancellationService;
 use App\Domains\Sales\Services\OrderService;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
@@ -20,6 +20,7 @@ class OrderController extends Controller
 {
     public function __construct(
         private OrderService $orderService,
+        private OrderCancellationService $orderCancellationService,
         private ProductionIncidentService $productionIncidentService,
     ) {}
 
@@ -207,22 +208,25 @@ class OrderController extends Controller
     {
         $this->ensureOrderIsAccessible($request, $order);
         $validated = $request->validate([
-            'order_item_id' => 'nullable|uuid|exists:order_items,id',
-            'amount' => 'nullable|numeric',
-            'reason' => 'required|string',
+            'reason' => 'required|string|min:3|max:1000',
+            'inventory_outcome' => 'required|string|in:no_stock_return,restore_stock',
         ]);
 
-        $void = VoidTransaction::create([
-            'order_id' => $order->id,
-            'order_item_id' => $validated['order_item_id'] ?? null,
-            'user_id' => $request->user()?->id,
-            'amount' => $validated['amount'] ?? $order->total,
-            'reason' => $validated['reason'],
-        ]);
+        $result = $this->orderCancellationService->cancel(
+            order: $order,
+            user: $request->user(),
+            reason: trim($validated['reason']),
+            inventoryOutcome: $validated['inventory_outcome'],
+        );
 
-        $order->update(['status' => 'voided']);
-
-        return response()->json(['message' => 'Order voided.', 'data' => $void], 201);
+        return response()->json([
+            'message' => $result['refund']
+                ? 'Pesanan dibatalkan dan sisa pembayaran direfund.'
+                : 'Pesanan berhasil dibatalkan.',
+            'data' => $result['order'],
+            'void_transaction' => $result['void'],
+            'refund' => $result['refund'],
+        ], 201);
     }
 
     public function refund(Request $request, Order $order)

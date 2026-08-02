@@ -11,4 +11,10 @@ class VoidTransaction extends Model
     use HasUuids, SoftDeletes;
 
     protected $guarded = [];
+
+    protected $casts = [
+        'amount' => 'decimal:2',
+        'stock_restored_at' => 'datetime',
+        'meta' => 'array',
+    ];
 }

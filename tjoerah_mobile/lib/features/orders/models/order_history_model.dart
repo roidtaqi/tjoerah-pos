@@ -26,6 +26,9 @@ class OrderHistoryItem {
     this.note,
     this.orderStatus = 'completed',
     this.refundedAmount = 0,
+    this.cancellationReason,
+    this.cancellationInventoryOutcome,
+    this.cancelledAt,
   });
 
   final String id;
@@ -50,6 +53,9 @@ class OrderHistoryItem {
   final String? note;
   final String orderStatus;
   final double refundedAmount;
+  final String? cancellationReason;
+  final String? cancellationInventoryOutcome;
+  final DateTime? cancelledAt;
 
   bool get isPending => syncStatus == 'pending';
   bool get isOpenBill => orderStatus == 'open' || orderStatus == 'held';
@@ -61,6 +67,16 @@ class OrderHistoryItem {
   }.contains(orderStatus);
   bool get isRefunded =>
       orderStatus == 'refunded' || orderStatus == 'partially_refunded';
+  bool get isVoided => orderStatus == 'voided';
+  bool get canBeCancelled => const {
+    'draft',
+    'open',
+    'held',
+    'paid',
+    'completed',
+    'partially_refunded',
+    'refunded',
+  }.contains(orderStatus);
   int get itemCount => items.fold(0, (sum, item) => sum + item.quantity);
 
   TransactionPrintData toPrintData({
@@ -105,6 +121,8 @@ class OrderHistoryItem {
       note: note,
       amountReceived: amountReceived ?? this.amountReceived,
       change: change ?? this.change,
+      isCancelled: isVoided,
+      cancellationReason: cancellationReason,
     );
   }
 
@@ -118,6 +136,9 @@ class OrderHistoryItem {
     final rawItems = payload['items'] is List ? payload['items'] as List : [];
     final rawPayments = meta['payment_breakdown'] is Map
         ? Map<String, dynamic>.from(meta['payment_breakdown'] as Map)
+        : <String, dynamic>{};
+    final cancellation = meta['cancellation'] is Map
+        ? Map<String, dynamic>.from(meta['cancellation'] as Map)
         : <String, dynamic>{};
     final id = row['id']?.toString() ?? '';
     final fallbackReceipt = id.length <= 8 ? id : id.substring(0, 8);
@@ -170,6 +191,12 @@ class OrderHistoryItem {
           meta['server_order_status']?.toString() ??
           (payload['is_open_bill'] == true ? 'open' : 'completed'),
       refundedAmount: _number(meta['refunded_amount']),
+      cancellationReason: cancellation['reason']?.toString(),
+      cancellationInventoryOutcome: cancellation['inventory_outcome']
+          ?.toString(),
+      cancelledAt: DateTime.tryParse(
+        cancellation['cancelled_at']?.toString() ?? '',
+      ),
       items: items,
       paymentBreakdown: rawPayments.map(
         (key, value) => MapEntry(key, _number(value)),
@@ -182,6 +209,9 @@ class OrderHistoryItem {
         ? Map<String, dynamic>.from(json['meta'] as Map)
         : <String, dynamic>{};
     final rawItems = json['items'] is List ? json['items'] as List : [];
+    final cancellation = meta['cancellation'] is Map
+        ? Map<String, dynamic>.from(meta['cancellation'] as Map)
+        : <String, dynamic>{};
     final rawPayments = json['payments'] is List
         ? json['payments'] as List
         : [];
@@ -236,6 +266,12 @@ class OrderHistoryItem {
       note: meta['note']?.toString(),
       orderStatus: json['status']?.toString() ?? 'completed',
       refundedAmount: refundedAmount,
+      cancellationReason: cancellation['reason']?.toString(),
+      cancellationInventoryOutcome: cancellation['inventory_outcome']
+          ?.toString(),
+      cancelledAt: DateTime.tryParse(
+        cancellation['cancelled_at']?.toString() ?? '',
+      ),
       items: items,
       paymentBreakdown: payments,
     );

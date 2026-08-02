@@ -34,6 +34,8 @@ class TransactionPrintData {
     this.note,
     this.amountReceived,
     this.change = 0,
+    this.isCancelled = false,
+    this.cancellationReason,
   }) : paymentBreakdown = Map.unmodifiable(paymentBreakdown),
        items = List.unmodifiable(items);
 
@@ -55,6 +57,8 @@ class TransactionPrintData {
   final String? note;
   final double? amountReceived;
   final double change;
+  final bool isCancelled;
+  final String? cancellationReason;
 
   String get shortOrderId => orderId.length <= 8
       ? orderId.toUpperCase()
