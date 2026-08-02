@@ -121,10 +121,13 @@ flutter run --dart-define=API_BASE_URL=https://DOMAIN_RAILWAY/api
 
 ## Akun Demo
 
-| Role | Email | Password | PIN |
-| --- | --- | --- | --- |
-| Owner | `owner@tjoerah.com` | `password` | `1234` |
-| Cashier | `cashier@tjoerah.com` | `password` | `5678` |
+| Role | Username | Email | Password | PIN |
+| --- | --- | --- | --- | --- |
+| Owner | `owner` | `owner@tjoerah.com` | `password` | `1234` |
+| Cashier | `cashier` | `cashier@tjoerah.com` | `password` | `5678` |
+
+Login menerima email, nomor telepon, atau username. Login PIN selalu meminta
+identitas pengguna dan PIN; PIN yang sama boleh digunakan oleh akun berbeda.
 
 Data demo dibuat oleh `php artisan migrate:fresh --seed`.
 

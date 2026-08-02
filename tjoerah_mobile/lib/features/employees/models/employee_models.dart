@@ -97,6 +97,7 @@ class EmployeeProfile {
     required this.outletId,
     required this.isActive,
     this.attendanceShiftId,
+    this.username,
     this.outletName,
     this.shiftName,
     this.phone,
@@ -129,6 +130,7 @@ class EmployeeProfile {
       role: user['role']?.toString() ?? 'cashier',
       outletId: _asInt(json['outlet_id']),
       attendanceShiftId: _nullableInt(json['attendance_shift_id']),
+      username: _nullableString(user['username']),
       outletName: outlet['name']?.toString(),
       shiftName: shift['name']?.toString(),
       phone: _nullableString(json['phone']),
@@ -152,6 +154,7 @@ class EmployeeProfile {
   final String role;
   final int outletId;
   final int? attendanceShiftId;
+  final String? username;
   final String? outletName;
   final String? shiftName;
   final String? phone;
@@ -177,6 +180,7 @@ class EmployeeDraft {
     required this.employmentStatus,
     required this.isActive,
     this.attendanceShiftId,
+    this.username,
     this.phone,
     this.position,
     this.hireDate,
@@ -196,6 +200,7 @@ class EmployeeDraft {
   final String role;
   final int outletId;
   final int? attendanceShiftId;
+  final String? username;
   final String? phone;
   final String? position;
   final String employmentStatus;
@@ -215,6 +220,7 @@ class EmployeeDraft {
       'employee_number': employeeNumber,
       'name': name,
       'email': email,
+      'username': username,
       'role': role,
       'outlet_id': outletId,
       'attendance_shift_id': attendanceShiftId,

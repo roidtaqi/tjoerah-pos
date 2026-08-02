@@ -35,6 +35,8 @@ class DatabaseSeeder extends Seeder
             ['email' => 'owner@tjoerah.com'],
             [
                 'name' => 'Owner Admin',
+                'username' => 'owner',
+                'phone' => '6281234567890',
                 'password' => Hash::make($demoCredentials['owner_password']),
                 'pin' => $demoCredentials['owner_pin'],
                 'role' => 'owner',
@@ -47,6 +49,8 @@ class DatabaseSeeder extends Seeder
             ['email' => 'cashier@tjoerah.com'],
             [
                 'name' => 'Kasir Demo',
+                'username' => 'cashier',
+                'phone' => '6281234567891',
                 'password' => Hash::make($demoCredentials['cashier_password']),
                 'pin' => $demoCredentials['cashier_pin'],
                 'role' => 'cashier',
@@ -91,6 +95,7 @@ class DatabaseSeeder extends Seeder
                     'outlet_id' => $outlet->id,
                     'employee_number' => 'USR-'.str_pad((string) $user->id, 4, '0', STR_PAD_LEFT),
                     'name' => $user->name,
+                    'phone' => $user->phone,
                     'email' => $user->email,
                     'position' => $user->role,
                     'hire_date' => now()->toDateString(),

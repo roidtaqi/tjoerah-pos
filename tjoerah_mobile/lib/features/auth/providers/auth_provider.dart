@@ -88,13 +88,13 @@ class AuthNotifier extends Notifier<AuthState> {
   }
 
   Future<AuthLoginResult> login(
-    String loginId,
-    String password, {
+    String identifier,
+    String secret, {
     bool isPin = false,
   }) async {
     final data = isPin
-        ? {'pin': loginId}
-        : {'email': loginId, 'password': password};
+        ? {'identifier': identifier, 'pin': secret}
+        : {'identifier': identifier, 'password': secret};
 
     try {
       final response = await ApiClient.post(

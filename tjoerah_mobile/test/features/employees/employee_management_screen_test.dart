@@ -23,6 +23,7 @@ void main() {
     expect(find.text('Akses aplikasi'), findsOneWidget);
     expect(find.text('Nomor karyawan *'), findsOneWidget);
     expect(find.text('Jabatan (opsional)'), findsOneWidget);
+    expect(find.text('Username login (opsional)'), findsOneWidget);
     expect(find.text('Shift absensi'), findsNothing);
     expect(tester.takeException(), isNull);
 

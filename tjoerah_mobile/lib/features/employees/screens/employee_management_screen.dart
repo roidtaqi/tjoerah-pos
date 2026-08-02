@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -112,7 +113,9 @@ class _EmployeeManagementScreenState
           query.isEmpty ||
           employee.name.toLowerCase().contains(query) ||
           employee.employeeNumber.toLowerCase().contains(query) ||
-          employee.email.toLowerCase().contains(query);
+          employee.email.toLowerCase().contains(query) ||
+          (employee.username?.toLowerCase().contains(query) ?? false) ||
+          (employee.phone?.toLowerCase().contains(query) ?? false);
       final matchesStatus =
           _status == 'all' ||
           (_status == 'active' && employee.isActive) ||
@@ -135,7 +138,7 @@ class _EmployeeManagementScreenState
                     builder: (context, constraints) {
                       final horizontal = constraints.maxWidth >= 720;
                       final search = AppSearchBar(
-                        hintText: 'Cari nama, nomor, atau email',
+                        hintText: 'Cari nama, username, telepon, atau email',
                         onChanged: (value) => setState(() => _query = value),
                       );
                       final filters = Wrap(
@@ -435,11 +438,14 @@ class _EmployeeFormState extends State<_EmployeeForm> {
   final _nameFocus = FocusNode();
   final _outletFocus = FocusNode();
   final _roleFocus = FocusNode();
+  final _usernameFocus = FocusNode();
   final _emailFocus = FocusNode();
+  final _phoneFocus = FocusNode();
   final _pinFocus = FocusNode();
   final _passwordFocus = FocusNode();
   late final TextEditingController _number;
   late final TextEditingController _name;
+  late final TextEditingController _username;
   late final TextEditingController _email;
   late final TextEditingController _phone;
   late final TextEditingController _position;
@@ -468,6 +474,7 @@ class _EmployeeFormState extends State<_EmployeeForm> {
     final employee = widget.employee;
     _number = TextEditingController(text: employee?.employeeNumber);
     _name = TextEditingController(text: employee?.name);
+    _username = TextEditingController(text: employee?.username);
     _email = TextEditingController(text: employee?.email);
     _phone = TextEditingController(text: employee?.phone);
     _position = TextEditingController(text: employee?.position);
@@ -481,7 +488,15 @@ class _EmployeeFormState extends State<_EmployeeForm> {
     );
     _password = TextEditingController();
     _pin = TextEditingController();
-    for (final controller in [_number, _name, _email, _pin, _password]) {
+    for (final controller in [
+      _number,
+      _name,
+      _username,
+      _email,
+      _phone,
+      _pin,
+      _password,
+    ]) {
       controller.addListener(_refreshValidationSummary);
     }
     _role =
@@ -503,6 +518,7 @@ class _EmployeeFormState extends State<_EmployeeForm> {
     for (final controller in [
       _number,
       _name,
+      _username,
       _email,
       _phone,
       _position,
@@ -520,7 +536,9 @@ class _EmployeeFormState extends State<_EmployeeForm> {
       _nameFocus,
       _outletFocus,
       _roleFocus,
+      _usernameFocus,
       _emailFocus,
+      _phoneFocus,
       _pinFocus,
       _passwordFocus,
     ]) {
@@ -658,6 +676,29 @@ class _EmployeeFormState extends State<_EmployeeForm> {
           ],
           const SizedBox(height: 12),
           TextFormField(
+            controller: _username,
+            focusNode: _usernameFocus,
+            decoration: const InputDecoration(
+              labelText: 'Username login (opsional)',
+              hintText: 'Contoh: ayu.lestari',
+              prefixIcon: Icon(Icons.alternate_email_rounded),
+            ),
+            autocorrect: false,
+            enableSuggestions: false,
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9._-]')),
+            ],
+            validator: (value) {
+              final username = value?.trim() ?? '';
+              if (username.isEmpty) return null;
+              if (username.length < 3) return 'Username minimal 3 karakter.';
+              return RegExp(r'^[a-zA-Z][a-zA-Z0-9._-]*$').hasMatch(username)
+                  ? null
+                  : 'Awali dengan huruf; gunakan angka, titik, garis bawah, atau strip setelahnya.';
+            },
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
             controller: _email,
             focusNode: _emailFocus,
             decoration: const InputDecoration(
@@ -669,6 +710,23 @@ class _EmployeeFormState extends State<_EmployeeForm> {
               final error = _required(value);
               if (error != null) return error;
               return value!.contains('@') ? null : 'Email tidak valid.';
+            },
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: _phone,
+            focusNode: _phoneFocus,
+            decoration: const InputDecoration(
+              labelText: 'Nomor telepon login (opsional)',
+              prefixIcon: Icon(Icons.phone_outlined),
+            ),
+            keyboardType: TextInputType.phone,
+            validator: (value) {
+              final digits = (value ?? '').replaceAll(RegExp(r'\D'), '');
+              return digits.isNotEmpty &&
+                      (digits.length < 8 || digits.length > 15)
+                  ? 'Nomor telepon harus terdiri dari 8-15 angka.'
+                  : null;
             },
           ),
           const SizedBox(height: 12),
@@ -735,15 +793,6 @@ class _EmployeeFormState extends State<_EmployeeForm> {
           const SizedBox(height: 20),
           const _FormSection(title: 'Data pribadi'),
           const SizedBox(height: 10),
-          TextFormField(
-            controller: _phone,
-            decoration: const InputDecoration(
-              labelText: 'Nomor telepon (opsional)',
-              prefixIcon: Icon(Icons.phone_outlined),
-            ),
-            keyboardType: TextInputType.phone,
-          ),
-          const SizedBox(height: 12),
           _DateField(
             label: 'Tanggal lahir (opsional)',
             value: _birthDate,
@@ -852,6 +901,7 @@ class _EmployeeFormState extends State<_EmployeeForm> {
         employeeNumber: _number.text.trim(),
         name: _name.text.trim(),
         email: _email.text.trim(),
+        username: _nullable(_username.text),
         role: _role!,
         outletId: _outletId!,
         attendanceShiftId: null,
@@ -885,11 +935,23 @@ class _EmployeeFormState extends State<_EmployeeForm> {
     if (_outletId == null) issues.add('Outlet');
     if (_employmentStatus.trim().isEmpty) issues.add('Status kerja');
     if (_role == null) issues.add('Role');
+    final username = _username.text.trim();
+    if (username.isNotEmpty && username.length < 3) {
+      issues.add('Username minimal 3 karakter');
+    } else if (username.isNotEmpty &&
+        !RegExp(r'^[a-zA-Z][a-zA-Z0-9._-]*$').hasMatch(username)) {
+      issues.add('Format username login');
+    }
     final email = _email.text.trim();
     if (email.isEmpty) {
       issues.add('Email login');
     } else if (!email.contains('@')) {
       issues.add('Format email login');
+    }
+    final phoneDigits = _phone.text.replaceAll(RegExp(r'\D'), '');
+    if (phoneDigits.isNotEmpty &&
+        (phoneDigits.length < 8 || phoneDigits.length > 15)) {
+      issues.add('Nomor telepon 8-15 angka');
     }
     final pin = _pin.text.trim();
     if (_isNew && pin.isEmpty) {
@@ -916,9 +978,20 @@ class _EmployeeFormState extends State<_EmployeeForm> {
       _outletFocus.requestFocus();
     } else if (_role == null) {
       _roleFocus.requestFocus();
+    } else if ((_username.text.trim().isNotEmpty &&
+            _username.text.trim().length < 3) ||
+        (_username.text.trim().isNotEmpty &&
+            !RegExp(
+              r'^[a-zA-Z][a-zA-Z0-9._-]*$',
+            ).hasMatch(_username.text.trim()))) {
+      _usernameFocus.requestFocus();
     } else if (_email.text.trim().isEmpty ||
         !_email.text.trim().contains('@')) {
       _emailFocus.requestFocus();
+    } else if (_phone.text.replaceAll(RegExp(r'\D'), '').isNotEmpty &&
+        (_phone.text.replaceAll(RegExp(r'\D'), '').length < 8 ||
+            _phone.text.replaceAll(RegExp(r'\D'), '').length > 15)) {
+      _phoneFocus.requestFocus();
     } else if ((_isNew && _pin.text.trim().isEmpty) ||
         (_pin.text.trim().isNotEmpty &&
             !RegExp(r'^\d{4,6}$').hasMatch(_pin.text.trim()))) {

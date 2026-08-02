@@ -11,6 +11,7 @@ use App\Domains\Employee\Models\Shift;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -90,6 +91,7 @@ class EmployeeController extends Controller
 
     public function store(Request $request)
     {
+        $this->normalizeLoginFields($request);
         $validated = $request->validate([
             'outlet_id' => 'required|integer|exists:outlets,id',
             'attendance_shift_id' => 'nullable|integer|exists:attendance_shifts,id',
@@ -102,10 +104,29 @@ class EmployeeController extends Controller
                     ->where('company_id', $request->user()?->company_id),
             ],
             'name' => 'required|string|max:255',
-            'phone' => 'nullable|string|max:50',
-            'email' => ['required_without:user_id', 'email', 'max:255', Rule::unique('users', 'email')],
+            'phone' => [
+                'nullable',
+                'string',
+                'max:50',
+                'digits_between:8,15',
+                Rule::unique('users', 'phone')->ignore($request->input('user_id')),
+            ],
+            'email' => [
+                'required_without:user_id',
+                'email',
+                'max:255',
+                Rule::unique('users', 'email')->ignore($request->input('user_id')),
+            ],
+            'username' => [
+                'nullable',
+                'string',
+                'min:3',
+                'max:100',
+                'regex:/^[a-z][a-z0-9._-]*$/',
+                Rule::unique('users', 'username')->ignore($request->input('user_id')),
+            ],
             'password' => 'required_without:user_id|string|min:8|max:255',
-            'pin' => ['required_without:user_id', 'digits_between:4,6', Rule::unique('users', 'pin')],
+            'pin' => ['required_without:user_id', 'digits_between:4,6'],
             'role' => ['required_without:user_id', Rule::in(array_keys($this->roleOptions()))],
             'position' => 'nullable|string|max:100',
             'employment_status' => ['required', Rule::in(['permanent', 'contract', 'part_time', 'intern'])],
@@ -131,17 +152,27 @@ class EmployeeController extends Controller
             $companyId,
             $outlet,
         ) {
-            $user = isset($validated['user_id'])
-                ? $this->accessibleUser($request, (int) $validated['user_id'])
-                : User::create([
+            if (isset($validated['user_id'])) {
+                $user = $this->accessibleUser($request, (int) $validated['user_id']);
+                $user->update(
+                    collect($validated)
+                        ->only(['name', 'username', 'email', 'phone', 'password', 'pin', 'role', 'is_active'])
+                        ->reject(fn ($value, $key) => $key === 'password' && blank($value))
+                        ->all(),
+                );
+            } else {
+                $user = User::create([
                     'company_id' => $companyId,
                     'name' => $validated['name'],
+                    'username' => $validated['username'] ?? null,
                     'email' => $validated['email'],
+                    'phone' => $validated['phone'] ?? null,
                     'password' => $validated['password'],
                     'pin' => $validated['pin'],
                     'role' => $validated['role'],
                     'is_active' => $validated['is_active'] ?? true,
                 ]);
+            }
             $user->outlets()->syncWithoutDetaching([$outlet->id]);
 
             return Employee::create([
@@ -160,6 +191,7 @@ class EmployeeController extends Controller
     public function update(Request $request, Employee $employee)
     {
         $this->ensureAccessible($request, $employee);
+        $this->normalizeLoginFields($request);
         $validated = $request->validate([
             'outlet_id' => 'nullable|integer|exists:outlets,id',
             'attendance_shift_id' => 'nullable|integer|exists:attendance_shifts,id',
@@ -172,19 +204,30 @@ class EmployeeController extends Controller
                     ->ignore($employee->id),
             ],
             'name' => 'sometimes|string|max:255',
-            'phone' => 'nullable|string|max:50',
+            'phone' => [
+                'nullable',
+                'string',
+                'max:50',
+                'digits_between:8,15',
+                Rule::unique('users', 'phone')->ignore($employee->user_id),
+            ],
             'email' => [
                 'sometimes',
                 'email',
                 'max:255',
                 Rule::unique('users', 'email')->ignore($employee->user_id),
             ],
-            'password' => 'nullable|string|min:8|max:255',
-            'pin' => [
+            'username' => [
                 'sometimes',
-                'digits_between:4,6',
-                Rule::unique('users', 'pin')->ignore($employee->user_id),
+                'nullable',
+                'string',
+                'min:3',
+                'max:100',
+                'regex:/^[a-z][a-z0-9._-]*$/',
+                Rule::unique('users', 'username')->ignore($employee->user_id),
             ],
+            'password' => 'nullable|string|min:8|max:255',
+            'pin' => ['sometimes', 'digits_between:4,6'],
             'role' => ['sometimes', Rule::in(array_keys($this->roleOptions()))],
             'position' => 'nullable|string|max:100',
             'employment_status' => ['sometimes', Rule::in(['permanent', 'contract', 'part_time', 'intern'])],
@@ -214,7 +257,7 @@ class EmployeeController extends Controller
             $employee->update($this->employeeData($validated));
             if ($employee->user) {
                 $userData = collect($validated)
-                    ->only(['name', 'email', 'password', 'pin', 'role', 'is_active'])
+                    ->only(['name', 'username', 'email', 'phone', 'password', 'pin', 'role', 'is_active'])
                     ->reject(fn ($value, $key) => $key === 'password' && blank($value))
                     ->all();
                 $employee->user->update($userData);
@@ -429,6 +472,29 @@ class EmployeeController extends Controller
             'emergency_contact_phone',
             'is_active',
         ])->all();
+    }
+
+    private function normalizeLoginFields(Request $request): void
+    {
+        $normalized = [];
+        if ($request->exists('email')) {
+            $email = Str::lower(trim((string) $request->input('email')));
+            $normalized['email'] = $email === '' ? null : $email;
+        }
+        if ($request->exists('username')) {
+            $username = Str::lower(trim((string) $request->input('username')));
+            $normalized['username'] = $username === '' ? null : $username;
+        }
+        if ($request->exists('phone')) {
+            $phone = preg_replace('/\D+/', '', (string) $request->input('phone')) ?? '';
+            if (str_starts_with($phone, '0')) {
+                $phone = '62'.substr($phone, 1);
+            }
+            $normalized['phone'] = $phone === '' ? null : $phone;
+        }
+        if ($normalized !== []) {
+            $request->merge($normalized);
+        }
     }
 
     /**

@@ -32,8 +32,8 @@ app/
 All endpoints are prefixed with `/api/v1/`.
 
 ### Authentication & Authorization
-- `POST /auth/login` (JWT Generation)
-- `POST /auth/pin/login` (Cashier fast login via device token)
+- `POST /auth/login` (`identifier` + `password`; identifier dapat berupa email, telepon, atau username)
+- `POST /auth/pin/login` (`identifier` + `pin`; PIN dapat sama antar-akun)
 - `POST /auth/device/register` (Register a POS terminal)
 
 ### POS & Transactions

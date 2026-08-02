@@ -18,7 +18,7 @@ class LoginScreen extends ConsumerStatefulWidget {
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
+  final _identifierController = TextEditingController();
   final _passwordController = TextEditingController();
   final _pinController = TextEditingController();
   bool _usePin = false;
@@ -35,7 +35,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   void dispose() {
-    _emailController.dispose();
+    _identifierController.dispose();
     _passwordController.dispose();
     _pinController.dispose();
     super.dispose();
@@ -63,8 +63,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final result = await ref
         .read(authProvider.notifier)
         .login(
-          _usePin ? _pinController.text : _emailController.text.trim(),
-          _usePin ? '' : _passwordController.text,
+          _identifierController.text.trim(),
+          _usePin ? _pinController.text : _passwordController.text,
           isPin: _usePin,
         );
     if (!mounted) return;
@@ -150,8 +150,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   segments: const [
                                     ButtonSegment(
                                       value: false,
-                                      icon: Icon(Icons.mail_outline_rounded),
-                                      label: Text('Email'),
+                                      icon: Icon(Icons.password_rounded),
+                                      label: Text('Password'),
                                     ),
                                     ButtonSegment(
                                       value: true,
@@ -169,11 +169,30 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   },
                                 ),
                                 const SizedBox(height: 20),
+                                TextFormField(
+                                  key: const ValueKey('identifier-field'),
+                                  controller: _identifierController,
+                                  autofocus: true,
+                                  keyboardType: TextInputType.text,
+                                  textInputAction: TextInputAction.next,
+                                  autofillHints: const [AutofillHints.username],
+                                  decoration: const InputDecoration(
+                                    labelText: 'Email, telepon, atau username',
+                                    hintText: 'Contoh: kasir01',
+                                    prefixIcon: Icon(
+                                      Icons.account_circle_outlined,
+                                    ),
+                                  ),
+                                  validator: (value) =>
+                                      (value ?? '').trim().isEmpty
+                                      ? 'Identitas pengguna wajib diisi'
+                                      : null,
+                                ),
+                                const SizedBox(height: 14),
                                 if (_usePin)
                                   TextFormField(
                                     key: const ValueKey('pin-field'),
                                     controller: _pinController,
-                                    autofocus: true,
                                     keyboardType: TextInputType.number,
                                     textInputAction: TextInputAction.done,
                                     obscureText: true,
@@ -199,27 +218,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                     onFieldSubmitted: (_) => _submit(),
                                   )
                                 else ...[
-                                  TextFormField(
-                                    key: const ValueKey('email-field'),
-                                    controller: _emailController,
-                                    keyboardType: TextInputType.emailAddress,
-                                    textInputAction: TextInputAction.next,
-                                    autofillHints: const [AutofillHints.email],
-                                    decoration: const InputDecoration(
-                                      labelText: 'Email',
-                                      hintText: 'nama@perusahaan.com',
-                                      prefixIcon: Icon(
-                                        Icons.mail_outline_rounded,
-                                      ),
-                                    ),
-                                    validator: (value) {
-                                      final email = (value ?? '').trim();
-                                      return !email.contains('@')
-                                          ? 'Masukkan email yang valid'
-                                          : null;
-                                    },
-                                  ),
-                                  const SizedBox(height: 14),
                                   TextFormField(
                                     controller: _passwordController,
                                     obscureText: _hidePassword,
@@ -334,8 +332,8 @@ String _loginErrorMessage(AuthLoginFailure failure, {required bool isPin}) {
   return switch (failure) {
     AuthLoginFailure.invalidCredentials =>
       isPin
-          ? 'PIN tidak dikenali. Periksa kembali atau gunakan email.'
-          : 'Email atau kata sandi tidak sesuai.',
+          ? 'Identitas pengguna atau PIN tidak sesuai.'
+          : 'Identitas pengguna atau kata sandi tidak sesuai.',
     AuthLoginFailure.connection =>
       'Tidak dapat terhubung ke server. Periksa koneksi lalu coba lagi.',
     AuthLoginFailure.serviceUnavailable =>

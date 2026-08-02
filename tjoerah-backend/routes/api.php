@@ -23,9 +23,11 @@ use App\Domains\Reporting\Controllers\ReportingController;
 use App\Domains\Sales\Controllers\OrderController;
 use Illuminate\Support\Facades\Route;
 
-Route::post('/login', [AuthController::class, 'login']);
-Route::post('/auth/login', [AuthController::class, 'login']);
-Route::post('/auth/pin/login', [AuthController::class, 'pinLogin']);
+Route::middleware('throttle:30,1')->group(function () {
+    Route::post('/login', [AuthController::class, 'login']);
+    Route::post('/auth/login', [AuthController::class, 'login']);
+    Route::post('/auth/pin/login', [AuthController::class, 'pinLogin']);
+});
 
 Route::middleware('auth:api')->group(function () {
     Route::get('/me', [AuthController::class, 'me']);

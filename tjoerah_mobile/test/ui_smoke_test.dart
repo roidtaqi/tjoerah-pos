@@ -28,6 +28,7 @@ void main() {
     await tester.tap(find.text('Masuk dengan PIN'));
     await tester.pump();
 
+    expect(find.text('Identitas pengguna wajib diisi'), findsOneWidget);
     expect(find.text('PIN minimal 4 digit'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -54,7 +55,7 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.enterText(
-      find.byKey(const ValueKey('email-field')),
+      find.byKey(const ValueKey('identifier-field')),
       'owner@tjoerah.com',
     );
     await tester.enterText(find.byType(TextFormField).at(1), 'password');
@@ -89,8 +90,8 @@ class _UnavailableAuthNotifier extends AuthNotifier {
 
   @override
   Future<AuthLoginResult> login(
-    String loginId,
-    String password, {
+    String identifier,
+    String secret, {
     bool isPin = false,
   }) async {
     return const AuthLoginResult.failure(AuthLoginFailure.serviceUnavailable);

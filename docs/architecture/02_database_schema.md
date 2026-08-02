@@ -51,7 +51,7 @@ erDiagram
 - **`outlets`**: `id`, `brand_id` (FK), `name`, `address`, `timezone`, `status`
 
 ### Authentication & Authorization
-- **`users`**: `id`, `email`, `password_hash`, `pin_hash` (For fast cashier login), `is_active`
+- **`users`**: `id`, `username`, `email`, `phone`, `password`, `pin`, `is_active`. Email, username, dan telepon unik; PIN boleh sama karena login PIN menggunakan identifier.
 - **`roles`**: `id`, `name` (e.g., Owner, Area Manager, Outlet Manager, Cashier)
 - **`permissions`**: `id`, `name` (e.g., `refund_transaction`, `void_item`)
 - **`user_roles`**: `user_id`, `role_id`, `company_id`, `brand_id`, `outlet_id` (Allows scope-based RBAC)

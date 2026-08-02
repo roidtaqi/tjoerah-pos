@@ -7,45 +7,27 @@ use App\Domains\Core\Models\User;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 
 class AuthController extends Controller
 {
     public function login(Request $request)
     {
-        $request->validate([
-            'email' => 'required_without:pin|email',
-            'password' => 'required_without:pin',
-            'pin' => 'required_without:email',
+        $validated = $request->validate([
+            'identifier' => 'required_without:email|string|max:255',
+            'email' => 'required_without:identifier|email|max:255',
+            'password' => 'required|string|max:255',
         ]);
 
-        if ($request->has('pin') && $request->pin) {
-            $user = User::where('pin', $request->pin)
-                ->where('is_active', true)
-                ->first();
-            if (! $user) {
-                return response()->json([
-                    'message' => 'Invalid PIN.',
-                    'errors' => ['pin' => ['Invalid PIN.']],
-                ], 401);
-            }
-            $token = Auth::guard('api')->login($user);
-        } else {
-            $credentials = [
-                ...$request->only('email', 'password'),
-                'is_active' => true,
-            ];
-            if (! $token = Auth::guard('api')->attempt($credentials)) {
-                return response()->json([
-                    'message' => 'Invalid credentials.',
-                    'errors' => ['email' => ['Invalid credentials.']],
-                ], 401);
-            }
-            $user = Auth::guard('api')->user();
+        $user = $this->findActiveUser(
+            $validated['identifier'] ?? $validated['email'],
+        );
+        if (! $user || ! Hash::check($validated['password'], $user->password)) {
+            return $this->invalidCredentials();
         }
 
-        $user->forceFill(['last_login_at' => now()])->save();
-
-        return $this->respondWithToken($token);
+        return $this->authenticate($user);
     }
 
     public function me()
@@ -112,8 +94,64 @@ class AuthController extends Controller
 
     public function pinLogin(Request $request)
     {
-        $request->merge(['pin' => $request->input('pin')]);
+        $validated = $request->validate([
+            'identifier' => 'required|string|max:255',
+            'pin' => 'required|digits_between:4,6',
+        ]);
+        $user = $this->findActiveUser($validated['identifier']);
+        if (! $user || ! hash_equals((string) $user->pin, (string) $validated['pin'])) {
+            return $this->invalidCredentials();
+        }
 
-        return $this->login($request);
+        return $this->authenticate($user);
+    }
+
+    private function authenticate(User $user)
+    {
+        $token = Auth::guard('api')->login($user);
+        $user->forceFill(['last_login_at' => now()])->save();
+
+        return $this->respondWithToken($token);
+    }
+
+    private function findActiveUser(string $identifier): ?User
+    {
+        $normalizedIdentifier = Str::lower(trim($identifier));
+        $normalizedPhone = $this->normalizePhone($identifier);
+
+        $matches = User::query()
+            ->where('is_active', true)
+            ->where(function ($query) use ($normalizedIdentifier, $normalizedPhone): void {
+                $query->whereRaw('LOWER(email) = ?', [$normalizedIdentifier])
+                    ->orWhereRaw('LOWER(username) = ?', [$normalizedIdentifier]);
+                if ($normalizedPhone !== null) {
+                    $query->orWhere('phone', $normalizedPhone);
+                }
+            })
+            ->limit(2)
+            ->get();
+
+        return $matches->count() === 1 ? $matches->first() : null;
+    }
+
+    private function normalizePhone(string $value): ?string
+    {
+        $phone = preg_replace('/\D+/', '', $value) ?? '';
+        if (strlen($phone) < 8) {
+            return null;
+        }
+        if (str_starts_with($phone, '0')) {
+            $phone = '62'.substr($phone, 1);
+        }
+
+        return $phone;
+    }
+
+    private function invalidCredentials()
+    {
+        return response()->json([
+            'message' => 'Invalid credentials.',
+            'errors' => ['identifier' => ['Invalid credentials.']],
+        ], 401);
     }
 }

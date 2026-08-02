@@ -17,6 +17,7 @@ class EmployeeManagementTest extends TestCase
     {
         [$company, $outlet, $owner, $shift] = $this->context();
         $this->actingAs($owner, 'api');
+        User::factory()->create(['company_id' => $company->id, 'pin' => '2468']);
 
         $this->getJson('/api/employees/options')
             ->assertOk()
@@ -29,6 +30,7 @@ class EmployeeManagementTest extends TestCase
             'employee_number' => 'EMP-001',
             'name' => 'Ayu Lestari',
             'phone' => '081234567890',
+            'username' => 'ayu.lestari',
             'email' => 'ayu@tjoerah.test',
             'password' => 'rahasia123',
             'pin' => '2468',
@@ -50,11 +52,16 @@ class EmployeeManagementTest extends TestCase
 
         $this->assertDatabaseHas('users', [
             'company_id' => $company->id,
+            'username' => 'ayu.lestari',
             'email' => 'ayu@tjoerah.test',
+            'phone' => '6281234567890',
             'role' => 'cashier',
             'is_active' => true,
         ]);
-        $this->postJson('/api/auth/pin/login', ['pin' => '2468'])
+        $this->postJson('/api/auth/pin/login', [
+            'identifier' => 'ayu.lestari',
+            'pin' => '2468',
+        ])
             ->assertOk()
             ->assertJsonPath('user.role', 'cashier');
 
@@ -68,7 +75,10 @@ class EmployeeManagementTest extends TestCase
             ->assertJsonPath('user.role', 'barista')
             ->assertJsonPath('is_active', false);
 
-        $this->postJson('/api/auth/pin/login', ['pin' => '2468'])
+        $this->postJson('/api/auth/pin/login', [
+            'identifier' => 'ayu.lestari',
+            'pin' => '2468',
+        ])
             ->assertUnauthorized();
     }
 
