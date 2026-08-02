@@ -410,6 +410,7 @@ void main() {
       size: const Size(1280, 800),
       screen: const OperationsScreen(),
       overrides: [
+        authProvider.overrideWith(_PreviewOwnerAuthNotifier.new),
         kdsOverviewProvider.overrideWith(
           (ref) async => const <KitchenTicketModel>[],
         ),
@@ -419,6 +420,7 @@ void main() {
       ],
     );
     expect(find.text('Layanan outlet'), findsOneWidget);
+    expect(find.text('Pesanan & pembatalan'), findsOneWidget);
     expect(find.text('Persediaan & menu'), findsOneWidget);
     expect(tester.takeException(), isNull);
 

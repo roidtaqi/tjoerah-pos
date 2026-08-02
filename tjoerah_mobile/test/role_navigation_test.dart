@@ -101,6 +101,17 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('owner order history remains grouped under operations', (
+    tester,
+  ) async {
+    await _renderShell(tester, role: 'owner', location: '/orders');
+
+    final navigation = tester.widget<NavigationBar>(find.byType(NavigationBar));
+    expect(navigation.selectedIndex, 1);
+    expect(find.text('Operasional'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('every role shell fits the SM T220 landscape viewport', (
     tester,
   ) async {

@@ -99,7 +99,9 @@ class ShellLayout extends ConsumerWidget {
     );
     if (index >= 0) return index;
 
-    if (currentLocation == '/kds' || currentLocation == '/outlets') {
+    if (currentLocation == '/kds' ||
+        currentLocation == '/outlets' ||
+        currentLocation == '/orders') {
       final operations = destinations.indexWhere(
         (destination) => destination.path == '/operations',
       );

@@ -116,6 +116,16 @@ class OperationsScreen extends ConsumerWidget {
                   padding: EdgeInsets.zero,
                   child: Column(
                     children: [
+                      if (canCancelOrdersForUser(user)) ...[
+                        AppListTile(
+                          title: 'Pesanan & pembatalan',
+                          subtitle:
+                              'Cari transaksi, kelola open bill, refund, dan pembatalan',
+                          icon: Icons.receipt_long_outlined,
+                          onTap: () => context.go('/orders'),
+                        ),
+                        const Divider(),
+                      ],
                       AppListTile(
                         title: 'Absensi saya',
                         subtitle:
