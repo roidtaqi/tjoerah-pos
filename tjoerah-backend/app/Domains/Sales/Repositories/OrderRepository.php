@@ -37,7 +37,7 @@ class OrderRepository
 
         foreach ($data->items as $item) {
             $order->items()->create([
-                'product_id' => $item['product_id'],
+                'product_id' => $item['product_id'] ?? null,
                 'product_variant_id' => $item['product_variant_id'] ?? null,
                 'snapshot_name' => $item['snapshot_name'],
                 'snapshot_price' => $item['snapshot_price'],
@@ -53,12 +53,20 @@ class OrderRepository
         }
 
         if (! $data->isOpenBill) {
-            $order->payments()->create([
-                'method' => $data->paymentMethod,
-                'amount' => $data->total,
-                'status' => 'completed',
-                'paid_at' => now(),
-            ]);
+            $paymentBreakdown = collect($data->meta['payment_breakdown'] ?? [])
+                ->map(fn ($amount) => (float) $amount)
+                ->filter(fn ($amount) => $amount > 0);
+            if ($paymentBreakdown->isEmpty()) {
+                $paymentBreakdown = collect([$data->paymentMethod => $data->total]);
+            }
+            foreach ($paymentBreakdown as $method => $amount) {
+                $order->payments()->create([
+                    'method' => $method,
+                    'amount' => $amount,
+                    'status' => 'completed',
+                    'paid_at' => now(),
+                ]);
+            }
         }
 
         if (! $data->isOpenBill && $data->customerId) {

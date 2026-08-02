@@ -15,12 +15,18 @@ class TransactionSettings {
 
   double get effectiveTaxRate => taxEnabled ? taxRate : 0;
 
-  factory TransactionSettings.fromJson(Map<String, dynamic> json) {
+  factory TransactionSettings.fromJson(
+    Map<String, dynamic> json, {
+    String kdsModeFallback = 'manual',
+  }) {
+    final rawKdsMode = json['kds_mode']?.toString();
     return TransactionSettings(
       outletId: _integer(json['outlet_id']),
       taxEnabled: _boolean(json['tax_enabled'], fallback: true),
       taxRate: _number(json['tax_rate'], fallback: 11).clamp(0, 100),
-      kdsMode: json['kds_mode']?.toString() ?? 'manual',
+      kdsMode: const {'manual', 'automatic'}.contains(rawKdsMode)
+          ? rawKdsMode!
+          : kdsModeFallback,
     );
   }
 

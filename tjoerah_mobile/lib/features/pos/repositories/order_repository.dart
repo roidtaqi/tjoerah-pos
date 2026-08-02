@@ -73,7 +73,9 @@ class OrderRepository {
     final itemPayloads = items
         .map(
           (item) => {
-            'product_id': int.tryParse(item.productId) ?? item.productId,
+            if (!item.isManual)
+              'product_id': int.tryParse(item.productId) ?? item.productId,
+            if (item.isManual) 'is_manual': true,
             'snapshot_name': item.name,
             'snapshot_price': item.price,
             'qty': item.quantity,
@@ -231,7 +233,9 @@ class OrderRepository {
     final itemPayloads = items
         .map(
           (item) => <String, dynamic>{
-            'product_id': int.tryParse(item.productId) ?? item.productId,
+            if (!item.isManual)
+              'product_id': int.tryParse(item.productId) ?? item.productId,
+            if (item.isManual) 'is_manual': true,
             'snapshot_name': item.name,
             'snapshot_price': item.price,
             'qty': item.quantity,

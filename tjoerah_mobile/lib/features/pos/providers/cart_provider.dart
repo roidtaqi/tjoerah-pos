@@ -7,6 +7,7 @@ class CartItem {
     required this.price,
     this.station,
     this.quantity = 1,
+    this.isManual = false,
   });
 
   final String productId;
@@ -14,6 +15,7 @@ class CartItem {
   final double price;
   final String? station;
   final int quantity;
+  final bool isManual;
 
   double get total => price * quantity;
 
@@ -24,6 +26,7 @@ class CartItem {
       price: price,
       station: station,
       quantity: quantity ?? this.quantity,
+      isManual: isManual,
     );
   }
 }
@@ -242,6 +245,23 @@ class CartNotifier extends Notifier<CartState> {
           name: name,
           price: price,
           station: station,
+        ),
+      ],
+    );
+  }
+
+  void addManualItem(String description, double price, {int quantity = 1}) {
+    final itemId = 'manual-${DateTime.now().microsecondsSinceEpoch}';
+    state = state.copyWith(
+      items: [
+        ...state.items,
+        CartItem(
+          productId: itemId,
+          name: description.trim(),
+          price: price,
+          station: 'cashier',
+          quantity: quantity,
+          isManual: true,
         ),
       ],
     );

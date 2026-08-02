@@ -61,7 +61,7 @@ class OrderService
                 $submittedAt = now();
                 foreach ($items as $item) {
                     $lockedOrder->items()->create([
-                        'product_id' => $item['product_id'],
+                        'product_id' => $item['product_id'] ?? null,
                         'product_variant_id' => $item['product_variant_id'] ?? null,
                         'snapshot_name' => $item['snapshot_name'],
                         'snapshot_price' => $item['snapshot_price'],
@@ -166,6 +166,11 @@ class OrderService
         $order->loadMissing('outlet');
         $automatic = ($order->outlet?->kds_mode ?? 'manual') === 'automatic';
         $itemsByStation = ($items ?? $order->items)
+            ->filter(fn ($item) => in_array(
+                strtolower((string) ($item->station ?: 'kitchen')),
+                ['bar', 'kitchen'],
+                true,
+            ))
             ->groupBy(fn ($item) => $item->station ?: 'kitchen');
         $tickets = collect();
 

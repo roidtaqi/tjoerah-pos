@@ -136,6 +136,27 @@ void main() {
     expect(order.paymentMethods, ['cash', 'qris']);
   });
 
+  test('uses split payment metadata from legacy server records', () {
+    final order = OrderHistoryItem.fromApi({
+      'id': 'legacy-split-order',
+      'receipt_number': 'TJ-SPLIT-LEGACY',
+      'status': 'paid',
+      'total': 50000,
+      'created_at': '2026-08-02T10:00:00Z',
+      'items': const [],
+      'payments': [
+        {'method': 'split', 'amount': 50000},
+      ],
+      'meta': {
+        'payment_breakdown': {'cash': 20000, 'qris': 30000},
+      },
+    });
+
+    expect(order.paymentMethod, 'split');
+    expect(order.paymentBreakdown, {'cash': 20000, 'qris': 30000});
+    expect(order.paymentSummary, 'Tunai + QRIS');
+  });
+
   test('recognizes a local open bill separately from sync status', () {
     final order = OrderHistoryItem.fromRow({
       'id': 'open-order',

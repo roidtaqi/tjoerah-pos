@@ -98,6 +98,34 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('cashier can add a described manual item to the cart', (
+    tester,
+  ) async {
+    await _render(
+      tester,
+      size: const Size(1007, 700),
+      screen: const PosScreen(),
+      overrides: [catalogProvider.overrideWith(_EmptyCatalogNotifier.new)],
+    );
+
+    await tester.tap(find.text('Item manual'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Deskripsi item'),
+      'Biaya dekorasi',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Harga satuan'),
+      '15000',
+    );
+    await tester.tap(find.text('Tambahkan ke pesanan'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Biaya dekorasi'), findsOneWidget);
+    expect(find.text('Item manual'), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('empty catalog fits the short SM T220 landscape viewport', (
     tester,
   ) async {
@@ -328,9 +356,15 @@ void main() {
       ],
     );
     expect(find.text('Pesanan hari ini'), findsOneWidget);
+    expect(find.text('Metode pembayaran hari ini'), findsOneWidget);
+    expect(find.text('Tunai'), findsWidgets);
+    expect(find.text('QRIS'), findsOneWidget);
+    expect(find.text('Kartu debit'), findsOneWidget);
     expect(find.text('TJ-260715-090001'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
+    await tester.drag(find.byType(ListView).first, const Offset(0, -360));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('TJ-260715-090001'));
     await tester.pumpAndSettle();
     expect(find.text('Cetak ulang'), findsOneWidget);

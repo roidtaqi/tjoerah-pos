@@ -21,11 +21,18 @@ void main() {
         quantity: 1,
         unitPrice: 18000,
       ),
+      const PrintOrderItem(
+        name: 'Biaya dekorasi',
+        quantity: 1,
+        unitPrice: 15000,
+        station: 'cashier',
+      ),
     ]);
 
     expect(order.itemsByStation.keys, containsAll(['bar', 'kitchen']));
     expect(order.itemsByStation['bar'], hasLength(1));
     expect(order.itemsByStation['kitchen'], hasLength(2));
+    expect(order.itemsByStation.containsKey('cashier'), isFalse);
     expect(productionStationLabel('kitchen'), 'Dapur');
     expect(productionStationLabel('bar'), 'Bar');
   });

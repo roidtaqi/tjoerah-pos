@@ -56,6 +56,20 @@ class _TaxFormState extends ConsumerState<_TaxForm> {
   }
 
   @override
+  void didUpdateWidget(covariant _TaxForm oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.settings.taxEnabled != widget.settings.taxEnabled) {
+      _enabled = widget.settings.taxEnabled;
+    }
+    if (oldWidget.settings.taxRate != widget.settings.taxRate) {
+      _rate.text = _formatRate(widget.settings.taxRate);
+    }
+    if (oldWidget.settings.kdsMode != widget.settings.kdsMode) {
+      _manualKds = widget.settings.manualKds;
+    }
+  }
+
+  @override
   void dispose() {
     _rate.dispose();
     super.dispose();
@@ -112,17 +126,49 @@ class _TaxFormState extends ConsumerState<_TaxForm> {
               ),
               const SizedBox(height: 14),
               AppCard(
-                padding: EdgeInsets.zero,
-                child: SwitchListTile(
-                  value: _manualKds,
-                  title: const Text('Konfirmasi KDS manual'),
-                  subtitle: Text(
-                    _manualKds
-                        ? 'Tim produksi mengubah status pesanan dari antrean hingga selesai.'
-                        : 'Tiket produksi langsung dicatat selesai tanpa konfirmasi status.',
-                  ),
-                  secondary: const Icon(Icons.soup_kitchen_outlined),
-                  onChanged: (value) => setState(() => _manualKds = value),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.soup_kitchen_outlined),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'Alur KDS',
+                            style: theme.textTheme.titleMedium,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    SegmentedButton<bool>(
+                      segments: const [
+                        ButtonSegment(
+                          value: false,
+                          icon: Icon(Icons.bolt_rounded),
+                          label: Text('Otomatis'),
+                        ),
+                        ButtonSegment(
+                          value: true,
+                          icon: Icon(Icons.touch_app_outlined),
+                          label: Text('KDS manual'),
+                        ),
+                      ],
+                      selected: {_manualKds},
+                      showSelectedIcon: false,
+                      onSelectionChanged: (selection) {
+                        setState(() => _manualKds = selection.first);
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      _manualKds
+                          ? 'Status antrean diubah oleh tim produksi.'
+                          : 'Tiket produksi langsung diselesaikan otomatis.',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: 14),

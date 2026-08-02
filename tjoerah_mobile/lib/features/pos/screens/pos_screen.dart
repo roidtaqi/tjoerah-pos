@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_layout.dart';
 import '../../../shared/components/app_badge.dart';
 import '../../../shared/components/app_bottom_sheet.dart';
+import '../../../shared/components/app_button.dart';
 import '../../../shared/components/app_search_bar.dart';
 import '../providers/cart_provider.dart';
 import '../providers/catalog_provider.dart';
@@ -153,10 +155,36 @@ class _CatalogPane extends ConsumerWidget {
         children: [
           const _OrderContextBar(),
           const SizedBox(height: 16),
-          AppSearchBar(
-            hintText: 'Cari nama produk atau SKU',
-            onChanged: ref.read(catalogProvider.notifier).search,
-            onClear: () => ref.read(catalogProvider.notifier).search(''),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final search = AppSearchBar(
+                hintText: 'Cari nama produk atau SKU',
+                onChanged: ref.read(catalogProvider.notifier).search,
+                onClear: () => ref.read(catalogProvider.notifier).search(''),
+              );
+              final manualItemButton = OutlinedButton.icon(
+                onPressed: () => _showManualItem(context, ref),
+                icon: const Icon(Icons.edit_note_rounded),
+                label: const Text('Item manual'),
+              );
+              if (constraints.maxWidth < 560) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    search,
+                    const SizedBox(height: 8),
+                    SizedBox(height: 44, child: manualItemButton),
+                  ],
+                );
+              }
+              return Row(
+                children: [
+                  Expanded(child: search),
+                  const SizedBox(width: 10),
+                  SizedBox(height: 48, child: manualItemButton),
+                ],
+              );
+            },
           ),
           const SizedBox(height: 12),
           const CategoryChips(),
@@ -165,6 +193,161 @@ class _CatalogPane extends ConsumerWidget {
       ),
     );
   }
+
+  Future<void> _showManualItem(BuildContext context, WidgetRef ref) async {
+    final draft = await AppBottomSheet.show<_ManualItemDraft>(
+      context,
+      title: 'Tambah item manual',
+      child: const _ManualItemForm(),
+    );
+    if (draft == null || !context.mounted) return;
+
+    ref
+        .read(cartProvider.notifier)
+        .addManualItem(
+          draft.description,
+          draft.price,
+          quantity: draft.quantity,
+        );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Item manual ditambahkan.')));
+  }
+}
+
+class _ManualItemForm extends StatefulWidget {
+  const _ManualItemForm();
+
+  @override
+  State<_ManualItemForm> createState() => _ManualItemFormState();
+}
+
+class _ManualItemFormState extends State<_ManualItemForm> {
+  final _formKey = GlobalKey<FormState>();
+  final _description = TextEditingController();
+  final _price = TextEditingController();
+  int _quantity = 1;
+
+  @override
+  void dispose() {
+    _description.dispose();
+    _price.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextFormField(
+              controller: _description,
+              autofocus: true,
+              textCapitalization: TextCapitalization.sentences,
+              maxLength: 100,
+              decoration: const InputDecoration(
+                labelText: 'Deskripsi item',
+                prefixIcon: Icon(Icons.description_outlined),
+              ),
+              validator: (value) {
+                final description = (value ?? '').trim();
+                if (description.isEmpty) return 'Deskripsi wajib diisi';
+                if (description.length < 3) {
+                  return 'Deskripsi minimal 3 karakter';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _price,
+              keyboardType: TextInputType.number,
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly,
+                LengthLimitingTextInputFormatter(10),
+              ],
+              decoration: const InputDecoration(
+                labelText: 'Harga satuan',
+                prefixText: 'Rp ',
+                prefixIcon: Icon(Icons.payments_outlined),
+              ),
+              validator: (value) {
+                final price = double.tryParse(value ?? '');
+                if (price == null || price <= 0) {
+                  return 'Harga wajib lebih dari 0';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 18),
+            Text('Jumlah', style: theme.textTheme.labelLarge),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                IconButton.outlined(
+                  tooltip: 'Kurangi jumlah',
+                  onPressed: _quantity == 1
+                      ? null
+                      : () => setState(() => _quantity--),
+                  icon: const Icon(Icons.remove_rounded),
+                ),
+                SizedBox(
+                  width: 64,
+                  child: Text(
+                    '$_quantity',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.titleLarge,
+                  ),
+                ),
+                IconButton.outlined(
+                  tooltip: 'Tambah jumlah',
+                  onPressed: _quantity == 99
+                      ? null
+                      : () => setState(() => _quantity++),
+                  icon: const Icon(Icons.add_rounded),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            AppButton(
+              text: 'Tambahkan ke pesanan',
+              icon: Icons.add_shopping_cart_rounded,
+              onPressed: _submit,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _submit() {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    Navigator.pop(
+      context,
+      _ManualItemDraft(
+        description: _description.text.trim(),
+        price: double.parse(_price.text),
+        quantity: _quantity,
+      ),
+    );
+  }
+}
+
+class _ManualItemDraft {
+  const _ManualItemDraft({
+    required this.description,
+    required this.price,
+    required this.quantity,
+  });
+
+  final String description;
+  final double price;
+  final int quantity;
 }
 
 class _OrderContextBar extends ConsumerWidget {

@@ -97,6 +97,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
       0,
       (sum, order) => sum + order.total - order.refundedAmount,
     );
+    final paymentSummaries = _summarizePayments(paidToday);
     final normalized = _query.trim().toLowerCase();
     final filtered = orders.where((order) {
       final matchesFilter = switch (_filter) {
@@ -126,6 +127,11 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
             revenue: _currency.format(revenue),
             pendingCount: pending,
             openBillCount: openBills,
+          ),
+          const SizedBox(height: 12),
+          _PaymentSummaryTable(
+            summaries: paymentSummaries,
+            currency: _currency,
           ),
           const SizedBox(height: 20),
           AppSearchBar(
@@ -1310,6 +1316,182 @@ class _Metrics extends StatelessWidget {
     );
   }
 }
+
+class _PaymentSummaryTable extends StatelessWidget {
+  const _PaymentSummaryTable({required this.summaries, required this.currency});
+
+  final List<_PaymentMethodSummary> summaries;
+  final NumberFormat currency;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AppCard(
+      padding: EdgeInsets.zero,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Metode pembayaran hari ini',
+                    style: theme.textTheme.titleMedium,
+                  ),
+                ),
+                Text('Transaksi', style: theme.textTheme.labelMedium),
+                const SizedBox(width: 28),
+                SizedBox(
+                  width: 112,
+                  child: Text(
+                    'Nominal',
+                    textAlign: TextAlign.end,
+                    style: theme.textTheme.labelMedium,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Divider(height: 1, color: theme.colorScheme.outlineVariant),
+          ...summaries.indexed.map((entry) {
+            final (index, summary) = entry;
+            return Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 11,
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 34,
+                        height: 34,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: _paymentColor(summary.method),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(
+                          _paymentIcon(summary.method),
+                          size: 19,
+                          color: _paymentTextColor(summary.method),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          summary.label,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      SizedBox(
+                        width: 64,
+                        child: Text(
+                          '${summary.transactionCount}',
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      SizedBox(
+                        width: 112,
+                        child: Text(
+                          currency.format(summary.amount),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.end,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (index != summaries.length - 1)
+                  Divider(
+                    height: 1,
+                    indent: 60,
+                    color: theme.colorScheme.outlineVariant,
+                  ),
+              ],
+            );
+          }),
+        ],
+      ),
+    );
+  }
+}
+
+class _PaymentMethodSummary {
+  const _PaymentMethodSummary({
+    required this.method,
+    required this.label,
+    required this.transactionCount,
+    required this.amount,
+  });
+
+  final String method;
+  final String label;
+  final int transactionCount;
+  final double amount;
+}
+
+List<_PaymentMethodSummary> _summarizePayments(
+  Iterable<OrderHistoryItem> orders,
+) {
+  final amounts = <String, double>{'cash': 0, 'qris': 0, 'debit': 0};
+  final counts = <String, int>{'cash': 0, 'qris': 0, 'debit': 0};
+
+  for (final order in orders) {
+    final breakdown = order.paymentBreakdown.isNotEmpty
+        ? order.paymentBreakdown
+        : {order.paymentMethod: order.total};
+    final methodsInOrder = <String>{};
+    for (final entry in breakdown.entries) {
+      final method = _normalizedPaymentMethod(entry.key);
+      if (method == null || entry.value <= 0) continue;
+      amounts[method] = (amounts[method] ?? 0) + entry.value;
+      methodsInOrder.add(method);
+    }
+    for (final method in methodsInOrder) {
+      counts[method] = (counts[method] ?? 0) + 1;
+    }
+  }
+
+  return [
+    _PaymentMethodSummary(
+      method: 'cash',
+      label: 'Tunai',
+      transactionCount: counts['cash']!,
+      amount: amounts['cash']!,
+    ),
+    _PaymentMethodSummary(
+      method: 'qris',
+      label: 'QRIS',
+      transactionCount: counts['qris']!,
+      amount: amounts['qris']!,
+    ),
+    _PaymentMethodSummary(
+      method: 'debit',
+      label: 'Kartu debit',
+      transactionCount: counts['debit']!,
+      amount: amounts['debit']!,
+    ),
+  ];
+}
+
+String? _normalizedPaymentMethod(String method) =>
+    switch (method.trim().toLowerCase()) {
+      'cash' => 'cash',
+      'qris' => 'qris',
+      'debit' || 'debit_card' || 'card' => 'debit',
+      _ => null,
+    };
 
 class _OrderRow extends StatelessWidget {
   const _OrderRow({

@@ -44,6 +44,22 @@ void main() {
     expect(container.read(cartProvider).customerName, isNull);
   });
 
+  test('manual items stay separate and do not use a production station', () {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    final cart = container.read(cartProvider.notifier);
+
+    cart.addManualItem('Biaya dekorasi', 15000, quantity: 2);
+    cart.addManualItem('Biaya dekorasi', 15000);
+
+    final items = container.read(cartProvider).items;
+    expect(items, hasLength(2));
+    expect(items.first.isManual, isTrue);
+    expect(items.first.station, 'cashier');
+    expect(items.first.total, 30000);
+    expect(items.first.productId, startsWith('manual-'));
+  });
+
   test('cart applies configurable tax after the order discount', () {
     final container = ProviderContainer();
     addTearDown(container.dispose);

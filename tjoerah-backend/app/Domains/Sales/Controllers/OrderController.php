@@ -69,13 +69,14 @@ class OrderController extends Controller
             'table_id' => 'nullable|integer|exists:tables,id',
             'order_type' => 'nullable|string|in:dine_in,take_away,delivery',
             'items' => 'required|array|min:1',
-            'items.*.product_id' => 'required|integer|exists:products,id',
+            'items.*.product_id' => 'nullable|integer|exists:products,id',
+            'items.*.is_manual' => 'nullable|boolean',
             'items.*.product_variant_id' => 'nullable|integer|exists:product_variants,id',
-            'items.*.snapshot_name' => 'required|string',
-            'items.*.snapshot_price' => 'required|numeric',
+            'items.*.snapshot_name' => 'required|string|max:255',
+            'items.*.snapshot_price' => 'required|numeric|min:0',
             'items.*.qty' => 'required|integer|min:1',
-            'items.*.total' => 'required|numeric',
-            'items.*.station' => 'nullable|string',
+            'items.*.total' => 'required|numeric|min:0',
+            'items.*.station' => 'nullable|string|max:50',
             'items.*.modifiers' => 'nullable|array',
             'items.*.notes' => 'nullable|string',
             'subtotal' => 'required|numeric',
@@ -89,6 +90,7 @@ class OrderController extends Controller
             'meta' => 'nullable|array',
         ]);
 
+        $validated['items'] = $this->normalizeOrderItems($validated['items']);
         $outlet = Outlet::findOrFail($validated['outlet_id']);
         $this->ensureOutletIsAccessible($request, $outlet);
         $subtotal = round(collect($validated['items'])->sum(
@@ -101,6 +103,18 @@ class OrderController extends Controller
         $total = round($subtotal - $discount + $tax + $serviceCharge, 2);
         $isOpenBill = (bool) ($validated['is_open_bill'] ?? false);
         $meta = $validated['meta'] ?? [];
+        $paymentBreakdown = collect($meta['payment_breakdown'] ?? [])
+            ->map(fn ($amount) => (float) $amount)
+            ->filter(fn ($amount) => $amount > 0)
+            ->all();
+        if (! $isOpenBill && $paymentBreakdown && abs(array_sum($paymentBreakdown) - $total) > 0.01) {
+            throw ValidationException::withMessages([
+                'meta.payment_breakdown' => 'Rincian pembayaran harus sama dengan total tagihan.',
+            ]);
+        }
+        if ($paymentBreakdown) {
+            $meta['payment_breakdown'] = $paymentBreakdown;
+        }
         $meta['tax_rate'] = $taxRate;
 
         $dto = new OrderData(
@@ -138,7 +152,8 @@ class OrderController extends Controller
         $validated = $request->validate([
             'client_append_id' => 'required|string|max:100',
             'items' => 'required|array|min:1',
-            'items.*.product_id' => 'required|integer|exists:products,id',
+            'items.*.product_id' => 'nullable|integer|exists:products,id',
+            'items.*.is_manual' => 'nullable|boolean',
             'items.*.product_variant_id' => 'nullable|integer|exists:product_variants,id',
             'items.*.snapshot_name' => 'required|string|max:255',
             'items.*.snapshot_price' => 'required|numeric|min:0',
@@ -149,6 +164,7 @@ class OrderController extends Controller
             'items.*.notes' => 'nullable|string|max:1000',
         ]);
 
+        $validated['items'] = $this->normalizeOrderItems($validated['items']);
         $result = $this->orderService->appendOpenBill(
             $order,
             $validated['items'],
@@ -158,10 +174,39 @@ class OrderController extends Controller
         return response()->json([
             'message' => $result['duplicate']
                 ? 'Tambahan open bill ini sudah diterima sebelumnya.'
-                : 'Tambahan open bill berhasil dikirim ke produksi.',
+                : 'Tambahan open bill berhasil disimpan.',
             'data' => $result['order'],
             'submission_batch' => $result['batch'],
         ], $result['duplicate'] ? 200 : 201);
+    }
+
+    private function normalizeOrderItems(array $items): array
+    {
+        return collect($items)->map(function (array $item, int $index) {
+            $isManual = (bool) ($item['is_manual'] ?? false);
+            if (! $isManual && empty($item['product_id'])) {
+                throw ValidationException::withMessages([
+                    "items.{$index}.product_id" => 'Produk wajib dipilih untuk item katalog.',
+                ]);
+            }
+
+            if ($isManual) {
+                $item['product_id'] = null;
+                $item['product_variant_id'] = null;
+                $item['station'] = 'cashier';
+                $item['total'] = round(
+                    (float) $item['snapshot_price'] * (int) $item['qty'],
+                    2,
+                );
+                $item['modifiers'] = array_merge($item['modifiers'] ?? [], [
+                    'manual_item' => true,
+                ]);
+            }
+
+            unset($item['is_manual']);
+
+            return $item;
+        })->all();
     }
 
     private function findExistingOrder(Request $request): ?Order

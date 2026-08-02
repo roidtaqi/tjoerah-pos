@@ -76,18 +76,21 @@ class PaymentController extends Controller
                 ]);
             }
 
-            $locked->payments()->create([
-                'method' => $validated['method'],
-                'amount' => $paidAmount,
-                'status' => 'completed',
-                'reference_number' => $validated['reference_number'] ?? null,
-                'meta' => [
-                    'payment_breakdown' => $breakdown,
-                    'amount_received' => $validated['amount_received'] ?? null,
-                    'change' => $validated['change'] ?? 0,
-                ],
-                'paid_at' => now(),
-            ]);
+            $payments = $breakdown ?: [$validated['method'] => $paidAmount];
+            foreach ($payments as $method => $amount) {
+                $locked->payments()->create([
+                    'method' => $method,
+                    'amount' => $amount,
+                    'status' => 'completed',
+                    'reference_number' => $validated['reference_number'] ?? null,
+                    'meta' => [
+                        'payment_breakdown' => $breakdown,
+                        'amount_received' => $validated['amount_received'] ?? null,
+                        'change' => $validated['change'] ?? 0,
+                    ],
+                    'paid_at' => now(),
+                ]);
+            }
 
             $meta = $locked->meta ?? [];
             $meta['payment_breakdown'] = $breakdown;

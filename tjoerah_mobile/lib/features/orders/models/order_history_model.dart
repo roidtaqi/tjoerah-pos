@@ -237,6 +237,12 @@ class OrderHistoryItem {
       final method = payment['method']?.toString() ?? 'unknown';
       payments[method] = (payments[method] ?? 0) + _number(payment['amount']);
     }
+    final metaPayments = meta['payment_breakdown'] is Map
+        ? Map<String, dynamic>.from(
+            meta['payment_breakdown'] as Map,
+          ).map((method, amount) => MapEntry(method, _number(amount)))
+        : <String, double>{};
+    final paymentBreakdown = metaPayments.isNotEmpty ? metaPayments : payments;
     final items = rawItems.whereType<Map>().map((rawItem) {
       final item = Map<String, dynamic>.from(rawItem);
       return OrderHistoryLine(
@@ -263,7 +269,9 @@ class OrderHistoryItem {
       receiptNumber: json['receipt_number']?.toString() ?? '-',
       orderType: json['order_type']?.toString() ?? 'take_away',
       paymentMethod:
-          payments.keys.firstOrNull ??
+          (paymentBreakdown.length > 1
+              ? 'split'
+              : paymentBreakdown.keys.firstOrNull) ??
           (json['status']?.toString() == 'open' ? 'open_bill' : 'unknown'),
       total: _number(json['total']),
       subtotal: _number(json['subtotal']),
@@ -291,7 +299,7 @@ class OrderHistoryItem {
         cancellation['cancelled_at']?.toString() ?? '',
       ),
       items: items,
-      paymentBreakdown: payments,
+      paymentBreakdown: paymentBreakdown,
     );
   }
 

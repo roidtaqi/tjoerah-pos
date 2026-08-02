@@ -151,6 +151,32 @@ class OrderApiTest extends TestCase
         $this->assertDatabaseCount('orders', 1);
     }
 
+    public function test_split_payment_is_stored_by_actual_payment_method(): void
+    {
+        [$user, $outlet, $product] = $this->createOrderContext();
+        $this->actingAs($user, 'api');
+        $payload = $this->orderPayload(
+            $outlet->id,
+            $product->id,
+            'RCP-SPLIT',
+            'client-split',
+        );
+        $payload['payment_method'] = 'split';
+        $payload['meta']['payment_breakdown'] = [
+            'cash' => 15000,
+            'qris' => 20000,
+        ];
+
+        $this->postJson('/api/orders', $payload)
+            ->assertCreated()
+            ->assertJsonCount(2, 'data.payments')
+            ->assertJsonPath('data.payments.0.method', 'cash')
+            ->assertJsonPath('data.payments.1.method', 'qris');
+
+        $this->assertDatabaseHas('payments', ['method' => 'cash', 'amount' => 15000]);
+        $this->assertDatabaseHas('payments', ['method' => 'qris', 'amount' => 20000]);
+    }
+
     public function test_customer_statistics_and_history_are_updated_once(): void
     {
         [$user, $outlet, $product] = $this->createOrderContext();
@@ -299,6 +325,74 @@ class OrderApiTest extends TestCase
             'outlet_id' => $outlet->id,
             'status' => 'completed',
         ]);
+    }
+
+    public function test_manual_item_is_charged_without_inventory_or_production_ticket(): void
+    {
+        [$user, $outlet] = $this->createOrderContext();
+        $this->actingAs($user, 'api');
+
+        $response = $this->postJson('/api/orders', [
+            'outlet_id' => $outlet->id,
+            'order_type' => 'take_away',
+            'receipt_number' => 'RCP-MANUAL-001',
+            'subtotal' => 30000,
+            'tax' => 0,
+            'total' => 30000,
+            'payment_method' => 'cash',
+            'items' => [[
+                'is_manual' => true,
+                'snapshot_name' => 'Biaya dekorasi ulang tahun',
+                'snapshot_price' => 15000,
+                'qty' => 2,
+                'total' => 1,
+                'station' => 'kitchen',
+            ]],
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('data.total', 30000)
+            ->assertJsonPath('data.items.0.product_id', null)
+            ->assertJsonPath('data.items.0.station', 'cashier')
+            ->assertJsonPath('data.items.0.total', 30000)
+            ->assertJsonCount(0, 'data.kitchen_tickets');
+
+        $this->assertDatabaseHas('order_items', [
+            'snapshot_name' => 'Biaya dekorasi ulang tahun',
+            'product_id' => null,
+            'station' => 'cashier',
+            'total' => 30000,
+            'cogs_total' => 0,
+        ]);
+        $this->assertDatabaseCount('kitchen_tickets', 0);
+        $this->assertNotNull(
+            Order::where('receipt_number', 'RCP-MANUAL-001')
+                ->firstOrFail()
+                ->items()
+                ->firstOrFail()
+                ->inventory_deducted_at,
+        );
+    }
+
+    public function test_catalog_item_still_requires_a_product(): void
+    {
+        [$user, $outlet] = $this->createOrderContext();
+        $this->actingAs($user, 'api');
+
+        $this->postJson('/api/orders', [
+            'outlet_id' => $outlet->id,
+            'receipt_number' => 'RCP-NO-PRODUCT',
+            'payment_method' => 'cash',
+            'subtotal' => 10000,
+            'total' => 10000,
+            'items' => [[
+                'snapshot_name' => 'Item tanpa produk',
+                'snapshot_price' => 10000,
+                'qty' => 1,
+                'total' => 10000,
+            ]],
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors('items.0.product_id');
     }
 
     public function test_outlet_tax_setting_is_used_as_server_source_of_truth(): void

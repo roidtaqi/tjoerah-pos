@@ -47,6 +47,15 @@ class DeductInventoryOnOrderSubmission
             // 2. Loop over order items to find recipes and deduct raw materials
             foreach ($items as $orderItem) {
                 $cogsTotal = 0.0;
+                if (! $orderItem->product_id) {
+                    $orderItem->update([
+                        'cogs_total' => $cogsTotal,
+                        'inventory_deducted_at' => now(),
+                    ]);
+
+                    continue;
+                }
+
                 if (! $warehouse) {
                     $orderItem->update([
                         'cogs_total' => $cogsTotal,

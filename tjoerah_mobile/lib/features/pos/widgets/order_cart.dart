@@ -291,6 +291,13 @@ class _CartItemRow extends ConsumerWidget {
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
+              if (item.isManual) ...[
+                const SizedBox(height: 5),
+                const AppBadge(
+                  text: 'Item manual',
+                  icon: Icons.edit_note_rounded,
+                ),
+              ],
             ],
           ),
         ),
@@ -678,8 +685,8 @@ class _OrderTotalsState extends ConsumerState<_OrderTotals> {
       builder: (dialogContext) => AlertDialog(
         title: const Text('Buat open bill?'),
         content: const Text(
-          'Pesanan akan disimpan sebagai belum dibayar dan dikirim ke dapur. '
-          'Stok bahan dikurangi satu kali saat pesanan berhasil dikirim.',
+          'Pesanan akan disimpan sebagai belum dibayar. Produk bar atau dapur '
+          'dikirim ke stasiun produksi dan stok bahannya dikurangi satu kali.',
         ),
         actions: [
           TextButton(
@@ -750,7 +757,7 @@ class _OrderTotalsState extends ConsumerState<_OrderTotals> {
             title: const Text('Open bill tersimpan'),
             content: Text(
               created.isSynced
-                  ? 'Pesanan sudah dikirim ke dapur. Cetak tagihan belum lunas untuk pelanggan bila diperlukan.'
+                  ? 'Open bill sudah tersimpan. Cetak tagihan belum lunas untuk pelanggan bila diperlukan.'
                   : 'Pesanan tersimpan di perangkat dan akan dikirim ke server saat sinkronisasi.',
             ),
             actions: [
@@ -806,7 +813,8 @@ class _OrderTotalsState extends ConsumerState<_OrderTotals> {
         title: const Text('Kirim tambahan?'),
         content: Text(
           '${cart.items.length} item baru akan ditambahkan ke '
-          '${cart.openBill!.receiptNumber} dan dikirim ke stasiun produksi.',
+          '${cart.openBill!.receiptNumber}. Produk bar atau dapur dikirim ke '
+          'stasiun produksi.',
         ),
         actions: [
           TextButton(
