@@ -177,6 +177,56 @@ class OrderApiTest extends TestCase
         $this->assertDatabaseHas('payments', ['method' => 'qris', 'amount' => 20000]);
     }
 
+    public function test_order_history_can_filter_a_period_and_keep_old_open_bills(): void
+    {
+        [$user, $outlet, $product] = $this->createOrderContext();
+        $this->actingAs($user, 'api');
+
+        $this->postJson('/api/orders', $this->orderPayload(
+            $outlet->id,
+            $product->id,
+            'RCP-TODAY',
+            'client-today',
+        ))->assertCreated();
+
+        $oldPaid = $this->postJson('/api/orders', $this->orderPayload(
+            $outlet->id,
+            $product->id,
+            'RCP-OLD-PAID',
+            'client-old-paid',
+        ))->assertCreated();
+
+        $openPayload = $this->orderPayload(
+            $outlet->id,
+            $product->id,
+            'RCP-OLD-OPEN',
+            'client-old-open',
+        );
+        unset($openPayload['payment_method']);
+        $openPayload['is_open_bill'] = true;
+        $oldOpen = $this->postJson('/api/orders', $openPayload)->assertCreated();
+
+        Order::whereKey($oldPaid->json('data.id'))->update([
+            'created_at' => now()->subDays(3),
+        ]);
+        Order::whereKey($oldOpen->json('data.id'))->update([
+            'created_at' => now()->subDays(3),
+        ]);
+
+        $query = http_build_query([
+            'created_from' => now()->startOfDay()->toIso8601String(),
+            'created_to' => now()->addDay()->startOfDay()->toIso8601String(),
+            'include_open' => 1,
+        ]);
+        $response = $this->getJson("/api/orders?{$query}")->assertOk();
+        $receipts = collect($response->json('data'))->pluck('receipt_number');
+
+        $this->assertCount(2, $receipts);
+        $this->assertTrue($receipts->contains('RCP-TODAY'));
+        $this->assertTrue($receipts->contains('RCP-OLD-OPEN'));
+        $this->assertFalse($receipts->contains('RCP-OLD-PAID'));
+    }
+
     public function test_customer_statistics_and_history_are_updated_once(): void
     {
         [$user, $outlet, $product] = $this->createOrderContext();

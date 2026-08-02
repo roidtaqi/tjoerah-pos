@@ -12,6 +12,7 @@ use App\Domains\Sales\DTOs\OrderData;
 use App\Domains\Sales\Services\OrderCancellationService;
 use App\Domains\Sales\Services\OrderService;
 use App\Http\Controllers\Controller;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -31,7 +32,18 @@ class OrderController extends Controller
             'outlet_id' => 'nullable|integer|exists:outlets,id',
             'status' => 'nullable|string|max:50',
             'q' => 'nullable|string|max:255',
+            'created_from' => 'nullable|required_with:created_to|date',
+            'created_to' => 'nullable|required_with:created_from|date|after:created_from',
+            'include_open' => 'nullable|boolean',
         ]);
+
+        $createdFrom = $request->filled('created_from')
+            ? Carbon::parse($request->string('created_from')->toString())->utc()
+            : null;
+        $createdTo = $request->filled('created_to')
+            ? Carbon::parse($request->string('created_to')->toString())->utc()
+            : null;
+        $includeOpen = $request->boolean('include_open');
 
         return Order::with(['items', 'payments', 'refunds'])
             ->when(
@@ -42,6 +54,16 @@ class OrderController extends Controller
                 ),
             )
             ->when($request->integer('outlet_id'), fn ($query, $outletId) => $query->where('outlet_id', $outletId))
+            ->when($createdFrom || $createdTo, function ($query) use ($createdFrom, $createdTo, $includeOpen) {
+                $query->where(function ($period) use ($createdFrom, $createdTo, $includeOpen) {
+                    $period
+                        ->when($createdFrom, fn ($range, $from) => $range->where('created_at', '>=', $from))
+                        ->when($createdTo, fn ($range, $to) => $range->where('created_at', '<', $to));
+                    if ($includeOpen) {
+                        $period->orWhereIn('status', ['open', 'held']);
+                    }
+                });
+            })
             ->when($request->string('status')->trim()->isNotEmpty(), fn ($query) => $query->where('status', $request->string('status')->trim()->toString()))
             ->when($request->string('q')->trim()->isNotEmpty(), function ($query) use ($request) {
                 $term = $request->string('q')->trim()->toString();

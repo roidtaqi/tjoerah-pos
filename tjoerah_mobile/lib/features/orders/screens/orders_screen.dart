@@ -41,12 +41,20 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
   String _query = '';
   _OrderFilter _filter = _OrderFilter.all;
   bool _isMutating = false;
+  late DateTimeRange _dateRange;
 
   final _currency = NumberFormat.currency(
     locale: 'id_ID',
     symbol: 'Rp ',
     decimalDigits: 0,
   );
+
+  @override
+  void initState() {
+    super.initState();
+    final today = DateUtils.dateOnly(DateTime.now());
+    _dateRange = DateTimeRange(start: today, end: today);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -57,9 +65,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
         actions: [
           IconButton(
             tooltip: 'Muat ulang',
-            onPressed: _isMutating
-                ? null
-                : () => ref.read(orderHistoryProvider.notifier).refresh(),
+            onPressed: _isMutating ? null : _refreshOrders,
             icon: const Icon(Icons.refresh_rounded),
           ),
           const SizedBox(width: 4),
@@ -75,7 +81,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
         loading: () => const AppLoadingState(message: 'Memuat pesanan...'),
         error: (error, _) => AppErrorState(
           message: 'Riwayat lokal belum dapat dibaca.',
-          onRetry: () => ref.read(orderHistoryProvider.notifier).refresh(),
+          onRetry: _refreshOrders,
         ),
         data: _buildContent,
       ),
@@ -84,20 +90,20 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
 
   Widget _buildContent(List<OrderHistoryItem> orders) {
     final today = DateTime.now();
-    final todayOrders = orders.where(
-      (order) =>
-          order.createdAt.year == today.year &&
-          order.createdAt.month == today.month &&
-          order.createdAt.day == today.day,
+    final periodOrders = orders.where(
+      (order) => _isWithinDateRange(order.createdAt),
     );
-    final pending = orders.where((order) => order.isPending).length;
+    final pending = periodOrders.where((order) => order.isPending).length;
     final openBills = orders.where((order) => order.isOpenBill).length;
-    final paidToday = todayOrders.where((order) => order.isPaid);
-    final revenue = paidToday.fold<double>(
+    final paidPeriod = periodOrders.where((order) => order.isPaid);
+    final revenue = paidPeriod.fold<double>(
       0,
       (sum, order) => sum + order.total - order.refundedAmount,
     );
-    final paymentSummaries = _summarizePayments(paidToday);
+    final paymentSummaries = _summarizePayments(paidPeriod);
+    final isToday =
+        _isSingleDay(_dateRange) &&
+        DateUtils.isSameDay(_dateRange.start, today);
     final normalized = _query.trim().toLowerCase();
     final filtered = orders.where((order) {
       final matchesFilter = switch (_filter) {
@@ -106,6 +112,13 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
         _OrderFilter.synced => !order.isPending,
         _OrderFilter.pending => order.isPending,
       };
+      final matchesDate =
+          _isWithinDateRange(order.createdAt) ||
+          (order.isOpenBill &&
+              const {
+                _OrderFilter.all,
+                _OrderFilter.openBill,
+              }.contains(_filter));
       final matchesQuery =
           normalized.isEmpty ||
           order.receiptNumber.toLowerCase().contains(normalized) ||
@@ -113,25 +126,34 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
           order.items.any(
             (item) => item.name.toLowerCase().contains(normalized),
           );
-      return matchesFilter && matchesQuery;
+      return matchesFilter && matchesDate && matchesQuery;
     }).toList();
 
     return RefreshIndicator(
-      onRefresh: () => ref.read(orderHistoryProvider.notifier).refresh(),
+      onRefresh: _refreshOrders,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: AppSpacing.page(context),
         children: [
+          _DateRangeToolbar(
+            label: _dateRangeLabel(_dateRange),
+            isToday: isToday,
+            onSelect: _selectDateRange,
+            onToday: _showToday,
+          ),
+          const SizedBox(height: 12),
           _Metrics(
-            orderCount: paidToday.length,
+            orderCount: paidPeriod.length,
             revenue: _currency.format(revenue),
             pendingCount: pending,
             openBillCount: openBills,
+            isToday: isToday,
           ),
           const SizedBox(height: 12),
           _PaymentSummaryTable(
             summaries: paymentSummaries,
             currency: _currency,
+            isToday: isToday,
           ),
           const SizedBox(height: 20),
           AppSearchBar(
@@ -175,7 +197,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
                   : 'Pesanan tidak ditemukan',
               message: orders.isEmpty
                   ? 'Transaksi yang selesai akan muncul di sini.'
-                  : 'Ubah kata pencarian atau status pesanan.',
+                  : 'Ubah periode, kata pencarian, atau status pesanan.',
               icon: Icons.receipt_long_outlined,
             )
           else
@@ -193,6 +215,37 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _refreshOrders() => ref
+      .read(orderHistoryProvider.notifier)
+      .refresh(dateFrom: _dateRange.start, dateTo: _dateRange.end);
+
+  Future<void> _selectDateRange() async {
+    final selected = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateUtils.dateOnly(DateTime.now()),
+      initialDateRange: _dateRange,
+      helpText: 'PILIH PERIODE PESANAN',
+      cancelText: 'BATAL',
+      confirmText: 'TERAPKAN',
+      saveText: 'TERAPKAN',
+    );
+    if (selected == null || !mounted) return;
+    setState(() => _dateRange = selected);
+    await _refreshOrders();
+  }
+
+  Future<void> _showToday() async {
+    final today = DateUtils.dateOnly(DateTime.now());
+    setState(() => _dateRange = DateTimeRange(start: today, end: today));
+    await _refreshOrders();
+  }
+
+  bool _isWithinDateRange(DateTime value) {
+    final date = DateUtils.dateOnly(value.toLocal());
+    return !date.isBefore(_dateRange.start) && !date.isAfter(_dateRange.end);
   }
 
   void _showDetail(OrderHistoryItem order) {
@@ -1239,18 +1292,90 @@ class _OpenBillPaymentDraft {
   final double change;
 }
 
+class _DateRangeToolbar extends StatelessWidget {
+  const _DateRangeToolbar({
+    required this.label,
+    required this.isToday,
+    required this.onSelect,
+    required this.onToday,
+  });
+
+  final String label;
+  final bool isToday;
+  final VoidCallback onSelect;
+  final VoidCallback onToday;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final title = Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.calendar_month_outlined,
+              size: 20,
+              color: theme.colorScheme.primary,
+            ),
+            const SizedBox(width: 8),
+            Text('Periode pesanan', style: theme.textTheme.titleMedium),
+          ],
+        );
+        final controls = Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            OutlinedButton.icon(
+              onPressed: onSelect,
+              icon: const Icon(Icons.date_range_outlined),
+              label: Text(label, overflow: TextOverflow.ellipsis),
+            ),
+            if (!isToday) ...[
+              const SizedBox(width: 6),
+              IconButton(
+                tooltip: 'Kembali ke hari ini',
+                onPressed: onToday,
+                icon: const Icon(Icons.today_outlined),
+              ),
+            ],
+          ],
+        );
+        if (constraints.maxWidth < 560) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              title,
+              const SizedBox(height: 10),
+              Align(alignment: Alignment.centerLeft, child: controls),
+            ],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: title),
+            const SizedBox(width: 12),
+            controls,
+          ],
+        );
+      },
+    );
+  }
+}
+
 class _Metrics extends StatelessWidget {
   const _Metrics({
     required this.orderCount,
     required this.revenue,
     required this.pendingCount,
     required this.openBillCount,
+    required this.isToday,
   });
 
   final int orderCount;
   final String revenue;
   final int pendingCount;
   final int openBillCount;
+  final bool isToday;
 
   @override
   Widget build(BuildContext context) {
@@ -1270,7 +1395,7 @@ class _Metrics extends StatelessWidget {
               width: width,
               height: 112,
               child: AppMetricCard(
-                title: 'Pesanan hari ini',
+                title: isToday ? 'Pesanan hari ini' : 'Pesanan periode',
                 value: '$orderCount',
                 icon: Icons.receipt_long_outlined,
                 iconColor: AppColors.info,
@@ -1280,7 +1405,7 @@ class _Metrics extends StatelessWidget {
               width: width,
               height: 112,
               child: AppMetricCard(
-                title: 'Penjualan hari ini',
+                title: isToday ? 'Penjualan hari ini' : 'Penjualan periode',
                 value: revenue,
                 icon: Icons.payments_outlined,
                 iconColor: AppColors.success,
@@ -1318,10 +1443,15 @@ class _Metrics extends StatelessWidget {
 }
 
 class _PaymentSummaryTable extends StatelessWidget {
-  const _PaymentSummaryTable({required this.summaries, required this.currency});
+  const _PaymentSummaryTable({
+    required this.summaries,
+    required this.currency,
+    required this.isToday,
+  });
 
   final List<_PaymentMethodSummary> summaries;
   final NumberFormat currency;
+  final bool isToday;
 
   @override
   Widget build(BuildContext context) {
@@ -1336,7 +1466,9 @@ class _PaymentSummaryTable extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    'Metode pembayaran hari ini',
+                    isToday
+                        ? 'Metode pembayaran hari ini'
+                        : 'Metode pembayaran periode',
                     style: theme.textTheme.titleMedium,
                   ),
                 ),
@@ -1492,6 +1624,19 @@ String? _normalizedPaymentMethod(String method) =>
       'debit' || 'debit_card' || 'card' => 'debit',
       _ => null,
     };
+
+bool _isSingleDay(DateTimeRange range) =>
+    DateUtils.isSameDay(range.start, range.end);
+
+String _dateRangeLabel(DateTimeRange range) {
+  if (_isSingleDay(range)) {
+    return DateUtils.isSameDay(range.start, DateTime.now())
+        ? 'Hari ini, ${AppDateFormatter.shortDate(range.start)}'
+        : AppDateFormatter.shortDate(range.start);
+  }
+  return '${AppDateFormatter.shortDate(range.start)} - '
+      '${AppDateFormatter.shortDate(range.end)}';
+}
 
 class _OrderRow extends StatelessWidget {
   const _OrderRow({

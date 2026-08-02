@@ -356,15 +356,20 @@ void main() {
       ],
     );
     expect(find.text('Pesanan hari ini'), findsOneWidget);
+    expect(find.text('Periode pesanan'), findsOneWidget);
+    expect(find.textContaining('Hari ini,'), findsOneWidget);
     expect(find.text('Metode pembayaran hari ini'), findsOneWidget);
     expect(find.text('Tunai'), findsWidgets);
     expect(find.text('QRIS'), findsOneWidget);
     expect(find.text('Kartu debit'), findsOneWidget);
-    expect(find.text('TJ-260715-090001'), findsOneWidget);
+    expect(find.text('TJ-OLD-001'), findsNothing);
     expect(tester.takeException(), isNull);
 
-    await tester.drag(find.byType(ListView).first, const Offset(0, -360));
-    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('TJ-260715-090001'),
+      260,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.tap(find.text('TJ-260715-090001'));
     await tester.pumpAndSettle();
     expect(find.text('Cetak ulang'), findsOneWidget);
@@ -1016,6 +1021,25 @@ class _PreviewOrderHistoryNotifier extends OrderHistoryNotifier {
           quantity: 1,
           price: 42000,
           total: 42000,
+        ),
+      ],
+    ),
+    OrderHistoryItem(
+      id: 'order-old',
+      serverId: 'server-order-old',
+      receiptNumber: 'TJ-OLD-001',
+      orderType: 'take_away',
+      paymentMethod: 'qris',
+      total: 45000,
+      createdAt: DateTime.now().subtract(const Duration(days: 10)),
+      syncStatus: 'synced',
+      paymentBreakdown: const {'qris': 45000},
+      items: const [
+        OrderHistoryLine(
+          name: 'Produk lama',
+          quantity: 1,
+          price: 45000,
+          total: 45000,
         ),
       ],
     ),

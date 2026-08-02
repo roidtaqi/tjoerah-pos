@@ -18,6 +18,9 @@ class OrderHistoryMutationResult {
 }
 
 class OrderHistoryNotifier extends AsyncNotifier<List<OrderHistoryItem>> {
+  DateTime? _dateFrom;
+  DateTime? _dateTo;
+
   @override
   Future<List<OrderHistoryItem>> build() => _loadLocal();
 
@@ -30,14 +33,39 @@ class OrderHistoryNotifier extends AsyncNotifier<List<OrderHistoryItem>> {
     return rows.map(OrderHistoryItem.fromRow).toList();
   }
 
-  Future<void> refresh() async {
-    final local = state.asData?.value ?? await _loadLocal();
+  Future<void> refresh({DateTime? dateFrom, DateTime? dateTo}) async {
+    if (dateFrom != null && dateTo != null) {
+      _dateFrom = _dateOnly(dateFrom);
+      _dateTo = _dateOnly(dateTo);
+    }
+    final local = await _loadLocalForPeriod(
+      dateFrom: _dateFrom,
+      dateTo: _dateTo,
+      includeOpenBills: true,
+    );
     state = const AsyncValue.loading();
     try {
-      state = AsyncValue.data(await _loadRemote(local));
+      state = AsyncValue.data(
+        await _loadRemote(local, dateFrom: _dateFrom, dateTo: _dateTo),
+      );
     } catch (_) {
       state = AsyncValue.data(local);
     }
+  }
+
+  Future<List<OrderHistoryItem>> _loadLocalForPeriod({
+    DateTime? dateFrom,
+    DateTime? dateTo,
+    bool includeOpenBills = false,
+  }) async {
+    final orders = await _loadLocal();
+    if (dateFrom == null || dateTo == null) return orders;
+    final endExclusive = dateTo.add(const Duration(days: 1));
+    return orders.where((order) {
+      final createdAt = order.createdAt.toLocal();
+      return (includeOpenBills && order.isOpenBill) ||
+          (!createdAt.isBefore(dateFrom) && createdAt.isBefore(endExclusive));
+    }).toList();
   }
 
   Future<OrderHistoryMutationResult> refundOrder({
@@ -179,9 +207,22 @@ class OrderHistoryNotifier extends AsyncNotifier<List<OrderHistoryItem>> {
   }
 
   Future<List<OrderHistoryItem>> _loadRemote(
-    List<OrderHistoryItem> local,
-  ) async {
-    final response = await ApiClient.get('/orders?per_page=100');
+    List<OrderHistoryItem> local, {
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) async {
+    final query = <String, String>{'per_page': '100'};
+    if (dateFrom != null && dateTo != null) {
+      query['created_from'] = dateFrom.toUtc().toIso8601String();
+      query['created_to'] = dateTo
+          .add(const Duration(days: 1))
+          .toUtc()
+          .toIso8601String();
+      query['include_open'] = '1';
+    }
+    final response = await ApiClient.get(
+      '/orders?${Uri(queryParameters: query).query}',
+    );
     if (response.statusCode != 200) throw Exception(response.body);
     final decoded = Map<String, dynamic>.from(jsonDecode(response.body) as Map);
     final rows = decoded['data'] as List? ?? const [];
@@ -214,6 +255,9 @@ final orderHistoryProvider =
     AsyncNotifierProvider<OrderHistoryNotifier, List<OrderHistoryItem>>(
       OrderHistoryNotifier.new,
     );
+
+DateTime _dateOnly(DateTime value) =>
+    DateTime(value.year, value.month, value.day);
 
 final customerOrderHistoryProvider = FutureProvider.autoDispose
     .family<List<OrderHistoryItem>, String>((ref, customerId) async {
