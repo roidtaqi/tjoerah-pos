@@ -80,6 +80,7 @@ class TransactionPrintData {
     for (final item in items) {
       final station = item.station?.trim().toLowerCase();
       final key = station == null || station.isEmpty ? 'kitchen' : station;
+      if (key != 'kitchen' && key != 'bar') continue;
       groups.putIfAbsent(key, () => []).add(item);
     }
     return groups;

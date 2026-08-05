@@ -23,6 +23,7 @@ class SyncManager {
     String operation,
     String entityType,
     Map<String, dynamic> payload,
+  ) async {
     final db = await DatabaseHelper.instance.database;
 
     final syncItem = {
@@ -99,7 +100,7 @@ class SyncManager {
         'sync_queue',
         {
           'retry_count': currentRetry,
-          'status': currentRetry >= 5 ? 'FAILED' : 'PENDING'
+          'status': currentRetry >= 5 ? 'FAILED' : 'PENDING',
         },
         where: 'id = ?',
         whereArgs: [item['id']],
