@@ -1,0 +1,19 @@
+name: blue_thermal_printer
+description: Android-only Bluetooth Classic transport used by Tjoerah POS.
+version: 1.2.3+1
+publish_to: none
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+  flutter: ">=3.24.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: id.kakzaki.blue_thermal_printer
+        pluginClass: BlueThermalPrinterPlugin

@@ -1,7 +1,7 @@
-import 'package:blue_thermal_printer/blue_thermal_printer.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tjoerah_mobile/core/printer/printer_device.dart';
 import 'package:tjoerah_mobile/core/printer/printer_profile.dart';
 import 'package:tjoerah_mobile/core/theme/app_theme.dart';
 import 'package:tjoerah_mobile/features/settings/providers/printer_provider.dart';
@@ -9,7 +9,7 @@ import 'package:tjoerah_mobile/features/settings/screens/printer_settings_screen
 
 void main() {
   testWidgets(
-    'printer picker distinguishes duplicate names with MAC addresses',
+    'printer picker distinguishes duplicate names with device identifiers',
     (tester) async {
       tester.view.devicePixelRatio = 1;
       tester.view.physicalSize = const Size(390, 844);
@@ -29,15 +29,15 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('MTP-II'), findsOneWidget);
-      expect(find.text('MAC AA:BB:CC:01'), findsOneWidget);
+      expect(find.text('ID AA:BB:CC:01'), findsOneWidget);
 
       await tester.tap(find.text('MTP-II'));
       await tester.pumpAndSettle();
 
       expect(find.text('Pilih printer kasir'), findsOneWidget);
       expect(find.text('MTP-II'), findsNWidgets(3));
-      expect(find.text('MAC AA:BB:CC:01'), findsWidgets);
-      expect(find.text('MAC AA:BB:CC:02'), findsOneWidget);
+      expect(find.text('ID AA:BB:CC:01'), findsWidgets);
+      expect(find.text('ID AA:BB:CC:02'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );
@@ -47,8 +47,8 @@ class _PrinterSettingsTestNotifier extends PrinterNotifier {
   @override
   PrinterState build() => PrinterState(
     devices: [
-      BluetoothDevice('MTP-II', 'AA:BB:CC:01'),
-      BluetoothDevice('MTP-II', 'AA:BB:CC:02'),
+      const PrinterDevice(name: 'MTP-II', identifier: 'AA:BB:CC:01'),
+      const PrinterDevice(name: 'MTP-II', identifier: 'AA:BB:CC:02'),
     ],
     profiles: {
       PrinterDestination.cashier: PrinterProfile.defaults(

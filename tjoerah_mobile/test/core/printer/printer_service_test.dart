@@ -34,7 +34,7 @@ void main() {
     },
   );
 
-  test('connection is reused only for the same printer MAC address', () {
+  test('connection is reused only for the same printer identifier', () {
     expect(
       canReusePrinterConnection(
         nativeConnected: true,
@@ -62,5 +62,12 @@ void main() {
       ),
       isFalse,
     );
+  });
+
+  test('Bluetooth printing is supported on Android and iOS', () {
+    expect(isPrinterPlatformSupported(TargetPlatform.android), isTrue);
+    expect(isPrinterPlatformSupported(TargetPlatform.iOS), isTrue);
+    expect(isPrinterPlatformSupported(TargetPlatform.linux), isFalse);
+    expect(isPrinterPlatformSupported(TargetPlatform.windows), isFalse);
   });
 }

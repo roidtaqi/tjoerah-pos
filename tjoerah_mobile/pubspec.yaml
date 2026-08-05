@@ -1,5 +1,5 @@
 name: tjoerah_mobile
-description: "A new Flutter project."
+description: "Aplikasi POS, operasional, dan manajemen outlet Tjoerah."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -45,7 +45,10 @@ dependencies:
   flutter_riverpod: ^3.3.2
   pusher_client_socket: ^0.0.8
   image: ^4.9.1
-  blue_thermal_printer: ^1.2.3
+  blue_thermal_printer:
+    path: packages/blue_thermal_printer_android
+  universal_ble: ^2.0.1
+  esc_pos_utils_plus: ^2.0.4
   fl_chart: ^1.2.0
   intl: ^0.20.3
   permission_handler: ^12.0.3

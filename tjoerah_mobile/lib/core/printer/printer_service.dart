@@ -1,10 +1,13 @@
-import 'package:blue_thermal_printer/blue_thermal_printer.dart';
+import 'package:blue_thermal_printer/blue_thermal_printer.dart' as classic;
+import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:universal_ble/universal_ble.dart';
 
 import 'print_job.dart';
+import 'printer_device.dart';
 import 'printer_profile.dart';
 
 class PrinterException implements Exception {
@@ -24,63 +27,116 @@ class PrinterService {
     'com.tjoerah.tjoerah_mobile/system',
   );
 
-  final BlueThermalPrinter _printer = BlueThermalPrinter.instance;
+  final classic.BlueThermalPrinter _androidPrinter =
+      classic.BlueThermalPrinter.instance;
+  final Future<CapabilityProfile> _capabilityProfile = CapabilityProfile.load();
   String? _connectedAddress;
 
   static const Duration _deviceSwitchDelay = Duration(milliseconds: 350);
 
-  Future<List<BluetoothDevice>> getDevices() async {
+  Future<List<PrinterDevice>> getDevices() async {
     await _prepareBluetooth();
     try {
-      final bondedDevices = await _printer.getBondedDevices();
-      final devicesByAddress = <String, BluetoothDevice>{};
-      for (final device in bondedDevices) {
-        final address = normalizePrinterAddress(device.address);
-        if (address.isEmpty) continue;
-        devicesByAddress[address] = BluetoothDevice(device.name, address);
+      if (defaultTargetPlatform == TargetPlatform.android) {
+        return _getAndroidDevices();
       }
-      final devices = devicesByAddress.values.toList()
-        ..sort((left, right) {
-          final leftName = left.name?.trim().toLowerCase() ?? '';
-          final rightName = right.name?.trim().toLowerCase() ?? '';
-          final byName = leftName.compareTo(rightName);
-          return byName != 0
-              ? byName
-              : normalizePrinterAddress(
-                  left.address,
-                ).compareTo(normalizePrinterAddress(right.address));
-        });
-      return devices;
+      return _getIosDevices();
     } catch (error) {
+      if (error is PrinterException) rethrow;
       throw PrinterException('Perangkat Bluetooth tidak dapat dibaca: $error');
     }
   }
 
-  Future<void> openBluetoothSettings() async {
-    _ensureAndroid();
-    try {
-      final opened = await _systemChannel.invokeMethod<bool>(
-        'openBluetoothSettings',
+  Future<List<PrinterDevice>> _getAndroidDevices() async {
+    final bondedDevices = await _androidPrinter.getBondedDevices();
+    return _sortedDevices(
+      bondedDevices.map(
+        (device) => PrinterDevice(
+          name: device.name ?? 'Printer tanpa nama',
+          identifier: device.address ?? '',
+        ),
+      ),
+    );
+  }
+
+  Future<List<PrinterDevice>> _getIosDevices() async {
+    final devicesByAddress = <String, PrinterDevice>{};
+    void addDevice(BleDevice device) {
+      final address = normalizePrinterAddress(device.deviceId);
+      final name = device.name?.trim();
+      if (address.isEmpty || name == null || name.isEmpty) return;
+      devicesByAddress[address] = PrinterDevice(
+        name: name,
+        identifier: address,
       );
+    }
+
+    final subscription = UniversalBle.scanStream.listen(addDevice);
+    try {
+      for (final device in await UniversalBle.getSystemDevices()) {
+        addDevice(device);
+      }
+      await UniversalBle.startScan();
+      await Future<void>.delayed(const Duration(seconds: 5));
+    } finally {
+      try {
+        await UniversalBle.stopScan();
+      } finally {
+        await subscription.cancel();
+      }
+    }
+    return _sortedDevices(devicesByAddress.values);
+  }
+
+  List<PrinterDevice> _sortedDevices(Iterable<PrinterDevice> source) {
+    final devicesByAddress = <String, PrinterDevice>{};
+    for (final device in source) {
+      final normalized = device.normalized();
+      final address = normalized.identifier;
+      if (address.isEmpty) continue;
+      devicesByAddress[address] = normalized;
+    }
+    final devices = devicesByAddress.values.toList()
+      ..sort((left, right) {
+        final byName = left.name.toLowerCase().compareTo(
+          right.name.toLowerCase(),
+        );
+        return byName != 0
+            ? byName
+            : left.identifier.compareTo(right.identifier);
+      });
+    return devices;
+  }
+
+  Future<void> openBluetoothSettings() async {
+    _ensureSupportedPlatform();
+    try {
+      final opened = defaultTargetPlatform == TargetPlatform.iOS
+          ? await openAppSettings()
+          : await _systemChannel.invokeMethod<bool>('openBluetoothSettings');
       if (opened != true) {
         throw const PrinterException(
           'Perangkat tidak dapat membuka pengaturan Bluetooth.',
         );
       }
     } catch (error) {
+      if (error is PrinterException) rethrow;
       throw PrinterException('Pengaturan Bluetooth tidak dapat dibuka: $error');
     }
   }
 
-  Future<void> connect(BluetoothDevice device) async {
+  Future<void> connect(PrinterDevice device) async {
     await _prepareBluetooth();
-    final targetAddress = normalizePrinterAddress(device.address);
+    final normalizedDevice = device.normalized();
+    final targetAddress = normalizedDevice.identifier;
     if (targetAddress.isEmpty) {
-      throw const PrinterException('Alamat printer Bluetooth tidak tersedia.');
+      throw const PrinterException('ID printer Bluetooth tidak tersedia.');
     }
 
     try {
-      final nativeConnected = await _printer.isConnected == true;
+      final nativeConnected = await _nativeConnected(
+        fallbackAddress: targetAddress,
+      );
       if (canReusePrinterConnection(
         nativeConnected: nativeConnected,
         connectedAddress: _connectedAddress,
@@ -90,18 +146,27 @@ class PrinterService {
       }
 
       if (nativeConnected) {
-        await _printer.disconnect();
+        await _disconnectNative(targetAddress);
         _connectedAddress = null;
         await Future<void>.delayed(_deviceSwitchDelay);
       } else {
         _connectedAddress = null;
       }
 
-      await _printer.connect(BluetoothDevice(device.name, targetAddress));
-      final connected = await _printer.isConnected == true;
+      if (defaultTargetPlatform == TargetPlatform.android) {
+        await _androidPrinter.connect(
+          classic.BluetoothDevice(normalizedDevice.name, targetAddress),
+        );
+      } else {
+        await UniversalBle.connect(
+          targetAddress,
+          timeout: const Duration(seconds: 20),
+        );
+      }
+      final connected = await _nativeConnected(fallbackAddress: targetAddress);
       if (!connected) {
         throw PrinterException(
-          'Koneksi ke ${device.name ?? 'printer'} tidak aktif.',
+          'Koneksi ke ${normalizedDevice.name} tidak aktif.',
         );
       }
       _connectedAddress = targetAddress;
@@ -109,18 +174,19 @@ class PrinterService {
       _connectedAddress = null;
       if (error is PrinterException) rethrow;
       throw PrinterException(
-        'Tidak dapat terhubung ke ${device.name ?? 'printer'}: $error',
+        'Tidak dapat terhubung ke ${normalizedDevice.name}: $error',
       );
     }
   }
 
   Future<void> disconnect() async {
     try {
-      if (await _printer.isConnected == true) {
-        await _printer.disconnect();
+      if (await _nativeConnected()) {
+        await _disconnectNative(_connectedAddress);
         await Future<void>.delayed(_deviceSwitchDelay);
       }
     } catch (error) {
+      if (error is PrinterException) rethrow;
       throw PrinterException('Printer tidak dapat diputuskan: $error');
     } finally {
       _connectedAddress = null;
@@ -132,12 +198,12 @@ class PrinterService {
     required PrinterPaperWidth paperWidth,
     required bool cutPaper,
   }) async {
-    await _ensureConnected();
+    final document = await _newDocument(paperWidth);
     final width = paperWidth.characters;
     try {
-      await _printer.printNewLine();
-      await _printer.printCustom('TJOERAH POS', 2, 1);
-      await _printer.printCustom(
+      document.newLine();
+      document.text('TJOERAH POS', size: 2, align: PosAlign.center);
+      document.text(
         order.isCancelled
             ? 'BUKTI PEMBATALAN'
             : order.isOpenBill
@@ -147,54 +213,50 @@ class PrinterService {
             : order.isReprint
             ? 'SALINAN STRUK'
             : 'STRUK PEMBAYARAN',
-        1,
-        1,
+        size: 1,
+        align: PosAlign.center,
       );
       if (order.isCancelled) {
-        await _printer.printCustom('DIBATALKAN', 2, 1);
+        document.text('DIBATALKAN', size: 2, align: PosAlign.center);
       } else if (order.isOpenBill) {
-        await _printer.printCustom('BELUM LUNAS', 2, 1);
+        document.text('BELUM LUNAS', size: 2, align: PosAlign.center);
       }
-      await _printer.printNewLine();
-      await _printer.printCustom('No: ${order.receiptNumber}', 0, 0);
-      await _printer.printCustom('Waktu: ${_dateTime(order.createdAt)}', 0, 0);
-      await _printer.printCustom('Pesanan: ${order.orderTypeLabel}', 0, 0);
+      document.newLine();
+      document.text('No: ${order.receiptNumber}');
+      document.text('Waktu: ${_dateTime(order.createdAt)}');
+      document.text('Pesanan: ${order.orderTypeLabel}');
       if (_hasText(order.tableName)) {
-        await _printer.printCustom('Meja: ${order.tableName}', 0, 0);
+        document.text('Meja: ${order.tableName}');
       }
       if (_hasText(order.customerName)) {
-        await _printer.printCustom('Pelanggan: ${order.customerName}', 0, 0);
+        document.text('Pelanggan: ${order.customerName}');
       }
-      await _printer.printCustom(_separator(width), 0, 1);
+      document.text(_separator(width), align: PosAlign.center);
 
       for (final item in order.items) {
-        await _printer.printCustom('${item.quantity}x ${item.name}', 0, 0);
-        await _printColumns(
+        document.text('${item.quantity}x ${item.name}');
+        document.columns(
           '@ ${_money(item.unitPrice)}',
           _money(item.total),
           width,
         );
       }
 
-      await _printer.printCustom(_separator(width), 0, 1);
-      await _printColumns('Subtotal', _money(order.subtotal), width);
+      document.text(_separator(width), align: PosAlign.center);
+      document.columns('Subtotal', _money(order.subtotal), width);
       if (order.discount > 0) {
-        await _printColumns('Diskon', '-${_money(order.discount)}', width);
+        document.columns('Diskon', '-${_money(order.discount)}', width);
       }
-      await _printColumns('Pajak', _money(order.tax), width);
-      await _printColumns('TOTAL', _money(order.total), width, size: 1);
-      await _printer.printCustom(_separator(width), 0, 1);
+      document.columns('Pajak', _money(order.tax), width);
+      document.columns('TOTAL', _money(order.total), width, size: 1);
+      document.text(_separator(width), align: PosAlign.center);
       if (order.isOpenBill) {
-        await _printer.printCustom('Status: BELUM DIBAYAR', 1, 0);
+        document.text('Status: BELUM DIBAYAR', size: 1);
       } else {
-        await _printer.printCustom(
-          'Pembayaran: ${order.paymentMethodLabel}',
-          0,
-          0,
-        );
+        document.text('Pembayaran: ${order.paymentMethodLabel}');
         if (order.paymentMethod == 'split') {
           for (final entry in order.paymentBreakdown.entries) {
-            await _printColumns(
+            document.columns(
               _paymentLabel(entry.key),
               _money(entry.value),
               width,
@@ -203,30 +265,25 @@ class PrinterService {
         }
       }
       if (order.amountReceived != null) {
-        await _printColumns('Diterima', _money(order.amountReceived!), width);
-        await _printColumns('Kembali', _money(order.change), width);
+        document.columns('Diterima', _money(order.amountReceived!), width);
+        document.columns('Kembali', _money(order.change), width);
       }
       if (_hasText(order.note)) {
-        await _printer.printCustom('Catatan: ${order.note}', 0, 0);
+        document.text('Catatan: ${order.note}');
       }
       if (order.isCancelled && _hasText(order.cancellationReason)) {
-        await _printer.printCustom(
-          'Alasan batal: ${order.cancellationReason}',
-          0,
-          0,
-        );
+        document.text('Alasan batal: ${order.cancellationReason}');
       }
-      await _printer.printNewLine();
-      await _printer.printCustom(
+      document.newLine();
+      document.text(
         order.isCancelled
             ? 'TRANSAKSI DIBATALKAN'
             : order.isOpenBill
             ? 'Mohon simpan tagihan ini'
             : 'Terima kasih',
-        0,
-        1,
+        align: PosAlign.center,
       );
-      await _finishDocument(cutPaper);
+      await _writeDocument(document.finish(cutPaper: cutPaper));
     } catch (error) {
       if (error is PrinterException) rethrow;
       throw PrinterException('Struk gagal dicetak: $error');
@@ -240,48 +297,48 @@ class PrinterService {
     required bool cutPaper,
   }) async {
     if (order.isCancelled) {
-      throw PrinterException(
+      throw const PrinterException(
         'Tiket dapur untuk pesanan yang dibatalkan tidak dapat dicetak.',
       );
     }
-    await _ensureConnected();
     final items = order.itemsByStation[station] ?? const <PrintOrderItem>[];
     if (items.isEmpty) return;
 
+    final document = await _newDocument(paperWidth);
     final width = paperWidth.characters;
     try {
-      await _printer.printNewLine();
-      await _printer.printCustom('PESANAN PRODUKSI', 2, 1);
-      await _printer.printCustom(
+      document.newLine();
+      document.text('PESANAN PRODUKSI', size: 2, align: PosAlign.center);
+      document.text(
         productionStationLabel(station).toUpperCase(),
-        2,
-        1,
+        size: 2,
+        align: PosAlign.center,
       );
       if (order.isReprint) {
-        await _printer.printCustom('CETAK ULANG', 1, 1);
+        document.text('CETAK ULANG', size: 1, align: PosAlign.center);
       }
-      await _printer.printNewLine();
-      await _printer.printCustom('No: ${order.receiptNumber}', 1, 0);
-      await _printer.printCustom('Waktu: ${_dateTime(order.createdAt)}', 0, 0);
-      await _printer.printCustom('Tipe: ${order.orderTypeLabel}', 0, 0);
+      document.newLine();
+      document.text('No: ${order.receiptNumber}', size: 1);
+      document.text('Waktu: ${_dateTime(order.createdAt)}');
+      document.text('Tipe: ${order.orderTypeLabel}');
       if (_hasText(order.tableName)) {
-        await _printer.printCustom('MEJA: ${order.tableName}', 2, 0);
+        document.text('MEJA: ${order.tableName}', size: 2);
       }
       if (_hasText(order.customerName)) {
-        await _printer.printCustom('Nama: ${order.customerName}', 0, 0);
+        document.text('Nama: ${order.customerName}');
       }
-      await _printer.printCustom(_separator(width), 0, 1);
+      document.text(_separator(width), align: PosAlign.center);
 
       for (final item in items) {
-        await _printer.printCustom('[ ] ${item.quantity}x ${item.name}', 1, 0);
+        document.text('[ ] ${item.quantity}x ${item.name}', size: 1);
       }
 
       if (_hasText(order.note)) {
-        await _printer.printCustom(_separator(width), 0, 1);
-        await _printer.printCustom('CATATAN:', 1, 0);
-        await _printer.printCustom(order.note!, 1, 0);
+        document.text(_separator(width), align: PosAlign.center);
+        document.text('CATATAN:', size: 1);
+        document.text(order.note!, size: 1);
       }
-      await _finishDocument(cutPaper);
+      await _writeDocument(document.finish(cutPaper: cutPaper));
     } catch (error) {
       if (error is PrinterException) rethrow;
       throw PrinterException('Tiket produksi gagal dicetak: $error');
@@ -289,26 +346,26 @@ class PrinterService {
   }
 
   Future<void> printTestPage(PrinterProfile profile) async {
-    await _ensureConnected();
+    final document = await _newDocument(profile.paperWidth);
     try {
-      await _printer.printNewLine();
-      await _printer.printCustom('TJOERAH POS', 2, 1);
-      await _printer.printCustom('PRINTER SIAP', 1, 1);
-      await _printer.printCustom(profile.destination.title, 1, 1);
+      document.newLine();
+      document.text('TJOERAH POS', size: 2, align: PosAlign.center);
+      document.text('PRINTER SIAP', size: 1, align: PosAlign.center);
+      document.text(profile.destination.title, size: 1, align: PosAlign.center);
       if (profile.deviceName != null) {
-        await _printer.printCustom(profile.deviceName!, 0, 1);
+        document.text(profile.deviceName!, align: PosAlign.center);
       }
       if (profile.deviceAddress != null) {
-        await _printer.printCustom('MAC ${profile.deviceAddress}', 0, 1);
+        document.text('ID ${profile.deviceAddress}', align: PosAlign.center);
       }
-      await _printer.printCustom(
+      document.text(
         'Kertas ${profile.paperWidth.label} - ${profile.copies} salinan',
-        0,
-        1,
+        align: PosAlign.center,
       );
-      await _printer.printCustom(_dateTime(DateTime.now()), 0, 1);
-      await _finishDocument(profile.cutPaper);
+      document.text(_dateTime(DateTime.now()), align: PosAlign.center);
+      await _writeDocument(document.finish(cutPaper: profile.cutPaper));
     } catch (error) {
+      if (error is PrinterException) rethrow;
       throw PrinterException('Cetak tes gagal: $error');
     }
   }
@@ -318,37 +375,36 @@ class PrinterService {
     required PrinterPaperWidth paperWidth,
     required bool cutPaper,
   }) async {
-    await _ensureConnected();
+    final document = await _newDocument(paperWidth);
     final width = paperWidth.characters;
     try {
-      await _printer.printNewLine();
-      await _printer.printCustom('LAPORAN AKHIR SHIFT', 2, 1);
-      await _printer.printCustom('Tanggal: ${report['date']}', 1, 1);
-      await _printer.printNewLine();
-      await _printer.printCustom(
-        'Total pesanan: ${report['total_orders']}',
-        0,
-        0,
+      document.newLine();
+      document.text('LAPORAN AKHIR SHIFT', size: 2, align: PosAlign.center);
+      document.text(
+        'Tanggal: ${report['date']}',
+        size: 1,
+        align: PosAlign.center,
       );
-      await _printer.printCustom(
+      document.newLine();
+      document.text('Total pesanan: ${report['total_orders']}');
+      document.text(
         'Total pendapatan: ${_money(_asDouble(report['total_revenue']))}',
-        1,
-        0,
+        size: 1,
       );
-      await _printer.printCustom(_separator(width), 0, 1);
-      await _printer.printCustom('RINCIAN PEMBAYARAN', 1, 1);
+      document.text(_separator(width), align: PosAlign.center);
+      document.text('RINCIAN PEMBAYARAN', size: 1, align: PosAlign.center);
 
       final breakdown = report['payment_breakdown'];
       if (breakdown is Map) {
         for (final entry in breakdown.entries) {
-          await _printColumns(
+          document.columns(
             _paymentLabel(entry.key.toString()),
             _money(_asDouble(entry.value)),
             width,
           );
         }
       }
-      await _finishDocument(cutPaper);
+      await _writeDocument(document.finish(cutPaper: cutPaper));
     } catch (error) {
       if (error is PrinterException) rethrow;
       throw PrinterException('Laporan shift gagal dicetak: $error');
@@ -356,45 +412,86 @@ class PrinterService {
   }
 
   Future<void> _prepareBluetooth() async {
-    _ensureAndroid();
-    final statuses = await <Permission>[
-      Permission.bluetoothScan,
-      Permission.bluetoothConnect,
-      Permission.locationWhenInUse,
-    ].request();
-    final denied = statuses.values.where((status) => !status.isGranted);
-    if (denied.isNotEmpty) {
-      final permanentlyDenied = statuses.values.any(
-        (status) => status.isPermanentlyDenied,
-      );
-      throw PrinterException(
-        permanentlyDenied
-            ? 'Izin Bluetooth ditolak permanen. Aktifkan dari Pengaturan aplikasi.'
-            : 'Izin Bluetooth diperlukan untuk mencari dan memakai printer.',
-      );
+    _ensureSupportedPlatform();
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      final statuses = await <Permission>[
+        Permission.bluetoothScan,
+        Permission.bluetoothConnect,
+      ].request();
+      final denied = statuses.values.where((status) => !status.isGranted);
+      if (denied.isNotEmpty) {
+        final permanentlyDenied = statuses.values.any(
+          (status) => status.isPermanentlyDenied,
+        );
+        throw PrinterException(
+          permanentlyDenied
+              ? 'Izin Bluetooth ditolak permanen. Aktifkan dari Pengaturan aplikasi.'
+              : 'Izin Bluetooth diperlukan untuk mencari dan memakai printer.',
+        );
+      }
+      if (await _androidPrinter.isAvailable != true) {
+        throw const PrinterException(
+          'Perangkat ini tidak mendukung printer Bluetooth.',
+        );
+      }
+      if (await _androidPrinter.isOn != true) {
+        throw const PrinterException('Bluetooth belum aktif.');
+      }
+      return;
     }
-    if (await _printer.isAvailable != true) {
+
+    try {
+      await UniversalBle.requestPermissions();
+    } catch (_) {
       throw const PrinterException(
-        'Perangkat ini tidak mendukung printer Bluetooth.',
+        'Izin Bluetooth diperlukan untuk mencari dan memakai printer.',
       );
     }
-    if (await _printer.isOn != true) {
-      throw const PrinterException('Bluetooth belum aktif.');
+    final bluetoothState = await UniversalBle.getBluetoothAvailabilityState();
+    switch (bluetoothState) {
+      case AvailabilityState.poweredOn:
+        return;
+      case AvailabilityState.unauthorized:
+        throw const PrinterException(
+          'Izin Bluetooth ditolak. Aktifkan dari Pengaturan aplikasi.',
+        );
+      case AvailabilityState.poweredOff:
+        throw const PrinterException('Bluetooth belum aktif.');
+      case AvailabilityState.unsupported:
+        throw const PrinterException(
+          'Perangkat ini tidak mendukung printer Bluetooth BLE.',
+        );
+      case AvailabilityState.unknown:
+      case AvailabilityState.resetting:
+        throw const PrinterException(
+          'Bluetooth belum siap. Tunggu sebentar lalu muat ulang.',
+        );
     }
   }
 
-  void _ensureAndroid() {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+  void _ensureSupportedPlatform() {
+    if (kIsWeb || !isPrinterPlatformSupported(defaultTargetPlatform)) {
       throw const PrinterException(
-        'Printer Bluetooth hanya tersedia pada perangkat Android.',
+        'Printer Bluetooth tersedia pada perangkat Android dan iOS.',
       );
     }
+  }
+
+  Future<_EscPosDocument> _newDocument(PrinterPaperWidth paperWidth) async {
+    await _ensureConnected();
+    final profile = await _capabilityProfile;
+    return _EscPosDocument(
+      Generator(
+        paperWidth == PrinterPaperWidth.mm58 ? PaperSize.mm58 : PaperSize.mm80,
+        profile,
+      ),
+    );
   }
 
   Future<void> _ensureConnected() async {
-    _ensureAndroid();
+    _ensureSupportedPlatform();
     try {
-      if (await _printer.isConnected != true) {
+      if (!await _nativeConnected()) {
         throw const PrinterException('Printer tujuan belum terhubung.');
       }
     } catch (error) {
@@ -403,34 +500,109 @@ class PrinterService {
     }
   }
 
-  Future<void> _printColumns(
-    String left,
-    String right,
-    int width, {
-    int size = 0,
-  }) async {
-    final rightText = right.length >= width ? right.substring(0, width) : right;
-    final availableLeft = (width - rightText.length - 1).clamp(1, width);
-    final leftText = left.length > availableLeft
-        ? left.substring(0, availableLeft)
-        : left;
-    final spaces = width - leftText.length - rightText.length;
-    await _printer.printCustom(
-      '$leftText${' ' * spaces.clamp(1, width)}$rightText',
-      size,
-      0,
-    );
+  Future<void> _writeDocument(List<int> bytes) async {
+    if (bytes.isEmpty) {
+      throw const PrinterException('Dokumen cetak kosong.');
+    }
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      await _androidPrinter.writeBytes(Uint8List.fromList(bytes));
+      return;
+    }
+    await _writeIosDocument(bytes);
   }
 
-  Future<void> _finishDocument(bool cutPaper) async {
-    await _printer.printNewLine();
-    await _printer.printNewLine();
-    await _printer.printNewLine();
-    if (!cutPaper) return;
+  Future<bool> _nativeConnected({String? fallbackAddress}) async {
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return await _androidPrinter.isConnected == true;
+    }
+    final address = normalizePrinterAddress(
+      _connectedAddress ?? fallbackAddress,
+    );
+    if (address.isEmpty) return false;
     try {
-      await _printer.paperCut();
-    } catch (error) {
-      debugPrint('Paper cut is not supported by this printer: $error');
+      return await UniversalBle.getConnectionState(address) ==
+          BleConnectionState.connected;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _disconnectNative(String? fallbackAddress) async {
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      await _androidPrinter.disconnect();
+      return;
+    }
+    final address = normalizePrinterAddress(
+      _connectedAddress ?? fallbackAddress,
+    );
+    if (address.isNotEmpty) {
+      await UniversalBle.disconnect(
+        address,
+        timeout: const Duration(seconds: 10),
+      );
+    }
+  }
+
+  Future<void> _writeIosDocument(List<int> bytes) async {
+    final address = normalizePrinterAddress(_connectedAddress);
+    if (address.isEmpty) {
+      throw const PrinterException('Printer tujuan belum terhubung.');
+    }
+
+    final services = await UniversalBle.discoverServices(
+      address,
+      timeout: const Duration(seconds: 15),
+    );
+    _BleWriteTarget? target;
+    for (final service in services) {
+      for (final characteristic in service.characteristics) {
+        final supportsResponse = characteristic.properties.contains(
+          CharacteristicProperty.write,
+        );
+        final supportsNoResponse = characteristic.properties.contains(
+          CharacteristicProperty.writeWithoutResponse,
+        );
+        if (supportsResponse || supportsNoResponse) {
+          target = _BleWriteTarget(
+            service: service.uuid,
+            characteristic: characteristic.uuid,
+            withoutResponse: !supportsResponse,
+          );
+          if (supportsResponse) break;
+        }
+      }
+      if (target != null && !target.withoutResponse) break;
+    }
+    if (target == null) {
+      throw const PrinterException(
+        'Printer BLE tidak menyediakan saluran tulis yang kompatibel.',
+      );
+    }
+
+    var mtu = 185;
+    try {
+      mtu = await UniversalBle.requestMtu(
+        address,
+        185,
+        timeout: const Duration(seconds: 8),
+      );
+    } catch (_) {
+      // iOS menentukan MTU sendiri; ukuran konservatif tetap aman.
+    }
+    final chunkSize = (mtu - 3).clamp(20, 150).toInt();
+    for (var offset = 0; offset < bytes.length; offset += chunkSize) {
+      final end = (offset + chunkSize).clamp(0, bytes.length).toInt();
+      await UniversalBle.write(
+        address,
+        target.service,
+        target.characteristic,
+        Uint8List.fromList(bytes.sublist(offset, end)),
+        withoutResponse: target.withoutResponse,
+        timeout: const Duration(seconds: 10),
+      );
+      if (target.withoutResponse) {
+        await Future<void>.delayed(const Duration(milliseconds: 12));
+      }
     }
   }
 
@@ -456,6 +628,63 @@ class PrinterService {
       value is num ? value.toDouble() : double.tryParse('$value') ?? 0;
 }
 
+class _BleWriteTarget {
+  const _BleWriteTarget({
+    required this.service,
+    required this.characteristic,
+    required this.withoutResponse,
+  });
+
+  final String service;
+  final String characteristic;
+  final bool withoutResponse;
+}
+
+class _EscPosDocument {
+  _EscPosDocument(this._generator) {
+    _bytes.addAll(_generator.reset());
+  }
+
+  final Generator _generator;
+  final List<int> _bytes = [];
+
+  void newLine() => _bytes.addAll(_generator.emptyLines(1));
+
+  void text(String value, {int size = 0, PosAlign align = PosAlign.left}) {
+    final large = size >= 2;
+    _bytes.addAll(
+      _generator.text(
+        value,
+        styles: PosStyles(
+          bold: size > 0,
+          align: align,
+          height: large ? PosTextSize.size2 : PosTextSize.size1,
+          width: large ? PosTextSize.size2 : PosTextSize.size1,
+        ),
+      ),
+    );
+  }
+
+  void columns(String left, String right, int width, {int size = 0}) {
+    final rightText = right.length >= width ? right.substring(0, width) : right;
+    final availableLeft = (width - rightText.length - 1).clamp(1, width);
+    final leftText = left.length > availableLeft
+        ? left.substring(0, availableLeft)
+        : left;
+    final spaces = width - leftText.length - rightText.length;
+    text('$leftText${' ' * spaces.clamp(1, width)}$rightText', size: size);
+  }
+
+  List<int> finish({required bool cutPaper}) {
+    if (cutPaper) {
+      _bytes.addAll(_generator.cut());
+    } else {
+      _bytes.addAll(_generator.feed(3));
+    }
+    return List<int>.unmodifiable(_bytes);
+  }
+}
+
 @visibleForTesting
 bool canReusePrinterConnection({
   required bool nativeConnected,
@@ -467,3 +696,7 @@ bool canReusePrinterConnection({
   final target = normalizePrinterAddress(targetAddress);
   return connected.isNotEmpty && connected == target;
 }
+
+@visibleForTesting
+bool isPrinterPlatformSupported(TargetPlatform platform) =>
+    platform == TargetPlatform.android || platform == TargetPlatform.iOS;

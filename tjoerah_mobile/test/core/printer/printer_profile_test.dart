@@ -33,7 +33,7 @@ void main() {
     expect(restored.cutPaper, isFalse);
   });
 
-  test('printer MAC address is normalized for stable device matching', () {
+  test('printer identifier is normalized for stable device matching', () {
     final profile = PrinterProfile.defaults(
       PrinterDestination.cashier,
     ).copyWith(deviceAddress: ' aa:bb:cc:dd ', deviceName: 'MTP-II');

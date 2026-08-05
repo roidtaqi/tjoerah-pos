@@ -1,7 +1,7 @@
-import 'package:blue_thermal_printer/blue_thermal_printer.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/printer/printer_device.dart';
 import '../../../core/printer/printer_profile.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_layout.dart';
@@ -34,7 +34,7 @@ class _PrinterSettingsScreenState extends ConsumerState<PrinterSettingsScreen> {
         title: const Text('Printer Bluetooth'),
         actions: [
           IconButton(
-            tooltip: 'Buka pengaturan Bluetooth Android',
+            tooltip: 'Buka pengaturan Bluetooth',
             onPressed: busy ? null : notifier.openBluetoothSettings,
             icon: const Icon(Icons.settings_bluetooth_rounded),
           ),
@@ -108,12 +108,12 @@ class _PrinterSettingsScreenState extends ConsumerState<PrinterSettingsScreen> {
   }
 
   Future<void> _chooseDevice(PrinterState state, PrinterProfile profile) async {
-    final devicesByAddress = <String, BluetoothDevice>{
+    final devicesByAddress = <String, PrinterDevice>{
       for (final device in state.devices)
-        if (normalizePrinterAddress(device.address).isNotEmpty)
-          normalizePrinterAddress(device.address): BluetoothDevice(
-            device.name,
-            normalizePrinterAddress(device.address),
+        if (normalizePrinterAddress(device.identifier).isNotEmpty)
+          normalizePrinterAddress(device.identifier): PrinterDevice(
+            name: device.name,
+            identifier: normalizePrinterAddress(device.identifier),
           ),
     };
     if (profile.isConfigured &&
@@ -122,9 +122,9 @@ class _PrinterSettingsScreenState extends ConsumerState<PrinterSettingsScreen> {
         )) {
       devicesByAddress[normalizePrinterAddress(
         profile.deviceAddress,
-      )] = BluetoothDevice(
-        profile.deviceName,
-        normalizePrinterAddress(profile.deviceAddress),
+      )] = PrinterDevice(
+        name: profile.deviceName ?? 'Printer Bluetooth',
+        identifier: normalizePrinterAddress(profile.deviceAddress),
       );
     }
     final devices = devicesByAddress.values.toList()
@@ -137,7 +137,7 @@ class _PrinterSettingsScreenState extends ConsumerState<PrinterSettingsScreen> {
             : _deviceAddress(left).compareTo(_deviceAddress(right));
       });
 
-    final selected = await AppBottomSheet.show<BluetoothDevice>(
+    final selected = await AppBottomSheet.show<PrinterDevice>(
       context,
       title: 'Pilih printer ${profile.destination.shortLabel.toLowerCase()}',
       subtitle: '${devices.length} perangkat Bluetooth tersedia',
@@ -145,7 +145,7 @@ class _PrinterSettingsScreenState extends ConsumerState<PrinterSettingsScreen> {
           ? AppEmptyState(
               title: 'Belum ada printer',
               message:
-                  'Pasangkan printer dari pengaturan Bluetooth Android, lalu muat ulang daftar.',
+                  'Aktifkan printer Bluetooth, lalu muat ulang daftar perangkat.',
               icon: Icons.bluetooth_disabled_rounded,
               actionLabel: 'Buka Bluetooth',
               onAction: () {
@@ -200,8 +200,8 @@ class _PrinterSettingsScreenState extends ConsumerState<PrinterSettingsScreen> {
                     ),
                     subtitle: Text(
                       assigned.isEmpty
-                          ? 'MAC $address'
-                          : 'MAC $address\nDigunakan: $assigned',
+                          ? 'ID $address'
+                          : 'ID $address\nDigunakan: $assigned',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -389,7 +389,7 @@ class _PrinterProfilePanel extends StatelessWidget {
                           const SizedBox(height: 2),
                           Text(
                             profile.isConfigured
-                                ? 'MAC ${profile.deviceAddress!.toUpperCase()}'
+                                ? 'ID ${profile.deviceAddress!.toUpperCase()}'
                                 : 'Belum ada perangkat yang dipilih',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -499,14 +499,14 @@ class _PrinterProfilePanel extends StatelessWidget {
   }
 }
 
-String _deviceName(BluetoothDevice device) {
-  final name = device.name?.trim();
-  return name == null || name.isEmpty ? 'Printer tanpa nama' : name;
+String _deviceName(PrinterDevice device) {
+  final name = device.name.trim();
+  return name.isEmpty ? 'Printer tanpa nama' : name;
 }
 
-String _deviceAddress(BluetoothDevice device) {
-  final address = normalizePrinterAddress(device.address);
-  return address.isEmpty ? 'MAC tidak tersedia' : address;
+String _deviceAddress(PrinterDevice device) {
+  final address = normalizePrinterAddress(device.identifier);
+  return address.isEmpty ? 'ID tidak tersedia' : address;
 }
 
 IconData _destinationIcon(PrinterDestination destination) =>

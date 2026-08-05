@@ -1,10 +1,10 @@
 import 'dart:convert';
 
-import 'package:blue_thermal_printer/blue_thermal_printer.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/printer/print_job.dart';
+import '../../../core/printer/printer_device.dart';
 import '../../../core/printer/printer_profile.dart';
 import '../../../core/printer/printer_service.dart';
 
@@ -46,7 +46,7 @@ class PrinterState {
        );
 
   final Map<PrinterDestination, PrinterProfile> profiles;
-  final List<BluetoothDevice> devices;
+  final List<PrinterDevice> devices;
   final bool isInitialized;
   final bool isScanning;
   final PrinterDestination? activeDestination;
@@ -70,7 +70,7 @@ class PrinterState {
 
   PrinterState copyWith({
     Map<PrinterDestination, PrinterProfile>? profiles,
-    List<BluetoothDevice>? devices,
+    List<PrinterDevice>? devices,
     bool? isInitialized,
     bool? isScanning,
     PrinterDestination? activeDestination,
@@ -164,7 +164,7 @@ class PrinterNotifier extends Notifier<PrinterState> {
         devices: devices,
         isScanning: false,
         notice: devices.isEmpty
-            ? 'Belum ada printer yang dipasangkan di Android.'
+            ? 'Belum ada printer Bluetooth yang ditemukan.'
             : '${devices.length} printer Bluetooth ditemukan.',
       );
     } catch (error) {
@@ -178,14 +178,11 @@ class PrinterNotifier extends Notifier<PrinterState> {
 
   Future<void> assignDevice(
     PrinterDestination destination,
-    BluetoothDevice device,
+    PrinterDevice device,
   ) async {
     final profile = state
         .profile(destination)
-        .copyWith(
-          deviceAddress: device.address,
-          deviceName: device.name ?? 'Printer Bluetooth',
-        );
+        .copyWith(deviceAddress: device.identifier, deviceName: device.name);
     await _updateProfile(
       profile,
       notice:
@@ -383,7 +380,10 @@ class PrinterNotifier extends Notifier<PrinterState> {
       );
       try {
         await PrinterService.instance.connect(
-          BluetoothDevice(task.profile.deviceName, task.profile.deviceAddress),
+          PrinterDevice(
+            name: task.profile.deviceName ?? 'Printer Bluetooth',
+            identifier: task.profile.deviceAddress ?? '',
+          ),
         );
         for (var copy = 0; copy < task.profile.copies; copy++) {
           await task.print();
