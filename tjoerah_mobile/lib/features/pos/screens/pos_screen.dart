@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_layout.dart';
+import '../../../core/utils/app_date_formatter.dart';
 import '../../../shared/components/app_badge.dart';
 import '../../../shared/components/app_bottom_sheet.dart';
 import '../../../shared/components/app_button.dart';
@@ -394,7 +395,7 @@ class _OpenBillPickerState extends ConsumerState<_OpenBillPicker> {
                 ),
                 subtitle: Text(
                   '${order.receiptNumber} - ${order.itemCount} item - '
-                  '${DateFormat('HH:mm').format(order.createdAt.toLocal())}',
+                  '${AppDateFormatter.longDateTime(order.createdAt.toLocal())}',
                 ),
                 trailing: Column(
                   mainAxisAlignment: MainAxisAlignment.center,

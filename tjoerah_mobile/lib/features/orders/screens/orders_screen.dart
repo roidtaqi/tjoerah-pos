@@ -1622,116 +1622,63 @@ class _CashSessionReport extends StatelessWidget {
           );
         }
 
-        final summary = shift.summary;
-        final rows = [
-          ('Saldo awal', summary.openingCash, AppColors.info),
-          ('Penjualan tunai', summary.cashSales, AppColors.success),
-          (
-            'Kas masuk lain',
-            summary.manualCashIn + summary.adjustmentsIn,
-            AppColors.success,
-          ),
-          ('Kas keluar & refund', summary.totalOut, AppColors.error),
-          ('Saldo kas sistem', summary.expectedCash, AppColors.primary),
-        ];
-
-        return Column(
-          children: [
-            InkWell(
-              onTap: onOpenCash,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 8, 10),
-                child: Row(
+        return InkWell(
+          onTap: onOpenCash,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.account_balance_wallet_outlined,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Laporan kas berjalan',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Text(
+                        '${shift.number} • dibuka ${AppDateFormatter.time(shift.startedAt)}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Icon(
-                      Icons.account_balance_wallet_outlined,
-                      color: theme.colorScheme.primary,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Laporan kas berjalan',
-                            style: theme.textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          Text(
-                            '${shift.number} • dibuka ${AppDateFormatter.time(shift.startedAt)}',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
+                    Text(
+                      'Saldo akhir',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
-                    IconButton(
-                      tooltip: 'Buka pengelolaan kas',
-                      onPressed: onOpenCash,
-                      icon: const Icon(Icons.chevron_right_rounded),
+                    Text(
+                      currency.format(shift.summary.expectedCash),
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: theme.colorScheme.primary,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ],
                 ),
-              ),
+                IconButton(
+                  tooltip: 'Buka pengelolaan kas',
+                  onPressed: onOpenCash,
+                  icon: const Icon(Icons.chevron_right_rounded),
+                ),
+              ],
             ),
-            ...rows.indexed.map((entry) {
-              final (index, row) = entry;
-              final isTotal = index == rows.length - 1;
-              return Column(
-                children: [
-                  if (isTotal)
-                    Divider(
-                      height: 1,
-                      indent: 16,
-                      endIndent: 16,
-                      color: theme.colorScheme.outlineVariant,
-                    ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 9,
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: BoxDecoration(
-                            color: row.$3,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            row.$1,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              fontWeight: isTotal
-                                  ? FontWeight.w700
-                                  : FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Text(
-                          currency.format(row.$2),
-                          textAlign: TextAlign.end,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: isTotal ? row.$3 : null,
-                            fontWeight: isTotal
-                                ? FontWeight.w800
-                                : FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              );
-            }),
-          ],
+          ),
         );
       },
     );

@@ -404,8 +404,10 @@ class _PaymentPanelState extends ConsumerState<_PaymentPanel> {
           change: change,
           isSynced: true,
         );
-        ref.invalidate(orderHistoryProvider);
-        ref.invalidate(cashProvider);
+        await Future.wait([
+          ref.read(orderHistoryProvider.notifier).refresh(),
+          ref.read(cashProvider.notifier).refresh(),
+        ]);
         ref.invalidate(customerProvider);
         ref.read(cartProvider.notifier).clearCart();
         if (mounted) await widget.onCompleted(printData);

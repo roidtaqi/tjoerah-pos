@@ -144,6 +144,8 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Simpan tambahan ke open bill'), findsOneWidget);
+    expect(find.textContaining('Simpan & bayar'), findsOneWidget);
+    expect(find.text('2 Agustus 2026, 10:00'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await tester.tap(find.text('Simpan tambahan ke open bill'));
@@ -420,7 +422,7 @@ void main() {
     expect(find.text('QRIS'), findsOneWidget);
     expect(find.text('Kartu debit'), findsOneWidget);
     expect(find.text('Laporan kas berjalan'), findsOneWidget);
-    expect(find.text('Saldo kas sistem'), findsOneWidget);
+    expect(find.text('Saldo akhir'), findsOneWidget);
     expect(find.text('Rp 628.000'), findsOneWidget);
     expect(find.text('TJ-OLD-001'), findsNothing);
     expect(tester.takeException(), isNull);

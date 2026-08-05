@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/printer/print_job.dart';
+import '../../../core/utils/app_date_formatter.dart';
 import '../../../shared/components/app_badge.dart';
 import '../../../shared/components/app_bottom_sheet.dart';
 import '../../../shared/components/app_button.dart';
@@ -62,6 +63,13 @@ class OrderCart extends ConsumerWidget {
                           AppBadge(
                             text: cart.openBill!.receiptNumber,
                             icon: Icons.bookmark_added_outlined,
+                          ),
+                        if (cart.isEditingOpenBill)
+                          AppBadge(
+                            text: AppDateFormatter.longDateTime(
+                              cart.openBill!.createdAt.toLocal(),
+                            ),
+                            icon: Icons.schedule_outlined,
                           ),
                       ],
                     ),
@@ -662,55 +670,43 @@ class _OrderTotalsState extends ConsumerState<_OrderTotals> {
               ),
             ],
             const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: cart.isEditingOpenBill
-                  ? FilledButton.icon(
-                      onPressed: _isSavingOpenBill || cart.items.isEmpty
-                          ? null
-                          : _saveOpenBill,
-                      icon: _isSavingOpenBill
-                          ? const SizedBox.square(
-                              dimension: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.bookmark_add_outlined),
-                      label: Text(
-                        _isSavingOpenBill
-                            ? 'Menyimpan tambahan...'
-                            : 'Simpan tambahan ke open bill',
-                      ),
-                    )
-                  : OutlinedButton.icon(
-                      onPressed: _isSavingOpenBill ? null : _saveOpenBill,
-                      icon: _isSavingOpenBill
-                          ? const SizedBox.square(
-                              dimension: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.bookmark_add_outlined),
-                      label: Text(
-                        _isSavingOpenBill
-                            ? 'Menyimpan open bill...'
-                            : 'Simpan sebagai open bill',
-                      ),
-                    ),
+            if (!cart.isEditingOpenBill || cart.items.isNotEmpty)
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _isSavingOpenBill ? null : _saveOpenBill,
+                  icon: _isSavingOpenBill
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.bookmark_add_outlined),
+                  label: Text(
+                    _isSavingOpenBill
+                        ? cart.isEditingOpenBill
+                              ? 'Menyimpan tambahan...'
+                              : 'Menyimpan open bill...'
+                        : cart.isEditingOpenBill
+                        ? 'Simpan tambahan ke open bill'
+                        : 'Simpan sebagai open bill',
+                  ),
+                ),
+              ),
+            const SizedBox(height: 8),
+            AppButton(
+              text: cart.isEditingOpenBill && cart.items.isNotEmpty
+                  ? 'Simpan & bayar ${currency.format(cart.total)}'
+                  : 'Bayar ${currency.format(cart.total)}',
+              icon: cart.isEditingOpenBill
+                  ? Icons.payments_outlined
+                  : Icons.arrow_forward_rounded,
+              isLoading: cart.isEditingOpenBill && _isSavingOpenBill,
+              onPressed: _isSavingOpenBill
+                  ? null
+                  : cart.isEditingOpenBill
+                  ? _payOpenBill
+                  : () => showPaymentFlow(context),
             ),
-            if (!cart.isEditingOpenBill) ...[
-              const SizedBox(height: 8),
-              AppButton(
-                text: 'Bayar ${currency.format(cart.total)}',
-                icon: Icons.arrow_forward_rounded,
-                onPressed: () => showPaymentFlow(context),
-              ),
-            ] else if (cart.items.isEmpty) ...[
-              const SizedBox(height: 8),
-              AppButton(
-                text: 'Bayar ${currency.format(cart.total)}',
-                icon: Icons.payments_outlined,
-                onPressed: () => showPaymentFlow(context),
-              ),
-            ],
           ],
         ),
       ),
@@ -824,6 +820,15 @@ class _OrderTotalsState extends ConsumerState<_OrderTotals> {
     }
   }
 
+  Future<void> _payOpenBill() async {
+    final cart = widget.cart;
+    if (cart.items.isNotEmpty) {
+      final saved = await _appendOpenBill(cart, continueToPayment: true);
+      if (!saved || !mounted) return;
+    }
+    if (mounted) await showPaymentFlow(context);
+  }
+
   Future<String?> _requestOpenBillLabel(CartState cart) async {
     final controller = TextEditingController(
       text: cart.customerName ?? cart.tableName ?? '',
@@ -882,17 +887,24 @@ class _OrderTotalsState extends ConsumerState<_OrderTotals> {
     return result;
   }
 
-  Future<void> _appendOpenBill(CartState cart) async {
+  Future<bool> _appendOpenBill(
+    CartState cart, {
+    bool continueToPayment = false,
+  }) async {
     if (cart.items.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Tambahkan setidaknya satu produk baru.')),
       );
-      return;
+      return false;
     }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Simpan tambahan ke open bill?'),
+        title: Text(
+          continueToPayment
+              ? 'Simpan tambahan & lanjut bayar?'
+              : 'Simpan tambahan ke open bill?',
+        ),
         content: Text(
           '${cart.items.length} item baru akan disimpan pada '
           '${cart.openBill!.receiptNumber}. Item bar atau dapur juga dikirim '
@@ -906,12 +918,14 @@ class _OrderTotalsState extends ConsumerState<_OrderTotals> {
           FilledButton.icon(
             onPressed: () => Navigator.pop(dialogContext, true),
             icon: const Icon(Icons.send_outlined),
-            label: const Text('Simpan & kirim'),
+            label: Text(
+              continueToPayment ? 'Simpan & lanjut bayar' : 'Simpan & kirim',
+            ),
           ),
         ],
       ),
     );
-    if (confirmed != true || !mounted) return;
+    if (confirmed != true || !mounted) return false;
 
     setState(() => _isSavingOpenBill = true);
     try {
@@ -921,6 +935,10 @@ class _OrderTotalsState extends ConsumerState<_OrderTotals> {
         receiptNumber: cart.openBill!.receiptNumber,
         items: newItems,
       );
+      ref
+          .read(cartProvider.notifier)
+          .markOpenBillItemsSubmitted(submissionBatch: batch);
+      await ref.read(orderHistoryProvider.notifier).refresh();
       final newSubtotal = newItems.fold<double>(
         0,
         (sum, item) => sum + item.total,
@@ -951,29 +969,37 @@ class _OrderTotalsState extends ConsumerState<_OrderTotals> {
         total: newSubtotal,
         isSynced: true,
       );
-      final printResult = await ref
-          .read(printerProvider.notifier)
-          .autoPrintKitchenTickets(printData);
-      ref
-          .read(cartProvider.notifier)
-          .markOpenBillItemsSubmitted(submissionBatch: batch);
-      await ref.read(orderHistoryProvider.notifier).refresh();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            printResult.failures.isEmpty
-                ? 'Tambahan batch $batch tersimpan di ${cart.openBill!.receiptNumber} dan dikirim ke produksi.'
-                : 'Tambahan batch $batch tersimpan. ${printResult.message}',
+      String? printWarning;
+      try {
+        final printResult = await ref
+            .read(printerProvider.notifier)
+            .autoPrintKitchenTickets(printData);
+        if (printResult.failures.isNotEmpty) {
+          printWarning = printResult.message;
+        }
+      } catch (_) {
+        printWarning = 'Tiket produksi belum berhasil dicetak.';
+      }
+      if (!mounted) return true;
+      if (!continueToPayment || printWarning != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              printWarning == null
+                  ? 'Tambahan batch $batch tersimpan di ${cart.openBill!.receiptNumber} dan dikirim ke produksi.'
+                  : 'Tambahan batch $batch tersimpan. $printWarning',
+            ),
           ),
-        ),
-      );
+        );
+      }
+      return true;
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted) return false;
       final message = error.toString().replaceFirst('Bad state: ', '');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Tambahan belum dapat dikirim: $message')),
       );
+      return false;
     } finally {
       if (mounted) setState(() => _isSavingOpenBill = false);
     }
