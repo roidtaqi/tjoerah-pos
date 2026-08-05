@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -12,6 +13,7 @@ import '../../../shared/components/app_bottom_sheet.dart';
 import '../../../shared/components/app_button.dart';
 import '../../../shared/components/app_card.dart';
 import '../../customers/providers/customer_provider.dart';
+import '../../cash/providers/cash_provider.dart';
 import '../../orders/providers/order_history_provider.dart';
 import '../../settings/providers/printer_provider.dart';
 import '../providers/cart_provider.dart';
@@ -359,6 +361,56 @@ class _PaymentPanelState extends ConsumerState<_PaymentPanel> {
         : math.max(0, cash - cart.total).toDouble();
 
     try {
+      if (cart.isEditingOpenBill) {
+        if (cart.items.isNotEmpty) {
+          throw StateError(
+            'Simpan tambahan ke open bill sebelum menerima pembayaran.',
+          );
+        }
+        await OrderRepository().payOpenBill(
+          serverId: cart.openBill!.serverId,
+          receiptNumber: cart.openBill!.receiptNumber,
+          method: method,
+          paymentBreakdown: breakdown,
+          amountReceived: amountReceived,
+          change: change,
+          cashShiftId: ref.read(activeCashShiftIdProvider),
+        );
+        final printData = TransactionPrintData(
+          orderId: cart.openBill!.serverId,
+          receiptNumber: cart.openBill!.receiptNumber,
+          createdAt: cart.openBill!.createdAt,
+          orderTypeLabel: cart.orderTypeLabel,
+          tableName: cart.tableName,
+          customerName: cart.customerName,
+          note: cart.note,
+          paymentMethod: method,
+          paymentBreakdown: breakdown,
+          items: cart.submittedItems
+              .map(
+                (item) => PrintOrderItem(
+                  name: item.name,
+                  quantity: item.quantity,
+                  unitPrice: item.price,
+                  station: item.station,
+                ),
+              )
+              .toList(),
+          subtotal: cart.subtotal,
+          discount: cart.discount,
+          tax: cart.tax,
+          total: cart.total,
+          amountReceived: amountReceived,
+          change: change,
+          isSynced: true,
+        );
+        ref.invalidate(orderHistoryProvider);
+        ref.invalidate(cashProvider);
+        ref.invalidate(customerProvider);
+        ref.read(cartProvider.notifier).clearCart();
+        if (mounted) await widget.onCompleted(printData);
+        return;
+      }
       final createdOrder = await OrderRepository().createOrder(
         items: cart.items,
         subtotal: cart.subtotal,
@@ -375,6 +427,7 @@ class _PaymentPanelState extends ConsumerState<_PaymentPanel> {
         change: change,
         paymentMethod: method,
         paymentBreakdown: breakdown,
+        cashShiftId: ref.read(activeCashShiftIdProvider),
       );
       final printData = TransactionPrintData(
         orderId: createdOrder.id,
@@ -405,6 +458,7 @@ class _PaymentPanelState extends ConsumerState<_PaymentPanel> {
         isSynced: createdOrder.isSynced,
       );
       ref.invalidate(orderHistoryProvider);
+      ref.invalidate(cashProvider);
       if (createdOrder.isSynced) {
         ref.invalidate(customerProvider);
       } else {
@@ -542,6 +596,7 @@ Future<void> showPaymentSuccessDialog(
   if (!context.mounted) return;
   await showDialog<void>(
     context: context,
+    barrierDismissible: false,
     builder: (_) => _PaymentSuccessDialog(order: order),
   );
 }
@@ -560,6 +615,14 @@ class _PaymentSuccessDialog extends ConsumerStatefulWidget {
 
 class _PaymentSuccessDialogState extends ConsumerState<_PaymentSuccessDialog> {
   bool _automaticPrintScheduled = false;
+  Timer? _returnTimer;
+  int? _secondsToReturn;
+
+  @override
+  void dispose() {
+    _returnTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -615,6 +678,47 @@ class _PaymentSuccessDialogState extends ConsumerState<_PaymentSuccessDialog> {
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall,
               ),
+              if (widget.order.amountReceived != null) ...[
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFDCFCE7),
+                    border: Border.all(color: const Color(0xFF86EFAC)),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        widget.order.change > 0
+                            ? 'Kembalian pelanggan'
+                            : 'Pembayaran tunai',
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          color: const Color(0xFF166534),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        widget.order.change > 0
+                            ? _currency().format(widget.order.change)
+                            : 'Uang pas',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.headlineMedium?.copyWith(
+                          color: const Color(0xFF166534),
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Diterima ${_currency().format(widget.order.amountReceived)}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF166534),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 18),
               Container(
                 padding: const EdgeInsets.all(12),
@@ -693,7 +797,11 @@ class _PaymentSuccessDialogState extends ConsumerState<_PaymentSuccessDialog> {
       actions: [
         FilledButton.tonal(
           onPressed: printer.isPrinting ? null : () => Navigator.pop(context),
-          child: const Text('Kembali ke POS'),
+          child: Text(
+            _secondsToReturn == null
+                ? 'Transaksi baru'
+                : 'Transaksi baru ($_secondsToReturn)',
+          ),
         ),
       ],
     );
@@ -715,13 +823,17 @@ class _PaymentSuccessDialogState extends ConsumerState<_PaymentSuccessDialog> {
   Future<void> _print(_PrintTarget target) async {
     final notifier = ref.read(printerProvider.notifier);
     try {
+      late final PrinterJobResult result;
       switch (target) {
         case _PrintTarget.all:
-          await notifier.printTransaction(widget.order);
+          result = await notifier.printTransaction(widget.order);
         case _PrintTarget.receipt:
-          await notifier.printReceipt(widget.order);
+          result = await notifier.printReceipt(widget.order);
         case _PrintTarget.kitchen:
-          await notifier.printKitchenTickets(widget.order);
+          result = await notifier.printKitchenTickets(widget.order);
+      }
+      if (target != _PrintTarget.kitchen && _receiptWasPrinted(result)) {
+        _startReturnCountdown();
       }
     } catch (_) {
       // PrinterNotifier exposes the actionable error in PrinterState.
@@ -729,6 +841,33 @@ class _PaymentSuccessDialogState extends ConsumerState<_PaymentSuccessDialog> {
   }
 
   Future<void> _autoPrint() async {
-    await ref.read(printerProvider.notifier).autoPrintTransaction(widget.order);
+    final result = await ref
+        .read(printerProvider.notifier)
+        .autoPrintTransaction(widget.order);
+    if (_receiptWasPrinted(result)) _startReturnCountdown();
+  }
+
+  void _startReturnCountdown() {
+    if (!mounted || _returnTimer != null) return;
+    setState(() => _secondsToReturn = widget.order.change > 0 ? 8 : 4);
+    _returnTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      final next = (_secondsToReturn ?? 1) - 1;
+      if (next <= 0) {
+        timer.cancel();
+        Navigator.pop(context);
+        return;
+      }
+      setState(() => _secondsToReturn = next);
+    });
+  }
+
+  bool _receiptWasPrinted(PrinterJobResult result) {
+    return result.completed.any(
+      (label) => label.toLowerCase().contains('struk'),
+    );
   }
 }

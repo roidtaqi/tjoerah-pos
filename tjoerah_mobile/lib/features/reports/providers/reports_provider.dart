@@ -1,8 +1,11 @@
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../../core/network/api_client.dart';
 import '../../../core/database/database_helper.dart';
+import '../../auth/providers/auth_provider.dart';
 import '../models/report_models.dart';
 
 class ReportsState {
@@ -136,15 +139,49 @@ class ReportsNotifier extends Notifier<ReportsState> {
 
   Future<void> generateShiftReport(DateTime date) async {
     try {
+      final outletId = _outletId(ref.read(authProvider).user);
+      final dateKey = _dateKey(date);
+      final response = await ApiClient.get(
+        '/reports/shift?outlet_id=$outletId&date=$dateKey',
+      );
+      if (response.statusCode == 200) {
+        final decoded = Map<String, dynamic>.from(
+          jsonDecode(response.body) as Map,
+        );
+        state = state.copyWith(shiftReport: ShiftReportModel.fromJson(decoded));
+        return;
+      }
+      throw StateError('Laporan shift server belum tersedia.');
+    } catch (error) {
+      debugPrint('Failed to generate online shift report: $error');
+    }
+
+    try {
       final dbResult = await DatabaseHelper.instance.getShiftReport(date);
       final shiftReport = ShiftReportModel.fromLocalDb(date, dbResult);
       state = state.copyWith(shiftReport: shiftReport);
-    } catch (e) {
-      debugPrint("Failed to generate offline shift report: $e");
+    } catch (error) {
+      debugPrint('Failed to generate offline shift report: $error');
     }
+  }
+
+  int _outletId(Map<String, dynamic>? user) {
+    final direct = int.tryParse(user?['outlet_id']?.toString() ?? '');
+    if (direct != null) return direct;
+    final outlets = user?['outlets'];
+    if (outlets is List && outlets.isNotEmpty && outlets.first is Map) {
+      final id = int.tryParse((outlets.first as Map)['id']?.toString() ?? '');
+      if (id != null) return id;
+    }
+    throw StateError('Outlet aktif belum tersedia.');
   }
 }
 
 final reportsProvider = NotifierProvider<ReportsNotifier, ReportsState>(() {
   return ReportsNotifier();
 });
+
+String _dateKey(DateTime value) =>
+    '${value.year.toString().padLeft(4, '0')}-'
+    '${value.month.toString().padLeft(2, '0')}-'
+    '${value.day.toString().padLeft(2, '0')}';

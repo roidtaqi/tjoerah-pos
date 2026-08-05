@@ -20,6 +20,8 @@ import '../../../shared/components/app_loading_state.dart';
 import '../../../shared/components/app_metric_card.dart';
 import '../../../shared/components/app_search_bar.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../../cash/models/cash_model.dart';
+import '../../cash/providers/cash_provider.dart';
 import '../../customers/providers/customer_provider.dart';
 import '../../kds/providers/kds_provider.dart';
 import '../../pos/providers/table_provider.dart';
@@ -59,6 +61,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
   @override
   Widget build(BuildContext context) {
     final orders = ref.watch(orderHistoryProvider);
+    final cashOverview = ref.watch(cashProvider);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Pesanan'),
@@ -83,12 +86,15 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
           message: 'Riwayat lokal belum dapat dibaca.',
           onRetry: _refreshOrders,
         ),
-        data: _buildContent,
+        data: (items) => _buildContent(items, cashOverview),
       ),
     );
   }
 
-  Widget _buildContent(List<OrderHistoryItem> orders) {
+  Widget _buildContent(
+    List<OrderHistoryItem> orders,
+    AsyncValue<CashOverview> cashOverview,
+  ) {
     final today = DateTime.now();
     final periodOrders = orders.where(
       (order) => _isWithinDateRange(order.createdAt),
@@ -154,6 +160,8 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
             summaries: paymentSummaries,
             currency: _currency,
             isToday: isToday,
+            cashOverview: cashOverview,
+            onOpenCash: () => context.push('/cash'),
           ),
           const SizedBox(height: 20),
           AppSearchBar(
@@ -217,9 +225,14 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
     );
   }
 
-  Future<void> _refreshOrders() => ref
-      .read(orderHistoryProvider.notifier)
-      .refresh(dateFrom: _dateRange.start, dateTo: _dateRange.end);
+  Future<void> _refreshOrders() async {
+    await Future.wait([
+      ref
+          .read(orderHistoryProvider.notifier)
+          .refresh(dateFrom: _dateRange.start, dateTo: _dateRange.end),
+      ref.read(cashProvider.notifier).refresh(),
+    ]);
+  }
 
   Future<void> _selectDateRange() async {
     final selected = await showDateRangePicker(
@@ -525,6 +538,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
           serverId: order.serverId!,
           receiptNumber: order.receiptNumber,
           createdAt: order.createdAt,
+          openBillLabel: order.openBillDisplayLabel,
           submittedItems: order.items
               .map(
                 (item) => SubmittedCartItem(
@@ -1447,11 +1461,15 @@ class _PaymentSummaryTable extends StatelessWidget {
     required this.summaries,
     required this.currency,
     required this.isToday,
+    required this.cashOverview,
+    required this.onOpenCash,
   });
 
   final List<_PaymentMethodSummary> summaries;
   final NumberFormat currency;
   final bool isToday;
+  final AsyncValue<CashOverview> cashOverview;
+  final VoidCallback onOpenCash;
 
   @override
   Widget build(BuildContext context) {
@@ -1553,7 +1571,215 @@ class _PaymentSummaryTable extends StatelessWidget {
               ],
             );
           }),
+          if (isToday) ...[
+            Divider(height: 1, color: theme.colorScheme.outlineVariant),
+            _CashSessionReport(
+              overview: cashOverview,
+              currency: currency,
+              onOpenCash: onOpenCash,
+            ),
+          ],
         ],
+      ),
+    );
+  }
+}
+
+class _CashSessionReport extends StatelessWidget {
+  const _CashSessionReport({
+    required this.overview,
+    required this.currency,
+    required this.onOpenCash,
+  });
+
+  final AsyncValue<CashOverview> overview;
+  final NumberFormat currency;
+  final VoidCallback onOpenCash;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return overview.when(
+      loading: () => const _CashReportStatus(
+        icon: Icons.hourglass_top_rounded,
+        title: 'Laporan kas berjalan',
+        message: 'Memuat sesi kas aktif...',
+      ),
+      error: (_, _) => _CashReportStatus(
+        icon: Icons.cloud_off_outlined,
+        title: 'Laporan kas belum tersedia',
+        message: 'Ketuk untuk mencoba dari halaman pengelolaan kas.',
+        onTap: onOpenCash,
+      ),
+      data: (data) {
+        final shift = data.currentShift;
+        if (shift == null) {
+          return _CashReportStatus(
+            icon: Icons.point_of_sale_outlined,
+            title: 'Belum ada sesi kas aktif',
+            message: 'Buka kas untuk mulai mencatat uang masuk dan keluar.',
+            onTap: onOpenCash,
+          );
+        }
+
+        final summary = shift.summary;
+        final rows = [
+          ('Saldo awal', summary.openingCash, AppColors.info),
+          ('Penjualan tunai', summary.cashSales, AppColors.success),
+          (
+            'Kas masuk lain',
+            summary.manualCashIn + summary.adjustmentsIn,
+            AppColors.success,
+          ),
+          ('Kas keluar & refund', summary.totalOut, AppColors.error),
+          ('Saldo kas sistem', summary.expectedCash, AppColors.primary),
+        ];
+
+        return Column(
+          children: [
+            InkWell(
+              onTap: onOpenCash,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 8, 10),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.account_balance_wallet_outlined,
+                      color: theme.colorScheme.primary,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Laporan kas berjalan',
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          Text(
+                            '${shift.number} • dibuka ${AppDateFormatter.time(shift.startedAt)}',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Buka pengelolaan kas',
+                      onPressed: onOpenCash,
+                      icon: const Icon(Icons.chevron_right_rounded),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            ...rows.indexed.map((entry) {
+              final (index, row) = entry;
+              final isTotal = index == rows.length - 1;
+              return Column(
+                children: [
+                  if (isTotal)
+                    Divider(
+                      height: 1,
+                      indent: 16,
+                      endIndent: 16,
+                      color: theme.colorScheme.outlineVariant,
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 9,
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: row.$3,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            row.$1,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: isTotal
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          currency.format(row.$2),
+                          textAlign: TextAlign.end,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: isTotal ? row.$3 : null,
+                            fontWeight: isTotal
+                                ? FontWeight.w800
+                                : FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            }),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _CashReportStatus extends StatelessWidget {
+  const _CashReportStatus({
+    required this.icon,
+    required this.title,
+    required this.message,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String message;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Icon(icon, color: theme.colorScheme.onSurfaceVariant),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: theme.textTheme.titleSmall),
+                  const SizedBox(height: 2),
+                  Text(
+                    message,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (onTap != null) const Icon(Icons.chevron_right_rounded),
+          ],
+        ),
       ),
     );
   }

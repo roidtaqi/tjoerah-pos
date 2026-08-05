@@ -15,6 +15,7 @@ class Refund extends Model
     protected $casts = [
         'quantity' => 'integer',
         'amount' => 'decimal:2',
+        'meta' => 'array',
     ];
 
     public function order()

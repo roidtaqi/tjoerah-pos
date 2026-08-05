@@ -73,6 +73,8 @@ abstract final class AppDateFormatter {
   static String longDateTime(DateTime value) =>
       '${longDate(value)}, ${_time(value)}';
 
+  static String time(DateTime value) => _time(value);
+
   static String _shortMonth(DateTime value) => _shortMonths[value.month - 1];
 
   static String _time(DateTime value) =>

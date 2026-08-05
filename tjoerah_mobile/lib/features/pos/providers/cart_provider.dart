@@ -58,11 +58,13 @@ class OpenBillCartContext {
     required this.serverId,
     required this.receiptNumber,
     required this.createdAt,
+    required this.label,
   });
 
   final String serverId;
   final String receiptNumber;
   final DateTime createdAt;
+  final String label;
 }
 
 class CartState {
@@ -194,6 +196,7 @@ class CartNotifier extends Notifier<CartState> {
     required String serverId,
     required String receiptNumber,
     required DateTime createdAt,
+    required String openBillLabel,
     required List<SubmittedCartItem> submittedItems,
     required String orderType,
     required double discountPercent,
@@ -220,6 +223,7 @@ class CartNotifier extends Notifier<CartState> {
         serverId: serverId,
         receiptNumber: receiptNumber,
         createdAt: createdAt,
+        label: openBillLabel,
       ),
     );
   }
@@ -285,6 +289,31 @@ class CartNotifier extends Notifier<CartState> {
                 : item,
           )
           .toList(),
+    );
+  }
+
+  void markOpenBillItemsSubmitted({
+    required int submissionBatch,
+    DateTime? submittedAt,
+  }) {
+    if (!state.isEditingOpenBill || state.items.isEmpty) return;
+    final timestamp = submittedAt ?? DateTime.now();
+    final submitted = state.items
+        .map(
+          (item) => SubmittedCartItem(
+            productId: item.isManual ? null : item.productId,
+            name: item.name,
+            price: item.price,
+            quantity: item.quantity,
+            station: item.station,
+            submissionBatch: submissionBatch,
+            submittedAt: timestamp,
+          ),
+        )
+        .toList();
+    state = state.copyWith(
+      items: const [],
+      submittedItems: [...state.submittedItems, ...submitted],
     );
   }
 

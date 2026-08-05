@@ -8,9 +8,11 @@ import '../../../core/utils/app_date_formatter.dart';
 import '../../../shared/components/app_badge.dart';
 import '../../../shared/components/app_button.dart';
 import '../../../shared/components/app_card.dart';
-import '../../../shared/components/app_empty_state.dart';
 import '../../../shared/components/app_loading_state.dart';
 import '../../../shared/components/app_metric_card.dart';
+import '../../auth/providers/auth_provider.dart';
+import '../../cash/models/cash_model.dart';
+import '../../cash/providers/cash_provider.dart';
 import '../../settings/providers/printer_provider.dart';
 import '../models/report_models.dart';
 import '../providers/reports_provider.dart';
@@ -28,15 +30,17 @@ class _ShiftReportScreenState extends ConsumerState<ShiftReportScreen> {
   @override
   Widget build(BuildContext context) {
     final report = ref.watch(reportsProvider).shiftReport;
+    final cashOverview = ref.watch(cashProvider).value;
+    final cashShift = report == null
+        ? null
+        : _cashShiftForDate(cashOverview, report.date);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Laporan shift'),
         actions: [
           IconButton(
             tooltip: 'Hitung ulang laporan',
-            onPressed: () => ref
-                .read(reportsProvider.notifier)
-                .generateShiftReport(DateTime.now()),
+            onPressed: _refreshReport,
             icon: const Icon(Icons.refresh_rounded),
           ),
           const SizedBox(width: 4),
@@ -44,11 +48,11 @@ class _ShiftReportScreenState extends ConsumerState<ShiftReportScreen> {
       ),
       body: report == null
           ? const AppLoadingState(message: 'Menghitung transaksi shift...')
-          : _buildReport(report),
+          : _buildReport(report, cashShift),
     );
   }
 
-  Widget _buildReport(ShiftReportModel report) {
+  Widget _buildReport(ShiftReportModel report, CashShift? cashShift) {
     final currency = _currency();
     final theme = Theme.of(context);
     return SafeArea(
@@ -75,7 +79,7 @@ class _ShiftReportScreenState extends ConsumerState<ShiftReportScreen> {
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  'Berdasarkan transaksi yang tersimpan di perangkat ini.',
+                                  'Berdasarkan seluruh pembayaran pada outlet ini.',
                                   style: theme.textTheme.bodySmall,
                                 ),
                               ],
@@ -90,29 +94,50 @@ class _ShiftReportScreenState extends ConsumerState<ShiftReportScreen> {
                       const SizedBox(height: 20),
                       LayoutBuilder(
                         builder: (context, constraints) {
-                          final width = (constraints.maxWidth - 12) / 2;
-                          return Row(
+                          final columns = constraints.maxWidth >= 760 ? 4 : 2;
+                          final width =
+                              (constraints.maxWidth - (columns - 1) * 12) /
+                              columns;
+                          return Wrap(
+                            spacing: 12,
+                            runSpacing: 12,
                             children: [
-                              SizedBox(
-                                width: width,
-                                height: 116,
-                                child: AppMetricCard(
-                                  title: 'Total transaksi',
-                                  value: '${report.totalOrders}',
-                                  icon: Icons.receipt_long_outlined,
+                              for (final metric in [
+                                (
+                                  'Total transaksi',
+                                  '${report.totalOrders}',
+                                  Icons.receipt_long_outlined,
+                                  AppColors.info,
                                 ),
-                              ),
-                              const SizedBox(width: 12),
-                              SizedBox(
-                                width: width,
-                                height: 116,
-                                child: AppMetricCard(
-                                  title: 'Pendapatan kotor',
-                                  value: currency.format(report.totalRevenue),
-                                  icon: Icons.payments_outlined,
-                                  iconColor: AppColors.success,
+                                (
+                                  'Penjualan kotor',
+                                  currency.format(report.grossRevenue),
+                                  Icons.trending_up_rounded,
+                                  AppColors.success,
                                 ),
-                              ),
+                                (
+                                  'Refund',
+                                  currency.format(report.refundTotal),
+                                  Icons.keyboard_return_rounded,
+                                  AppColors.error,
+                                ),
+                                (
+                                  'Penjualan bersih',
+                                  currency.format(report.totalRevenue),
+                                  Icons.payments_outlined,
+                                  AppColors.primary,
+                                ),
+                              ])
+                                SizedBox(
+                                  width: width,
+                                  height: 116,
+                                  child: AppMetricCard(
+                                    title: metric.$1,
+                                    value: metric.$2,
+                                    icon: metric.$3,
+                                    iconColor: metric.$4,
+                                  ),
+                                ),
                             ],
                           );
                         },
@@ -129,45 +154,45 @@ class _ShiftReportScreenState extends ConsumerState<ShiftReportScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    'Rincian pembayaran',
+                                    'Metode pembayaran hari ini',
                                     style: theme.textTheme.titleMedium,
                                   ),
                                   const SizedBox(height: 3),
                                   Text(
-                                    'Rekonsiliasi per metode',
+                                    'Seluruh perangkat pada outlet ini',
                                     style: theme.textTheme.bodySmall,
                                   ),
                                 ],
                               ),
                             ),
                             Divider(color: theme.colorScheme.outline),
-                            if (report.paymentBreakdown.isEmpty)
-                              const SizedBox(
-                                height: 180,
-                                child: AppEmptyState(
-                                  title: 'Belum ada pembayaran',
-                                  message: 'Transaksi shift ini masih kosong.',
-                                  icon: Icons.account_balance_wallet_outlined,
+                            ...report.paymentBreakdown.entries.map(
+                              (entry) => ListTile(
+                                minTileHeight: 62,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 18,
                                 ),
-                              )
-                            else
-                              ...report.paymentBreakdown.entries.map(
-                                (entry) => ListTile(
-                                  minTileHeight: 62,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 18,
-                                  ),
-                                  leading: Icon(_paymentIcon(entry.key)),
-                                  title: Text(_paymentLabel(entry.key)),
-                                  trailing: Text(
-                                    currency.format(entry.value),
-                                    style: theme.textTheme.titleMedium,
-                                  ),
+                                leading: Icon(_paymentIcon(entry.key)),
+                                title: Text(_paymentLabel(entry.key)),
+                                subtitle: Text(
+                                  '${report.paymentCounts[entry.key] ?? 0} transaksi',
+                                ),
+                                trailing: Text(
+                                  currency.format(entry.value),
+                                  style: theme.textTheme.titleMedium,
                                 ),
                               ),
+                            ),
                           ],
                         ),
                       ),
+                      if (cashShift != null) ...[
+                        const SizedBox(height: 16),
+                        _CashReconciliationCard(
+                          shift: cashShift,
+                          currency: currency,
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -190,7 +215,7 @@ class _ShiftReportScreenState extends ConsumerState<ShiftReportScreen> {
                       text: 'Cetak laporan shift',
                       icon: Icons.print_outlined,
                       isLoading: _printing,
-                      onPressed: () => _printReport(report),
+                      onPressed: () => _printReport(report, cashShift),
                     ),
                   ),
                 ),
@@ -202,14 +227,51 @@ class _ShiftReportScreenState extends ConsumerState<ShiftReportScreen> {
     );
   }
 
-  Future<void> _printReport(ShiftReportModel report) async {
+  Future<void> _refreshReport() async {
+    await Future.wait([
+      ref.read(reportsProvider.notifier).generateShiftReport(DateTime.now()),
+      ref.read(cashProvider.notifier).refresh(),
+    ]);
+  }
+
+  Future<void> _printReport(
+    ShiftReportModel report,
+    CashShift? cashShift,
+  ) async {
     setState(() => _printing = true);
     try {
+      final user = ref.read(authProvider).user;
       final result = await ref.read(printerProvider.notifier).printShiftReport({
         'date': AppDateFormatter.shortDate(report.date),
+        'generated_at': AppDateFormatter.longDateTime(DateTime.now()),
+        'operator': user?['name']?.toString() ?? '-',
         'total_orders': report.totalOrders,
+        'gross_revenue': report.grossRevenue,
+        'refund_total': report.refundTotal,
         'total_revenue': report.totalRevenue,
         'payment_breakdown': report.paymentBreakdown,
+        'payment_counts': report.paymentCounts,
+        'refund_breakdown': report.refundBreakdown,
+        if (cashShift != null)
+          'cash_shift': {
+            'number': cashShift.number,
+            'opened_by': cashShift.openedBy,
+            'started_at': AppDateFormatter.longDateTime(cashShift.startedAt),
+            'ended_at': cashShift.endedAt == null
+                ? null
+                : AppDateFormatter.longDateTime(cashShift.endedAt!),
+            'status': cashShift.status,
+            'opening_cash': cashShift.summary.openingCash,
+            'cash_sales': cashShift.summary.cashSales,
+            'manual_cash_in': cashShift.summary.manualCashIn,
+            'cash_refunds': cashShift.summary.cashRefunds,
+            'manual_cash_out': cashShift.summary.manualCashOut,
+            'adjustments_in': cashShift.summary.adjustmentsIn,
+            'adjustments_out': cashShift.summary.adjustmentsOut,
+            'expected_cash': cashShift.summary.expectedCash,
+            'closing_cash': cashShift.summary.closingCash,
+            'difference': cashShift.summary.difference,
+          },
       });
       if (mounted) {
         ScaffoldMessenger.of(
@@ -226,6 +288,137 @@ class _ShiftReportScreenState extends ConsumerState<ShiftReportScreen> {
       if (mounted) setState(() => _printing = false);
     }
   }
+}
+
+class _CashReconciliationCard extends StatelessWidget {
+  const _CashReconciliationCard({required this.shift, required this.currency});
+
+  final CashShift shift;
+  final NumberFormat currency;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final summary = shift.summary;
+    return AppCard(
+      padding: EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Rekonsiliasi uang kas',
+                  style: theme.textTheme.titleMedium,
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  '${shift.number} • ${shift.isOpen ? 'Masih berjalan' : 'Sudah ditutup'}',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          Divider(color: theme.colorScheme.outline),
+          _ReportLine(
+            label: 'Saldo awal',
+            value: currency.format(summary.openingCash),
+          ),
+          _ReportLine(
+            label: 'Penjualan tunai',
+            value: currency.format(summary.cashSales),
+          ),
+          _ReportLine(
+            label: 'Kas masuk lain',
+            value: currency.format(
+              summary.manualCashIn + summary.adjustmentsIn,
+            ),
+          ),
+          _ReportLine(
+            label: 'Kas keluar & refund',
+            value: currency.format(summary.totalOut),
+          ),
+          _ReportLine(
+            label: 'Saldo kas sistem',
+            value: currency.format(summary.expectedCash),
+            emphasized: true,
+          ),
+          if (summary.closingCash != null)
+            _ReportLine(
+              label: 'Uang fisik',
+              value: currency.format(summary.closingCash),
+            ),
+          if (summary.difference != null)
+            _ReportLine(
+              label: 'Selisih',
+              value: currency.format(summary.difference),
+              emphasized: true,
+              valueColor: summary.difference == 0
+                  ? AppColors.success
+                  : AppColors.error,
+            ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReportLine extends StatelessWidget {
+  const _ReportLine({
+    required this.label,
+    required this.value,
+    this.emphasized = false,
+    this.valueColor,
+  });
+
+  final String label;
+  final String value;
+  final bool emphasized;
+  final Color? valueColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: emphasized ? FontWeight.w700 : FontWeight.w400,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Text(
+            value,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: valueColor,
+              fontWeight: emphasized ? FontWeight.w800 : FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+CashShift? _cashShiftForDate(CashOverview? overview, DateTime date) {
+  if (overview == null) return null;
+  final candidates = [
+    if (overview.currentShift != null) overview.currentShift!,
+    ...overview.recentShifts,
+  ];
+  for (final shift in candidates) {
+    if (DateUtils.isSameDay(shift.startedAt.toLocal(), date)) return shift;
+  }
+  return null;
 }
 
 String _paymentLabel(String method) => switch (method.toLowerCase()) {

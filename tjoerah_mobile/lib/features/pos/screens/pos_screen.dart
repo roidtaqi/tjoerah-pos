@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_layout.dart';
 import '../../../shared/components/app_badge.dart';
@@ -10,7 +11,12 @@ import '../../../shared/components/app_button.dart';
 import '../../../shared/components/app_search_bar.dart';
 import '../providers/cart_provider.dart';
 import '../providers/catalog_provider.dart';
+import '../../orders/models/order_history_model.dart';
+import '../../orders/providers/order_history_provider.dart';
+import '../../settings/providers/printer_provider.dart';
 import '../../settings/providers/transaction_settings_provider.dart';
+import '../../../core/printer/print_job.dart';
+import '../repositories/order_repository.dart';
 import '../widgets/category_chips.dart';
 import '../widgets/floating_cart.dart';
 import '../widgets/order_cart.dart';
@@ -24,6 +30,13 @@ class PosScreen extends ConsumerWidget {
     final isWide = AppBreakpoints.isWide(context);
     final cart = ref.watch(cartProvider);
     final transactionSettings = ref.watch(transactionSettingsProvider);
+    final openBillCount =
+        ref
+            .watch(orderHistoryProvider)
+            .value
+            ?.where((order) => order.isOpenBill)
+            .length ??
+        0;
     final settings = transactionSettings.asData?.value;
     if (settings != null &&
         (cart.taxEnabled != settings.taxEnabled ||
@@ -51,6 +64,30 @@ class PosScreen extends ConsumerWidget {
               ),
             ),
           const SizedBox(width: 4),
+          if (MediaQuery.sizeOf(context).width >= 760)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: OutlinedButton.icon(
+                onPressed: () => _showOpenBills(context, ref),
+                icon: const Icon(Icons.bookmarks_outlined),
+                label: Text('Open bill ($openBillCount)'),
+              ),
+            )
+          else
+            IconButton(
+              tooltip: 'Open bill aktif',
+              onPressed: () => _showOpenBills(context, ref),
+              icon: Badge(
+                isLabelVisible: openBillCount > 0,
+                label: Text('$openBillCount'),
+                child: const Icon(Icons.bookmarks_outlined),
+              ),
+            ),
+          IconButton(
+            tooltip: 'Kas outlet',
+            onPressed: () => context.push('/cash'),
+            icon: const Icon(Icons.account_balance_wallet_outlined),
+          ),
           IconButton(
             tooltip: 'Sinkronkan katalog',
             onPressed: () => _syncCatalog(context, ref),
@@ -103,7 +140,376 @@ class PosScreen extends ConsumerWidget {
       ),
     );
   }
+
+  Future<void> _showOpenBills(BuildContext context, WidgetRef ref) async {
+    final selected = await AppBottomSheet.show<OrderHistoryItem>(
+      context,
+      title: 'Open bill aktif',
+      subtitle: 'Pilih pelanggan untuk membuka atau menerima pembayaran.',
+      child: const _OpenBillPicker(),
+    );
+    if (selected == null || !context.mounted) return;
+    if (!await _prepareCartForSwitch(context, ref)) return;
+    _activateOpenBill(ref, selected);
+  }
+
+  Future<bool> _prepareCartForSwitch(
+    BuildContext context,
+    WidgetRef ref,
+  ) async {
+    final cart = ref.read(cartProvider);
+    if (cart.items.isEmpty) return true;
+    if (cart.isEditingOpenBill) {
+      final save = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Simpan tambahan?'),
+          content: Text(
+            '${cart.items.length} item baru belum tersimpan pada '
+            '${cart.openBill!.label}.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Tetap di sini'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              icon: const Icon(Icons.bookmark_add_outlined),
+              label: const Text('Simpan tambahan'),
+            ),
+          ],
+        ),
+      );
+      if (save != true || !context.mounted) return false;
+      return _appendCurrentOpenBill(context, ref, cart);
+    }
+
+    final action = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Pesanan belum disimpan'),
+        content: const Text(
+          'Simpan pesanan saat ini sebagai open bill sebelum berpindah pelanggan.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Batal'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, 'discard'),
+            child: const Text('Kosongkan'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(dialogContext, 'save'),
+            icon: const Icon(Icons.bookmark_add_outlined),
+            label: const Text('Simpan open bill'),
+          ),
+        ],
+      ),
+    );
+    if (action == 'discard') {
+      ref.read(cartProvider.notifier).clearCart();
+      return true;
+    }
+    if (action != 'save' || !context.mounted) return false;
+    return _saveCurrentAsOpenBill(context, ref, cart);
+  }
+
+  Future<bool> _saveCurrentAsOpenBill(
+    BuildContext context,
+    WidgetRef ref,
+    CartState cart,
+  ) async {
+    final label = await _promptOpenBillLabel(context, cart);
+    if (label == null || !context.mounted) return false;
+    try {
+      final created = await OrderRepository().createOpenBill(
+        items: cart.items,
+        subtotal: cart.subtotal,
+        discount: cart.discount,
+        tax: cart.tax,
+        total: cart.total,
+        orderType: cart.orderType,
+        tableId: cart.tableId,
+        tableName: cart.tableName,
+        note: cart.note,
+        customerId: cart.customerId,
+        customerName: cart.customerName,
+        openBillLabel: label,
+      );
+      final printData = _printDataForCart(
+        cart,
+        orderId: created.id,
+        receiptNumber: created.receiptNumber,
+        createdAt: created.createdAt,
+        isSynced: created.isSynced,
+      );
+      try {
+        await ref
+            .read(printerProvider.notifier)
+            .autoPrintKitchenTickets(printData);
+      } catch (_) {}
+      ref.read(cartProvider.notifier).clearCart();
+      await ref.read(orderHistoryProvider.notifier).refresh();
+      return true;
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Open bill belum dapat disimpan: $error')),
+        );
+      }
+      return false;
+    }
+  }
+
+  Future<bool> _appendCurrentOpenBill(
+    BuildContext context,
+    WidgetRef ref,
+    CartState cart,
+  ) async {
+    try {
+      final items = [...cart.items];
+      final batch = await OrderRepository().appendOpenBill(
+        serverId: cart.openBill!.serverId,
+        receiptNumber: cart.openBill!.receiptNumber,
+        items: items,
+      );
+      final printData = _printDataForCart(
+        cart.copyWith(items: items, submittedItems: const []),
+        orderId: cart.openBill!.serverId,
+        receiptNumber: cart.openBill!.receiptNumber,
+        createdAt: DateTime.now(),
+        isSynced: true,
+        note: 'Tambahan batch $batch',
+      );
+      try {
+        await ref
+            .read(printerProvider.notifier)
+            .autoPrintKitchenTickets(printData);
+      } catch (_) {}
+      ref.read(cartProvider.notifier).clearCart();
+      await ref.read(orderHistoryProvider.notifier).refresh();
+      return true;
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Tambahan belum dapat disimpan: $error')),
+        );
+      }
+      return false;
+    }
+  }
+
+  void _activateOpenBill(WidgetRef ref, OrderHistoryItem order) {
+    final discountPercent = order.subtotal > 0
+        ? (order.discount / order.subtotal * 100).clamp(0, 100).toDouble()
+        : 0.0;
+    ref
+        .read(cartProvider.notifier)
+        .startOpenBillEdit(
+          serverId: order.serverId!,
+          receiptNumber: order.receiptNumber,
+          createdAt: order.createdAt,
+          openBillLabel: order.openBillDisplayLabel,
+          submittedItems: order.items
+              .map(
+                (item) => SubmittedCartItem(
+                  productId: item.productId,
+                  name: item.name,
+                  price: item.price,
+                  quantity: item.quantity,
+                  station: item.station,
+                  submissionBatch: item.submissionBatch,
+                  submittedAt: item.submittedAt ?? order.createdAt,
+                ),
+              )
+              .toList(),
+          orderType: order.orderType,
+          discountPercent: discountPercent,
+          taxEnabled: order.taxRate > 0,
+          taxRate: order.taxRate,
+          tableId: order.tableId,
+          tableName: order.tableName,
+          customerId: order.customerId,
+          customerName: order.customerName,
+          note: order.note ?? '',
+        );
+  }
 }
+
+class _OpenBillPicker extends ConsumerStatefulWidget {
+  const _OpenBillPicker();
+
+  @override
+  ConsumerState<_OpenBillPicker> createState() => _OpenBillPickerState();
+}
+
+class _OpenBillPickerState extends ConsumerState<_OpenBillPicker> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(orderHistoryProvider.notifier).refresh();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = ref.watch(orderHistoryProvider);
+    return SizedBox(
+      height: MediaQuery.sizeOf(context).height * 0.62,
+      child: state.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (_, _) => Center(
+          child: OutlinedButton.icon(
+            onPressed: () => ref.read(orderHistoryProvider.notifier).refresh(),
+            icon: const Icon(Icons.refresh_rounded),
+            label: const Text('Muat ulang'),
+          ),
+        ),
+        data: (orders) {
+          final openBills = orders.where((order) => order.isOpenBill).toList();
+          if (openBills.isEmpty) {
+            return const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Text('Tidak ada open bill aktif.'),
+              ),
+            );
+          }
+          return ListView.separated(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
+            itemCount: openBills.length,
+            separatorBuilder: (_, _) => const Divider(height: 1),
+            itemBuilder: (context, index) {
+              final order = openBills[index];
+              return ListTile(
+                minTileHeight: 76,
+                leading: const Icon(Icons.bookmark_outline_rounded),
+                title: Text(
+                  order.openBillDisplayLabel,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                subtitle: Text(
+                  '${order.receiptNumber} - ${order.itemCount} item - '
+                  '${DateFormat('HH:mm').format(order.createdAt.toLocal())}',
+                ),
+                trailing: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      _posCurrency(order.total),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    if (order.isPending)
+                      const Text(
+                        'Menunggu sinkron',
+                        style: TextStyle(fontSize: 11),
+                      ),
+                  ],
+                ),
+                enabled: order.serverId != null && !order.isPending,
+                onTap: () => Navigator.pop(context, order),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+Future<String?> _promptOpenBillLabel(
+  BuildContext context,
+  CartState cart,
+) async {
+  final controller = TextEditingController(
+    text: cart.customerName ?? cart.tableName ?? '',
+  );
+  final formKey = GlobalKey<FormState>();
+  final result = await showDialog<String>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Identitas open bill'),
+      content: Form(
+        key: formKey,
+        child: TextFormField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 120,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(
+            labelText: 'Nama, ciri pelanggan, atau tempat duduk',
+            prefixIcon: Icon(Icons.person_pin_circle_outlined),
+          ),
+          validator: (value) => (value ?? '').trim().length < 2
+              ? 'Keterangan open bill wajib diisi'
+              : null,
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: const Text('Batal'),
+        ),
+        FilledButton(
+          onPressed: () {
+            if (!formKey.currentState!.validate()) return;
+            Navigator.pop(dialogContext, controller.text.trim());
+          },
+          child: const Text('Simpan'),
+        ),
+      ],
+    ),
+  );
+  controller.dispose();
+  return result;
+}
+
+TransactionPrintData _printDataForCart(
+  CartState cart, {
+  required String orderId,
+  required String receiptNumber,
+  required DateTime createdAt,
+  required bool isSynced,
+  String? note,
+}) {
+  return TransactionPrintData(
+    orderId: orderId,
+    receiptNumber: receiptNumber,
+    createdAt: createdAt,
+    orderTypeLabel: cart.orderTypeLabel,
+    tableName: cart.tableName,
+    customerName: cart.customerName,
+    note: note ?? cart.note,
+    paymentMethod: 'open_bill',
+    paymentBreakdown: const {},
+    items: cart.items
+        .map(
+          (item) => PrintOrderItem(
+            name: item.name,
+            quantity: item.quantity,
+            unitPrice: item.price,
+            station: item.station,
+          ),
+        )
+        .toList(),
+    subtotal: cart.newItemsSubtotal,
+    discount: 0,
+    tax: 0,
+    total: cart.newItemsSubtotal,
+    isSynced: isSynced,
+  );
+}
+
+String _posCurrency(double value) => NumberFormat.currency(
+  locale: 'id_ID',
+  symbol: 'Rp ',
+  decimalDigits: 0,
+).format(value);
 
 class _PhonePos extends StatelessWidget {
   const _PhonePos();

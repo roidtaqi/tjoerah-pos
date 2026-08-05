@@ -39,6 +39,9 @@ void main() {
     expect(find.text('Cetak struk & dapur'), findsOneWidget);
     expect(find.text('Struk'), findsOneWidget);
     expect(find.text('Dapur'), findsOneWidget);
+    expect(find.text('Kembalian pelanggan'), findsOneWidget);
+    expect(find.text('Rp 55.600'), findsOneWidget);
+    expect(find.text('Transaksi baru'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }
@@ -68,5 +71,7 @@ final _order = TransactionPrintData(
   discount: 0,
   tax: 4400,
   total: 44400,
+  amountReceived: 100000,
+  change: 55600,
   isSynced: true,
 );

@@ -385,25 +385,117 @@ class PrinterService {
         size: 1,
         align: PosAlign.center,
       );
+      document.text(
+        'Dicetak: ${report['generated_at']}',
+        align: PosAlign.center,
+      );
+      document.text('Petugas: ${report['operator']}', align: PosAlign.center);
       document.newLine();
       document.text('Total pesanan: ${report['total_orders']}');
-      document.text(
-        'Total pendapatan: ${_money(_asDouble(report['total_revenue']))}',
-        size: 1,
+      document.columns(
+        'Penjualan kotor',
+        _money(_asDouble(report['gross_revenue'])),
+        width,
+      );
+      document.columns(
+        'Refund',
+        _money(_asDouble(report['refund_total'])),
+        width,
+      );
+      document.columns(
+        'Penjualan bersih',
+        _money(_asDouble(report['total_revenue'])),
+        width,
       );
       document.text(_separator(width), align: PosAlign.center);
-      document.text('RINCIAN PEMBAYARAN', size: 1, align: PosAlign.center);
+      document.text(
+        'METODE PEMBAYARAN HARI INI',
+        size: 1,
+        align: PosAlign.center,
+      );
 
       final breakdown = report['payment_breakdown'];
+      final counts = report['payment_counts'];
+      var paymentTotal = 0.0;
       if (breakdown is Map) {
         for (final entry in breakdown.entries) {
+          final count = counts is Map
+              ? _asDouble(counts[entry.key]).toInt()
+              : 0;
+          final amount = _asDouble(entry.value);
+          paymentTotal += amount;
           document.columns(
-            _paymentLabel(entry.key.toString()),
-            _money(_asDouble(entry.value)),
+            '${_paymentLabel(entry.key.toString())} ($count trx)',
+            _money(amount),
             width,
           );
         }
       }
+      document.columns('TOTAL METODE', _money(paymentTotal), width);
+
+      final cashShift = report['cash_shift'];
+      if (cashShift is Map) {
+        document.text(_separator(width), align: PosAlign.center);
+        document.text('REKONSILIASI UANG KAS', size: 1, align: PosAlign.center);
+        document.text('Sesi: ${cashShift['number']}');
+        document.text('Dibuka: ${cashShift['started_at']}');
+        document.text('Petugas: ${cashShift['opened_by'] ?? '-'}');
+        document.columns(
+          'Saldo awal',
+          _money(_asDouble(cashShift['opening_cash'])),
+          width,
+        );
+        document.columns(
+          'Penjualan tunai',
+          _money(_asDouble(cashShift['cash_sales'])),
+          width,
+        );
+        document.columns(
+          'Kas masuk lain',
+          _money(
+            _asDouble(cashShift['manual_cash_in']) +
+                _asDouble(cashShift['adjustments_in']),
+          ),
+          width,
+        );
+        document.columns(
+          'Refund tunai',
+          _money(_asDouble(cashShift['cash_refunds'])),
+          width,
+        );
+        document.columns(
+          'Kas keluar lain',
+          _money(
+            _asDouble(cashShift['manual_cash_out']) +
+                _asDouble(cashShift['adjustments_out']),
+          ),
+          width,
+        );
+        document.columns(
+          'SALDO SISTEM',
+          _money(_asDouble(cashShift['expected_cash'])),
+          width,
+        );
+        if (cashShift['closing_cash'] != null) {
+          document.columns(
+            'Uang fisik',
+            _money(_asDouble(cashShift['closing_cash'])),
+            width,
+          );
+          document.columns(
+            'SELISIH',
+            _money(_asDouble(cashShift['difference'])),
+            width,
+          );
+          document.text('Ditutup: ${cashShift['ended_at']}');
+        } else {
+          document.text('Status: MASIH BERJALAN', align: PosAlign.center);
+        }
+      }
+      document.text(_separator(width), align: PosAlign.center);
+      document.text('Tanda tangan petugas:');
+      document.newLine(3);
+      document.text('(____________________)', align: PosAlign.center);
       await _writeDocument(document.finish(cutPaper: cutPaper));
     } catch (error) {
       if (error is PrinterException) rethrow;
@@ -648,7 +740,7 @@ class _EscPosDocument {
   final Generator _generator;
   final List<int> _bytes = [];
 
-  void newLine() => _bytes.addAll(_generator.emptyLines(1));
+  void newLine([int count = 1]) => _bytes.addAll(_generator.emptyLines(count));
 
   void text(String value, {int size = 0, PosAlign align = PosAlign.left}) {
     final large = size >= 2;

@@ -2,12 +2,16 @@
 
 namespace App\Domains\Reporting\Controllers;
 
+use App\Domains\Core\Models\Outlet;
 use App\Domains\Inventory\Models\InventoryItem;
 use App\Domains\Inventory\Models\StockMovement;
 use App\Domains\POS\Models\Order;
+use App\Domains\POS\Models\Payment;
+use App\Domains\POS\Models\Refund;
 use App\Domains\Reporting\Models\ProfitabilitySnapshot;
 use App\Domains\Reporting\Models\SystemAlert;
 use App\Http\Controllers\Controller;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -22,6 +26,71 @@ class ReportingController extends Controller
             ->groupBy(DB::raw('DATE(orders.created_at)'))
             ->orderBy('date')
             ->get());
+    }
+
+    public function shift(Request $request)
+    {
+        $validated = $request->validate([
+            'outlet_id' => 'required|integer|exists:outlets,id',
+            'date' => 'required|date_format:Y-m-d',
+        ]);
+        $outlet = $this->accessibleOutlet($request, (int) $validated['outlet_id']);
+        $timezone = $outlet->timezone ?: config('app.timezone', 'Asia/Makassar');
+        $start = CarbonImmutable::parse($validated['date'], $timezone)->startOfDay()->utc();
+        $end = $start->addDay();
+
+        $payments = Payment::query()
+            ->join('orders', 'orders.id', '=', 'payments.order_id')
+            ->where('orders.outlet_id', $outlet->id)
+            ->where('payments.status', 'completed')
+            ->whereNull('orders.deleted_at')
+            ->where('payments.paid_at', '>=', $start)
+            ->where('payments.paid_at', '<', $end)
+            ->get(['payments.order_id', 'payments.method', 'payments.amount']);
+
+        $paymentBreakdown = ['cash' => 0.0, 'qris' => 0.0, 'debit' => 0.0];
+        $paymentOrders = ['cash' => [], 'qris' => [], 'debit' => []];
+        foreach ($payments as $payment) {
+            $method = $this->normalizePaymentMethod((string) $payment->method);
+            $paymentBreakdown[$method] = ($paymentBreakdown[$method] ?? 0) + (float) $payment->amount;
+            $paymentOrders[$method][(string) $payment->order_id] = true;
+        }
+
+        $refunds = Refund::query()
+            ->join('orders', 'orders.id', '=', 'refunds.order_id')
+            ->where('orders.outlet_id', $outlet->id)
+            ->where('refunds.status', 'approved')
+            ->whereNull('orders.deleted_at')
+            ->where('refunds.created_at', '>=', $start)
+            ->where('refunds.created_at', '<', $end)
+            ->get(['refunds.method', 'refunds.amount']);
+        $refundBreakdown = [];
+        foreach ($refunds as $refund) {
+            $method = $this->normalizePaymentMethod((string) ($refund->method ?: 'unknown'));
+            $refundBreakdown[$method] = ($refundBreakdown[$method] ?? 0) + (float) $refund->amount;
+        }
+
+        $grossRevenue = round(array_sum($paymentBreakdown), 2);
+        $refundTotal = round(array_sum($refundBreakdown), 2);
+
+        return response()->json([
+            'date' => $validated['date'],
+            'timezone' => $timezone,
+            'outlet' => $outlet->only(['id', 'name']),
+            'total_orders' => $payments->pluck('order_id')->unique()->count(),
+            'gross_revenue' => $grossRevenue,
+            'refund_total' => $refundTotal,
+            'total_revenue' => round($grossRevenue - $refundTotal, 2),
+            'payment_breakdown' => collect($paymentBreakdown)
+                ->map(fn ($amount) => round($amount, 2))
+                ->all(),
+            'payment_counts' => collect($paymentOrders)
+                ->map(fn ($orders) => count($orders))
+                ->all(),
+            'refund_breakdown' => collect($refundBreakdown)
+                ->map(fn ($amount) => round($amount, 2))
+                ->all(),
+        ]);
     }
 
     public function exportSales(Request $request)
@@ -115,5 +184,32 @@ class ReportingController extends Controller
     private function refundAmountSql(): string
     {
         return "(SELECT COALESCE(SUM(order_refunds.amount), 0) FROM refunds AS order_refunds WHERE order_refunds.order_id = orders.id AND order_refunds.status = 'approved' AND order_refunds.deleted_at IS NULL)";
+    }
+
+    private function accessibleOutlet(Request $request, int $outletId): Outlet
+    {
+        $user = $request->user();
+        $query = Outlet::query()->whereKey($outletId);
+        if ($user->company_id) {
+            $query->where('company_id', $user->company_id);
+        } else {
+            $assigned = $user->outlets()->pluck('outlets.id')->map(fn ($id) => (int) $id);
+            if ($user->employee?->outlet_id) {
+                $assigned->push((int) $user->employee->outlet_id);
+            }
+            $query->whereIn('id', $assigned->unique()->all());
+        }
+
+        return $query->firstOrFail();
+    }
+
+    private function normalizePaymentMethod(string $method): string
+    {
+        return match (strtolower(trim($method))) {
+            'cash' => 'cash',
+            'qris' => 'qris',
+            'card', 'debit_card', 'debit' => 'debit',
+            default => strtolower(trim($method)) ?: 'unknown',
+        };
     }
 }

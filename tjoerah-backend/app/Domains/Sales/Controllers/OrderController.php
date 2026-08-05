@@ -8,6 +8,7 @@ use App\Domains\KDS\Models\KitchenTicket;
 use App\Domains\POS\Models\Order;
 use App\Domains\POS\Models\OrderItem;
 use App\Domains\POS\Models\Refund;
+use App\Domains\POS\Services\CashLedgerService;
 use App\Domains\Sales\DTOs\OrderData;
 use App\Domains\Sales\Services\OrderCancellationService;
 use App\Domains\Sales\Services\OrderService;
@@ -23,6 +24,7 @@ class OrderController extends Controller
         private OrderService $orderService,
         private OrderCancellationService $orderCancellationService,
         private ProductionIncidentService $productionIncidentService,
+        private CashLedgerService $cashLedgerService,
     ) {}
 
     public function index(Request $request)
@@ -110,7 +112,10 @@ class OrderController extends Controller
             'payment_method' => 'nullable|required_unless:is_open_bill,true|string',
             'receipt_number' => 'required|string|unique:orders,receipt_number',
             'meta' => 'nullable|array',
+            'meta.open_bill_label' => 'nullable|required_if:is_open_bill,true|string|min:2|max:120',
         ]);
+        // The meta payload is intentionally extensible for offline/idempotency data.
+        $validated['meta'] = $request->input('meta', []);
 
         $validated['items'] = $this->normalizeOrderItems($validated['items']);
         $outlet = Outlet::findOrFail($validated['outlet_id']);
@@ -340,6 +345,7 @@ class OrderController extends Controller
             'type' => 'nullable|string|in:full,partial',
             'inventory_outcome' => 'nullable|string|in:no_stock_return,wrong_discard,wrong_remake',
             'reason' => 'required|string',
+            'refund_method' => 'nullable|string|in:cash,qris,debit_card,mixed',
         ]);
 
         $orderItem = isset($validated['order_item_id'])
@@ -399,7 +405,14 @@ class OrderController extends Controller
                 'inventory_outcome' => $outcome,
                 'reason' => $validated['reason'],
                 'status' => 'approved',
+                'method' => $validated['refund_method'] ?? null,
             ]);
+
+            $this->cashLedgerService->recordRefund(
+                $refund,
+                $order,
+                $validated['refund_method'] ?? null,
+            );
 
             $incident = null;
             if ($orderItem && $outcome !== 'no_stock_return') {

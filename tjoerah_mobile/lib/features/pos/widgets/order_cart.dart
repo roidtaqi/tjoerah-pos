@@ -40,7 +40,7 @@ class OrderCart extends ConsumerWidget {
                   children: [
                     Text(
                       cart.isEditingOpenBill
-                          ? 'Tambah ${cart.openBill!.receiptNumber}'
+                          ? cart.openBill!.label
                           : 'Pesanan saat ini',
                       style: theme.textTheme.titleLarge,
                     ),
@@ -59,8 +59,8 @@ class OrderCart extends ConsumerWidget {
                             icon: Icons.table_restaurant_outlined,
                           ),
                         if (cart.isEditingOpenBill)
-                          const AppBadge(
-                            text: 'Open bill',
+                          AppBadge(
+                            text: cart.openBill!.receiptNumber,
                             icon: Icons.bookmark_added_outlined,
                           ),
                       ],
@@ -703,6 +703,13 @@ class _OrderTotalsState extends ConsumerState<_OrderTotals> {
                 icon: Icons.arrow_forward_rounded,
                 onPressed: () => showPaymentFlow(context),
               ),
+            ] else if (cart.items.isEmpty) ...[
+              const SizedBox(height: 8),
+              AppButton(
+                text: 'Bayar ${currency.format(cart.total)}',
+                icon: Icons.payments_outlined,
+                onPressed: () => showPaymentFlow(context),
+              ),
             ],
           ],
         ),
@@ -716,28 +723,8 @@ class _OrderTotalsState extends ConsumerState<_OrderTotals> {
       await _appendOpenBill(cart);
       return;
     }
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Buat open bill?'),
-        content: const Text(
-          'Pesanan akan disimpan sebagai belum dibayar. Produk bar atau dapur '
-          'dikirim ke stasiun produksi dan stok bahannya dikurangi satu kali.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Batal'),
-          ),
-          FilledButton.icon(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            icon: const Icon(Icons.send_outlined),
-            label: const Text('Simpan & kirim'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
+    final openBillLabel = await _requestOpenBillLabel(cart);
+    if (openBillLabel == null || !mounted) return;
 
     setState(() => _isSavingOpenBill = true);
     try {
@@ -750,9 +737,10 @@ class _OrderTotalsState extends ConsumerState<_OrderTotals> {
         orderType: cart.orderType,
         tableId: cart.tableId,
         tableName: cart.tableName,
-        note: cart.note,
+        note: cart.note.isNotEmpty ? cart.note : 'Open bill: $openBillLabel',
         customerId: cart.customerId,
         customerName: cart.customerName,
+        openBillLabel: openBillLabel,
       );
       final printData = TransactionPrintData(
         orderId: created.id,
@@ -836,6 +824,64 @@ class _OrderTotalsState extends ConsumerState<_OrderTotals> {
     }
   }
 
+  Future<String?> _requestOpenBillLabel(CartState cart) async {
+    final controller = TextEditingController(
+      text: cart.customerName ?? cart.tableName ?? '',
+    );
+    final formKey = GlobalKey<FormState>();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Simpan open bill'),
+        content: SizedBox(
+          width: 420,
+          child: Form(
+            key: formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextFormField(
+                  controller: controller,
+                  autofocus: true,
+                  textCapitalization: TextCapitalization.words,
+                  maxLength: 120,
+                  decoration: const InputDecoration(
+                    labelText: 'Nama, ciri pelanggan, atau tempat duduk',
+                    prefixIcon: Icon(Icons.person_pin_circle_outlined),
+                  ),
+                  validator: (value) => (value ?? '').trim().length < 2
+                      ? 'Keterangan open bill wajib diisi'
+                      : null,
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Produk bar atau dapur akan dikirim ke stasiun produksi.',
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Batal'),
+          ),
+          FilledButton.icon(
+            onPressed: () {
+              if (!formKey.currentState!.validate()) return;
+              Navigator.pop(dialogContext, controller.text.trim());
+            },
+            icon: const Icon(Icons.send_outlined),
+            label: const Text('Simpan & kirim'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return result;
+  }
+
   Future<void> _appendOpenBill(CartState cart) async {
     if (cart.items.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -908,7 +954,9 @@ class _OrderTotalsState extends ConsumerState<_OrderTotals> {
       final printResult = await ref
           .read(printerProvider.notifier)
           .autoPrintKitchenTickets(printData);
-      ref.read(cartProvider.notifier).clearCart();
+      ref
+          .read(cartProvider.notifier)
+          .markOpenBillItemsSubmitted(submissionBatch: batch);
       await ref.read(orderHistoryProvider.notifier).refresh();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

@@ -12,6 +12,7 @@ use App\Domains\POS\Models\Order;
 use App\Domains\POS\Models\Refund;
 use App\Domains\POS\Models\TableSession;
 use App\Domains\POS\Models\VoidTransaction;
+use App\Domains\POS\Services\CashLedgerService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
@@ -19,6 +20,8 @@ use Throwable;
 
 class OrderCancellationService
 {
+    public function __construct(private CashLedgerService $cashLedgerService) {}
+
     /**
      * @return array{order: Order, void: VoidTransaction, refund: ?Refund}
      */
@@ -75,6 +78,13 @@ class OrderCancellationService
 
             $refund = null;
             if ($refundableAmount > 0.009) {
+                $refundMethod = $completedPayments
+                    ->pluck('method')
+                    ->map(fn ($method) => strtolower((string) $method))
+                    ->unique()
+                    ->count() === 1
+                    ? $completedPayments->first()?->method
+                    : 'mixed';
                 $refund = Refund::create([
                     'order_id' => $locked->id,
                     'payment_id' => $completedPayments->last()?->id,
@@ -86,7 +96,9 @@ class OrderCancellationService
                     'inventory_outcome' => 'no_stock_return',
                     'reason' => "Pembatalan pesanan: {$reason}",
                     'status' => 'approved',
+                    'method' => $refundMethod,
                 ]);
+                $this->cashLedgerService->recordRefund($refund, $locked, $refundMethod);
             }
 
             $void = VoidTransaction::create([

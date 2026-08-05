@@ -61,6 +61,8 @@ class OrderRepository {
     double? amountReceived,
     double change = 0,
     bool isOpenBill = false,
+    String? openBillLabel,
+    int? cashShiftId,
   }) async {
     final orderId = _uuid.v4();
     final now = DateTime.now();
@@ -106,6 +108,9 @@ class OrderRepository {
         'client_order_id': orderId,
         if (!isOpenBill) 'payment_breakdown': paymentBreakdown,
         if (isOpenBill) 'server_order_status': 'open',
+        if (isOpenBill && openBillLabel != null)
+          'open_bill_label': openBillLabel.trim(),
+        'cash_shift_id': ?cashShiftId,
         if (note != null && note.isNotEmpty) 'note': note,
         if (customerName != null && customerName.isNotEmpty)
           'customer_name': customerName,
@@ -178,6 +183,7 @@ class OrderRepository {
     String? note,
     String? customerId,
     String? customerName,
+    required String openBillLabel,
   }) {
     return createOrder(
       items: items,
@@ -194,6 +200,7 @@ class OrderRepository {
       paymentMethod: 'open_bill',
       paymentBreakdown: const {},
       isOpenBill: true,
+      openBillLabel: openBillLabel,
     );
   }
 
@@ -204,12 +211,14 @@ class OrderRepository {
     required Map<String, double> paymentBreakdown,
     double? amountReceived,
     double change = 0,
+    int? cashShiftId,
   }) async {
     final response = await ApiClient.post('/orders/$serverId/pay', {
       'method': method,
       'payment_breakdown': paymentBreakdown,
       'amount_received': amountReceived,
       'change': change,
+      'cash_shift_id': ?cashShiftId,
     });
     if (response.statusCode != 200 && response.statusCode != 201) {
       throw StateError(_responseMessage(response.statusCode, response.body));

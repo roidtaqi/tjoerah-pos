@@ -2,9 +2,14 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 
 class AttendanceCameraScreen extends StatefulWidget {
-  const AttendanceCameraScreen({super.key, required this.actionLabel});
+  const AttendanceCameraScreen({
+    super.key,
+    required this.actionLabel,
+    this.preferredLensDirection = CameraLensDirection.front,
+  });
 
   final String actionLabel;
+  final CameraLensDirection preferredLensDirection;
 
   @override
   State<AttendanceCameraScreen> createState() => _AttendanceCameraScreenState();
@@ -48,7 +53,7 @@ class _AttendanceCameraScreenState extends State<AttendanceCameraScreen>
       final cameras = await availableCameras();
       if (cameras.isEmpty) throw Exception('Kamera tidak tersedia.');
       _camera = cameras.cast<CameraDescription?>().firstWhere(
-        (camera) => camera?.lensDirection == CameraLensDirection.front,
+        (camera) => camera?.lensDirection == widget.preferredLensDirection,
         orElse: () => cameras.first,
       );
       final controller = CameraController(

@@ -87,26 +87,69 @@ class SystemAlertModel {
 class ShiftReportModel {
   final DateTime date;
   final int totalOrders;
+  final double grossRevenue;
+  final double refundTotal;
   final double totalRevenue;
   final Map<String, double> paymentBreakdown;
+  final Map<String, int> paymentCounts;
+  final Map<String, double> refundBreakdown;
 
   ShiftReportModel({
     required this.date,
     required this.totalOrders,
+    required this.grossRevenue,
+    required this.refundTotal,
     required this.totalRevenue,
     required this.paymentBreakdown,
+    required this.paymentCounts,
+    this.refundBreakdown = const {},
   });
+
+  factory ShiftReportModel.fromJson(Map<String, dynamic> json) {
+    final payments = _doubleMap(json['payment_breakdown']);
+    final counts = _intMap(json['payment_counts']);
+    for (final method in ['cash', 'qris', 'debit']) {
+      payments.putIfAbsent(method, () => 0);
+      counts.putIfAbsent(method, () => 0);
+    }
+    final totalRevenue = _number(json['total_revenue']);
+    return ShiftReportModel(
+      date: DateTime.tryParse(json['date']?.toString() ?? '') ?? DateTime.now(),
+      totalOrders: _integer(json['total_orders']),
+      grossRevenue: json.containsKey('gross_revenue')
+          ? _number(json['gross_revenue'])
+          : totalRevenue,
+      refundTotal: _number(json['refund_total']),
+      totalRevenue: totalRevenue,
+      paymentBreakdown: payments,
+      paymentCounts: counts,
+      refundBreakdown: _doubleMap(json['refund_breakdown']),
+    );
+  }
 
   factory ShiftReportModel.fromLocalDb(
     DateTime date,
     Map<String, dynamic> dbResult,
   ) {
-    return ShiftReportModel(
-      date: date,
-      totalOrders: dbResult['total_orders'] as int? ?? 0,
-      totalRevenue: dbResult['total_revenue'] as double? ?? 0.0,
-      paymentBreakdown:
-          dbResult['payment_breakdown'] as Map<String, double>? ?? {},
-    );
+    return ShiftReportModel.fromJson({...dbResult, 'date': _dateKey(date)});
   }
 }
+
+Map<String, double> _doubleMap(Object? raw) => raw is Map
+    ? raw.map((key, value) => MapEntry(key.toString(), _number(value)))
+    : <String, double>{};
+
+Map<String, int> _intMap(Object? raw) => raw is Map
+    ? raw.map((key, value) => MapEntry(key.toString(), _integer(value)))
+    : <String, int>{};
+
+double _number(Object? value) =>
+    value is num ? value.toDouble() : double.tryParse('$value') ?? 0;
+
+int _integer(Object? value) =>
+    value is num ? value.toInt() : int.tryParse('$value') ?? 0;
+
+String _dateKey(DateTime value) =>
+    '${value.year.toString().padLeft(4, '0')}-'
+    '${value.month.toString().padLeft(2, '0')}-'
+    '${value.day.toString().padLeft(2, '0')}';

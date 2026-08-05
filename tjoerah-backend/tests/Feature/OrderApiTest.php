@@ -204,6 +204,7 @@ class OrderApiTest extends TestCase
         );
         unset($openPayload['payment_method']);
         $openPayload['is_open_bill'] = true;
+        $openPayload['meta']['open_bill_label'] = 'Meja depan';
         $oldOpen = $this->postJson('/api/orders', $openPayload)->assertCreated();
 
         Order::whereKey($oldPaid->json('data.id'))->update([
@@ -274,6 +275,7 @@ class OrderApiTest extends TestCase
         );
         unset($payload['payment_method']);
         $payload['is_open_bill'] = true;
+        $payload['meta']['open_bill_label'] = 'Dina - dekat jendela';
         $payload['customer_id'] = $customer->id;
 
         $created = $this->postJson('/api/orders', $payload);

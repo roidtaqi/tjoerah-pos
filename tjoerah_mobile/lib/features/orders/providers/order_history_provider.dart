@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/database/database_helper.dart';
 import '../../../core/network/api_client.dart';
 import '../../pos/repositories/order_repository.dart';
+import '../../cash/providers/cash_provider.dart';
 import '../models/order_history_model.dart';
 
 class OrderHistoryMutationResult {
@@ -144,6 +145,7 @@ class OrderHistoryNotifier extends AsyncNotifier<List<OrderHistoryItem>> {
         paymentBreakdown: paymentBreakdown,
         amountReceived: amountReceived,
         change: change,
+        cashShiftId: ref.read(activeCashShiftIdProvider),
       );
       await refresh();
       return const OrderHistoryMutationResult(

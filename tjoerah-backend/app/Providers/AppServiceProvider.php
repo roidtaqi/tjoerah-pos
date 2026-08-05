@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Domains\CRM\Listeners\AwardLoyaltyPointsListener;
 use App\Domains\Inventory\Listeners\DeductInventoryOnOrderSubmission;
+use App\Domains\POS\Listeners\RecordCashSaleOnOrderCompleted;
 use App\Domains\Sales\Events\OrderCompleted;
 use App\Domains\Sales\Events\OrderSubmitted;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -45,6 +46,11 @@ class AppServiceProvider extends ServiceProvider
         Event::listen(
             OrderCompleted::class,
             AwardLoyaltyPointsListener::class
+        );
+
+        Event::listen(
+            OrderCompleted::class,
+            RecordCashSaleOnOrderCompleted::class
         );
     }
 }

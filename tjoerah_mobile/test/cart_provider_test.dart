@@ -91,6 +91,7 @@ void main() {
       serverId: 'server-order',
       receiptNumber: 'TJ-OPEN-001',
       createdAt: DateTime(2026, 8, 2, 10),
+      openBillLabel: 'Meja 4',
       submittedItems: [
         SubmittedCartItem(
           productId: '1',
@@ -113,6 +114,11 @@ void main() {
 
     final state = container.read(cartProvider);
     expect(state.isEditingOpenBill, isTrue);
+    cart.markOpenBillItemsSubmitted(submissionBatch: 2);
+    final submitted = container.read(cartProvider);
+    expect(submitted.items, isEmpty);
+    expect(submitted.submittedItems, hasLength(2));
+    expect(submitted.isEditingOpenBill, isTrue);
     expect(state.submittedItems, hasLength(1));
     expect(state.items, hasLength(1));
     expect(state.subtotal, 60000);

@@ -5,6 +5,9 @@ import 'package:tjoerah_mobile/core/theme/app_theme.dart';
 import 'package:tjoerah_mobile/core/theme/theme_provider.dart';
 import 'package:tjoerah_mobile/features/auth/providers/auth_provider.dart';
 import 'package:tjoerah_mobile/features/customers/models/customer_model.dart';
+import 'package:tjoerah_mobile/features/cash/models/cash_model.dart';
+import 'package:tjoerah_mobile/features/cash/providers/cash_provider.dart';
+import 'package:tjoerah_mobile/features/cash/screens/cash_management_screen.dart';
 import 'package:tjoerah_mobile/features/customers/providers/customer_provider.dart';
 import 'package:tjoerah_mobile/features/customers/screens/customers_screen.dart';
 import 'package:tjoerah_mobile/features/dashboard/screens/dashboard_screen.dart';
@@ -135,7 +138,7 @@ void main() {
       overrides: [cartProvider.overrideWith(_PreviewOpenBillCartNotifier.new)],
     );
 
-    expect(find.text('Tambah TJ-OPEN-001'), findsOneWidget);
+    expect(find.text('Rina - dekat pintu'), findsOneWidget);
     expect(
       find.text('1 item baru akan disimpan ke TJ-OPEN-001.'),
       findsOneWidget,
@@ -366,6 +369,35 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets(
+    'shift report shows every payment method and cash reconciliation',
+    (tester) async {
+      await _render(
+        tester,
+        size: const Size(390, 844),
+        screen: const ShiftReportScreen(),
+        overrides: [
+          reportsProvider.overrideWith(_PreviewReportsNotifier.new),
+          cashProvider.overrideWith(_PreviewCashNotifier.new),
+          authProvider.overrideWith(_PreviewOwnerAuthNotifier.new),
+          printerProvider.overrideWith(_PreviewPrinterNotifier.new),
+        ],
+      );
+
+      expect(find.text('Metode pembayaran hari ini'), findsOneWidget);
+      expect(find.text('Tunai'), findsOneWidget);
+      expect(find.text('QRIS'), findsOneWidget);
+      expect(find.text('Kartu debit'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('Rekonsiliasi uang kas'),
+        240,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(find.text('Saldo kas sistem'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('role-specific screens render useful data without overflow', (
     tester,
   ) async {
@@ -375,6 +407,7 @@ void main() {
       screen: const OrdersScreen(),
       overrides: [
         orderHistoryProvider.overrideWith(_PreviewOrderHistoryNotifier.new),
+        cashProvider.overrideWith(_PreviewCashNotifier.new),
         printerProvider.overrideWith(_PreviewPrinterNotifier.new),
         authProvider.overrideWith(_PreviewOwnerAuthNotifier.new),
       ],
@@ -386,6 +419,9 @@ void main() {
     expect(find.text('Tunai'), findsWidgets);
     expect(find.text('QRIS'), findsOneWidget);
     expect(find.text('Kartu debit'), findsOneWidget);
+    expect(find.text('Laporan kas berjalan'), findsOneWidget);
+    expect(find.text('Saldo kas sistem'), findsOneWidget);
+    expect(find.text('Rp 628.000'), findsOneWidget);
     expect(find.text('TJ-OLD-001'), findsNothing);
     expect(tester.takeException(), isNull);
 
@@ -520,8 +556,15 @@ void main() {
         screen: const ShiftReportScreen(),
         overrides: [
           reportsProvider.overrideWith(_PreviewReportsNotifier.new),
+          cashProvider.overrideWith(_PreviewCashNotifier.new),
+          authProvider.overrideWith(_PreviewOwnerAuthNotifier.new),
           printerProvider.overrideWith(_PreviewPrinterNotifier.new),
         ],
+      ),
+      (
+        label: 'Cash management',
+        screen: const CashManagementScreen(),
+        overrides: [cashProvider.overrideWith(_PreviewCashNotifier.new)],
       ),
       (
         label: 'Settings',
@@ -538,6 +581,7 @@ void main() {
         screen: const OrdersScreen(),
         overrides: [
           orderHistoryProvider.overrideWith(_PreviewOrderHistoryNotifier.new),
+          cashProvider.overrideWith(_PreviewCashNotifier.new),
           printerProvider.overrideWith(_PreviewPrinterNotifier.new),
         ],
       ),
@@ -609,6 +653,7 @@ void main() {
         screen: const OrdersScreen(),
         overrides: [
           orderHistoryProvider.overrideWith(_PreviewOrderHistoryNotifier.new),
+          cashProvider.overrideWith(_PreviewCashNotifier.new),
           printerProvider.overrideWith(_PreviewPrinterNotifier.new),
         ],
       ),
@@ -747,6 +792,7 @@ class _PreviewOpenBillCartNotifier extends CartNotifier {
       serverId: 'server-open-1',
       receiptNumber: 'TJ-OPEN-001',
       createdAt: DateTime(2026, 8, 2, 10),
+      label: 'Rina - dekat pintu',
     ),
     submittedItems: [
       SubmittedCartItem(
@@ -918,6 +964,20 @@ class _PreviewReportsNotifier extends ReportsNotifier {
           createdAt: now,
         ),
       ],
+      shiftReport: ShiftReportModel(
+        date: now,
+        totalOrders: 18,
+        grossRevenue: 1325000,
+        refundTotal: 25000,
+        totalRevenue: 1300000,
+        paymentBreakdown: const {
+          'cash': 625000,
+          'qris': 450000,
+          'debit': 250000,
+        },
+        paymentCounts: const {'cash': 9, 'qris': 6, 'debit': 3},
+        refundBreakdown: const {'cash': 25000},
+      ),
     );
   }
 }
@@ -1045,6 +1105,47 @@ class _PreviewSyncNotifier extends SyncNotifier {
 class _PreviewPrinterNotifier extends PrinterNotifier {
   @override
   PrinterState build() => PrinterState();
+}
+
+class _PreviewCashNotifier extends CashNotifier {
+  @override
+  Future<CashOverview> build() async => CashOverview(
+    outletId: 1,
+    outletName: 'Tjoerah Coffee - Renon',
+    canAdjust: true,
+    currentShift: CashShift(
+      id: 1,
+      outletId: 1,
+      number: 'KAS-001',
+      status: 'open',
+      startedAt: DateTime(2026, 8, 5, 7, 30),
+      openedBy: 'Ayu Kasir',
+      summary: const CashSummary(
+        openingCash: 300000,
+        cashSales: 275000,
+        manualCashIn: 100000,
+        cashRefunds: 25000,
+        manualCashOut: 22000,
+        adjustmentsIn: 0,
+        adjustmentsOut: 0,
+        expectedCash: 628000,
+      ),
+      movements: [
+        CashMovement(
+          id: 1,
+          type: 'cash_out',
+          category: 'urgent_purchase',
+          amount: 22000,
+          signedAmount: -22000,
+          occurredAt: DateTime(2026, 8, 5, 11),
+          hasEvidence: true,
+          note: 'Membeli satu galon air',
+          userName: 'Ayu Kasir',
+        ),
+      ],
+    ),
+    recentShifts: const [],
+  );
 }
 
 class _PreviewThemeNotifier extends ThemeModeNotifier {

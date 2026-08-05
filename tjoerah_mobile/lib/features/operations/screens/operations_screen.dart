@@ -127,6 +127,14 @@ class OperationsScreen extends ConsumerWidget {
                         const Divider(),
                       ],
                       AppListTile(
+                        title: 'Kas outlet',
+                        subtitle:
+                            'Uang awal, pemasukan, pengeluaran, dan tutup kas',
+                        icon: Icons.account_balance_wallet_outlined,
+                        onTap: () => context.push('/cash'),
+                      ),
+                      const Divider(),
+                      AppListTile(
                         title: 'Absensi saya',
                         subtitle:
                             'Catat masuk atau pulang dengan foto dan lokasi',

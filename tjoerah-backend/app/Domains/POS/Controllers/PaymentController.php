@@ -20,6 +20,7 @@ class PaymentController extends Controller
             'method' => 'required|string|max:100',
             'amount' => 'required|numeric|min:0',
             'reference_number' => 'nullable|string|max:255',
+            'cash_shift_id' => 'nullable|integer|exists:shifts,id',
             'meta' => 'nullable|array',
         ]);
         $order = Order::findOrFail($validated['order_id']);
@@ -36,8 +37,22 @@ class PaymentController extends Controller
             'paid_at' => now(),
         ]);
 
+        $wasPaidNow = false;
         if ($order->payments()->sum('amount') >= $order->total) {
-            $order->update(['status' => 'paid', 'completed_at' => $order->completed_at ?? now()]);
+            $wasPaidNow = $order->status !== 'paid';
+            $meta = $order->meta ?? [];
+            $meta['cashier_user_id'] = $request->user()?->id;
+            if (isset($validated['cash_shift_id'])) {
+                $meta['cash_shift_id'] = $validated['cash_shift_id'];
+            }
+            $order->update([
+                'status' => 'paid',
+                'completed_at' => $order->completed_at ?? now(),
+                'meta' => $meta,
+            ]);
+        }
+        if ($wasPaidNow) {
+            OrderCompleted::dispatch($order->fresh());
         }
 
         return response()->json($payment, 201);
@@ -53,9 +68,10 @@ class PaymentController extends Controller
             'amount_received' => 'nullable|numeric|min:0',
             'change' => 'nullable|numeric|min:0',
             'reference_number' => 'nullable|string|max:255',
+            'cash_shift_id' => 'nullable|integer|exists:shifts,id',
         ]);
 
-        [$paidOrder, $wasPaidNow] = DB::transaction(function () use ($order, $validated) {
+        [$paidOrder, $wasPaidNow] = DB::transaction(function () use ($request, $order, $validated) {
             $locked = Order::lockForUpdate()->findOrFail($order->id);
             if ($locked->status === 'paid') {
                 return [$locked, false];
@@ -96,6 +112,10 @@ class PaymentController extends Controller
             $meta['payment_breakdown'] = $breakdown;
             $meta['amount_received'] = $validated['amount_received'] ?? null;
             $meta['change'] = $validated['change'] ?? 0;
+            $meta['cashier_user_id'] = $request->user()?->id;
+            if (isset($validated['cash_shift_id'])) {
+                $meta['cash_shift_id'] = $validated['cash_shift_id'];
+            }
             $locked->update([
                 'status' => 'paid',
                 'completed_at' => now(),

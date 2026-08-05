@@ -12,6 +12,7 @@ use App\Domains\Inventory\Controllers\InventoryController;
 use App\Domains\Inventory\Controllers\PurchaseController;
 use App\Domains\Inventory\Controllers\WastageController;
 use App\Domains\KDS\Controllers\KdsController;
+use App\Domains\POS\Controllers\CashController;
 use App\Domains\POS\Controllers\PaymentController;
 use App\Domains\POS\Controllers\ProductCatalogController;
 use App\Domains\POS\Controllers\ReceiptController;
@@ -80,6 +81,12 @@ Route::middleware('auth:api')->group(function () {
     Route::post('/orders/{order}/pay', [PaymentController::class, 'pay']);
     Route::post('/payments', [PaymentController::class, 'store']);
     Route::get('/receipts/{order}', [ReceiptController::class, 'show']);
+
+    Route::get('/cash/overview', [CashController::class, 'overview']);
+    Route::post('/cash/sessions/open', [CashController::class, 'open']);
+    Route::post('/cash/sessions/{shift}/close', [CashController::class, 'close']);
+    Route::post('/cash/movements', [CashController::class, 'movement']);
+    Route::get('/cash/movements/{cashMovement}/evidence', [CashController::class, 'evidence']);
 
     Route::get('/transaction-settings', [TransactionSettingsController::class, 'show']);
     Route::put('/transaction-settings', [TransactionSettingsController::class, 'update'])
@@ -185,6 +192,7 @@ Route::middleware('auth:api')->group(function () {
     Route::post('/shifts/end', [EmployeeController::class, 'endShift']);
 
     Route::get('/reports/sales', [ReportingController::class, 'sales']);
+    Route::get('/reports/shift', [ReportingController::class, 'shift']);
     Route::get('/reports/sales/export', [ReportingController::class, 'exportSales']);
     Route::get('/reports/products', [ReportingController::class, 'products']);
     Route::get('/reports/inventory', [ReportingController::class, 'inventory']);

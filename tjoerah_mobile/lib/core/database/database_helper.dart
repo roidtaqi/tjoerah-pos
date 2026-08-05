@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 
@@ -376,62 +378,71 @@ class DatabaseHelper {
     final endOfDay = DateTime(
       date.year,
       date.month,
-      date.day,
-      23,
-      59,
-      59,
+      date.day + 1,
     ).toIso8601String();
 
-    // Sum totals using JSON1 extension
-    final salesResult = await db.rawQuery(
-      '''
-      SELECT 
-        COUNT(id) as total_orders,
-        SUM(CAST(json_extract(payload, '\$.total') AS REAL)) as total_revenue
-      FROM offline_orders
-      WHERE created_at >= ? AND created_at <= ?
-        AND COALESCE(json_extract(payload, '\$.is_open_bill'), 0) = 0
-        AND COALESCE(
-          json_extract(payload, '\$.meta.server_order_status'),
-          'completed'
-        ) != 'voided'
-    ''',
-      [startOfDay, endOfDay],
+    final rows = await db.query(
+      'offline_orders',
+      columns: ['payload'],
+      where: 'created_at >= ? AND created_at < ?',
+      whereArgs: [startOfDay, endOfDay],
     );
+    var totalOrders = 0;
+    var grossRevenue = 0.0;
+    var refundTotal = 0.0;
+    final paymentBreakdown = <String, double>{'cash': 0, 'qris': 0, 'debit': 0};
+    final paymentCounts = <String, int>{'cash': 0, 'qris': 0, 'debit': 0};
+    for (final row in rows) {
+      final payload = Map<String, dynamic>.from(
+        jsonDecode(row['payload']?.toString() ?? '{}') as Map,
+      );
+      final meta = payload['meta'] is Map
+          ? Map<String, dynamic>.from(payload['meta'] as Map)
+          : <String, dynamic>{};
+      final status = meta['server_order_status']?.toString() ?? 'completed';
+      if (payload['is_open_bill'] == true || status == 'voided') continue;
 
-    // Payment method breakdown
-    final methodsResult = await db.rawQuery(
-      '''
-      SELECT 
-        json_extract(payload, '\$.payment_method') as payment_method,
-        SUM(CAST(json_extract(payload, '\$.total') AS REAL)) as amount
-      FROM offline_orders
-      WHERE created_at >= ? AND created_at <= ?
-        AND COALESCE(json_extract(payload, '\$.is_open_bill'), 0) = 0
-        AND COALESCE(
-          json_extract(payload, '\$.meta.server_order_status'),
-          'completed'
-        ) != 'voided'
-      GROUP BY payment_method
-    ''',
-      [startOfDay, endOfDay],
-    );
-
-    final totalOrders = Sqflite.firstIntValue(salesResult) ?? 0;
-    final totalRevenue =
-        (salesResult.first['total_revenue'] as num?)?.toDouble() ?? 0.0;
-
-    final Map<String, double> paymentBreakdown = {};
-    for (var row in methodsResult) {
-      final method = row['payment_method'] as String? ?? 'unknown';
-      final amount = (row['amount'] as num?)?.toDouble() ?? 0.0;
-      paymentBreakdown[method] = amount;
+      totalOrders++;
+      final total = _reportNumber(payload['total']);
+      final refunded = _reportNumber(meta['refunded_amount']);
+      grossRevenue += total;
+      refundTotal += refunded;
+      final rawBreakdown = meta['payment_breakdown'] is Map
+          ? Map<String, dynamic>.from(meta['payment_breakdown'] as Map)
+          : <String, dynamic>{
+              payload['payment_method']?.toString() ?? 'unknown': total,
+            };
+      final methodsInOrder = <String>{};
+      for (final entry in rawBreakdown.entries) {
+        final method = _reportPaymentMethod(entry.key);
+        final amount = _reportNumber(entry.value);
+        if (amount <= 0) continue;
+        paymentBreakdown[method] = (paymentBreakdown[method] ?? 0) + amount;
+        methodsInOrder.add(method);
+      }
+      for (final method in methodsInOrder) {
+        paymentCounts[method] = (paymentCounts[method] ?? 0) + 1;
+      }
     }
 
     return {
       'total_orders': totalOrders,
-      'total_revenue': totalRevenue,
+      'gross_revenue': grossRevenue,
+      'refund_total': refundTotal,
+      'total_revenue': grossRevenue - refundTotal,
       'payment_breakdown': paymentBreakdown,
+      'payment_counts': paymentCounts,
     };
   }
 }
+
+double _reportNumber(Object? value) =>
+    value is num ? value.toDouble() : double.tryParse('$value') ?? 0;
+
+String _reportPaymentMethod(String method) =>
+    switch (method.trim().toLowerCase()) {
+      'cash' => 'cash',
+      'qris' => 'qris',
+      'card' || 'debit_card' || 'debit' => 'debit',
+      final value => value.isEmpty ? 'unknown' : value,
+    };

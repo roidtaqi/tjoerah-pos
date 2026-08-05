@@ -29,6 +29,7 @@ class OrderHistoryItem {
     this.cancellationReason,
     this.cancellationInventoryOutcome,
     this.cancelledAt,
+    this.openBillLabel,
   });
 
   final String id;
@@ -56,6 +57,15 @@ class OrderHistoryItem {
   final String? cancellationReason;
   final String? cancellationInventoryOutcome;
   final DateTime? cancelledAt;
+  final String? openBillLabel;
+
+  String get openBillDisplayLabel => openBillLabel?.trim().isNotEmpty == true
+      ? openBillLabel!.trim()
+      : customerName?.trim().isNotEmpty == true
+      ? customerName!.trim()
+      : tableName?.trim().isNotEmpty == true
+      ? tableName!.trim()
+      : receiptNumber;
 
   bool get isPending => syncStatus == 'pending';
   bool get isOpenBill => orderStatus == 'open' || orderStatus == 'held';
@@ -130,7 +140,7 @@ class OrderHistoryItem {
       isReprint: isReprint,
       tableName: tableName ?? (tableId == null ? null : 'Meja $tableId'),
       customerName: customerName,
-      note: note,
+      note: note ?? (isOpenBill ? 'Open bill: $openBillDisplayLabel' : null),
       amountReceived: amountReceived ?? this.amountReceived,
       change: change ?? this.change,
       isCancelled: isVoided,
@@ -213,6 +223,7 @@ class OrderHistoryItem {
       cancelledAt: DateTime.tryParse(
         cancellation['cancelled_at']?.toString() ?? '',
       ),
+      openBillLabel: meta['open_bill_label']?.toString(),
       items: items,
       paymentBreakdown: rawPayments.map(
         (key, value) => MapEntry(key, _number(value)),
@@ -298,6 +309,7 @@ class OrderHistoryItem {
       cancelledAt: DateTime.tryParse(
         cancellation['cancelled_at']?.toString() ?? '',
       ),
+      openBillLabel: meta['open_bill_label']?.toString(),
       items: items,
       paymentBreakdown: paymentBreakdown,
     );
