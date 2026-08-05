@@ -24,6 +24,26 @@ class ReportingController extends Controller
             ->get());
     }
 
+    public function exportSales(Request $request)
+    {
+        $refunds = $this->refundAmountSql();
+
+        $data = $this->baseOrderQuery($request)
+            ->selectRaw("DATE(orders.created_at) as date, COUNT(*) as orders, SUM(orders.total - {$refunds}) as total_sales, SUM({$refunds}) as refunds, SUM(orders.cogs_total) as cogs, SUM((orders.subtotal - orders.discount_total - {$refunds}) - orders.cogs_total) as gross_profit")
+            ->groupBy(DB::raw('DATE(orders.created_at)'))
+            ->orderByDesc('date')
+            ->get();
+
+        $csv = "Tanggal,Total Pesanan,Total Penjualan,Pengembalian,HPP (COGS),Laba Kotor\n";
+        foreach ($data as $row) {
+            $csv .= "{$row->date},{$row->orders},{$row->total_sales},{$row->refunds},{$row->cogs},{$row->gross_profit}\n";
+        }
+
+        return response($csv)
+            ->header('Content-Type', 'text/csv')
+            ->header('Content-Disposition', 'attachment; filename="laporan_penjualan.csv"');
+    }
+
     public function products(Request $request)
     {
         $refunds = '(SELECT COALESCE(SUM(product_refunds.amount), 0) FROM refunds AS product_refunds WHERE product_refunds.order_item_id = order_items.id AND product_refunds.status = \'approved\' AND product_refunds.deleted_at IS NULL)';

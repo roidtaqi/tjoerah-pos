@@ -19,7 +19,8 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 10,
+      version: 11,
+      onConfigure: (db) async => await db.execute('PRAGMA foreign_keys = ON;'),
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -53,6 +54,7 @@ class DatabaseHelper {
     if (oldVersion < 8) await _upgradeRecipesTable(db);
     if (oldVersion < 9) await _upgradeInventoryItemsTable(db);
     if (oldVersion < 10) await _createIndexes(db);
+    if (oldVersion < 11) await _createSyncQueueTable(db);
   }
 
   Future<void> _createDB(Database db, int version) async {
@@ -191,6 +193,18 @@ class DatabaseHelper {
       )
     ''');
 
+    await db.execute('''
+      CREATE TABLE sync_queue (
+        id TEXT PRIMARY KEY,
+        operation TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        retry_count INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'PENDING'
+      )
+    ''');
+
     await _createCustomersTable(db);
     await _createOfflineAttendanceTable(db);
     await _createIndexes(db);
@@ -325,6 +339,20 @@ class DatabaseHelper {
     );
   }
 
+  Future<void> _createSyncQueueTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sync_queue (
+        id TEXT PRIMARY KEY,
+        operation TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        retry_count INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'PENDING'
+      )
+    ''');
+  }
+
   Future<void> clearCatalog() async {
     final db = await instance.database;
     await db.delete('recipe_items');
@@ -375,7 +403,7 @@ class DatabaseHelper {
     final methodsResult = await db.rawQuery(
       '''
       SELECT 
-        json_extract(payload, '\$.paymentMethod') as payment_method,
+        json_extract(payload, '\$.payment_method') as payment_method,
         SUM(CAST(json_extract(payload, '\$.total') AS REAL)) as amount
       FROM offline_orders
       WHERE created_at >= ? AND created_at <= ?

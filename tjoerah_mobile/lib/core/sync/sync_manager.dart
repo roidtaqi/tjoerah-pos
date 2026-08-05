@@ -1,21 +1,29 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:uuid/uuid.dart';
-import '../database/local_db.dart';
+import '../database/database_helper.dart';
 import '../network/api_client.dart';
 
 class SyncManager {
   static final SyncManager instance = SyncManager._init();
   final _uuid = const Uuid();
+  Timer? _syncTimer;
 
   SyncManager._init();
+
+  void startPeriodicSync() {
+    _syncTimer?.cancel();
+    _syncTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      runPeriodicSync();
+    });
+  }
 
   /// Records an operation into the local sync queue (Write-Ahead Log)
   Future<void> queueOperation(
     String operation,
     String entityType,
     Map<String, dynamic> payload,
-  ) async {
-    final db = await LocalDatabase.instance.database;
+    final db = await DatabaseHelper.instance.database;
 
     final syncItem = {
       'id': _uuid.v4(),
@@ -35,7 +43,7 @@ class SyncManager {
 
   /// Attempts to flush the sync queue to the remote server
   Future<void> _triggerSync() async {
-    final db = await LocalDatabase.instance.database;
+    final db = await DatabaseHelper.instance.database;
 
     // Get up to 50 pending items
     final pendingItems = await db.query(
@@ -84,11 +92,15 @@ class SyncManager {
   }
 
   Future<void> _incrementRetry(List<Map<String, dynamic>> items) async {
-    final db = await LocalDatabase.instance.database;
+    final db = await DatabaseHelper.instance.database;
     for (var item in items) {
+      final currentRetry = (item['retry_count'] as int) + 1;
       await db.update(
         'sync_queue',
-        {'retry_count': (item['retry_count'] as int) + 1},
+        {
+          'retry_count': currentRetry,
+          'status': currentRetry >= 5 ? 'FAILED' : 'PENDING'
+        },
         where: 'id = ?',
         whereArgs: [item['id']],
       );
@@ -102,7 +114,7 @@ class SyncManager {
 
   /// Returns the count of pending items in the sync queue
   Future<int> getPendingCount() async {
-    final db = await LocalDatabase.instance.database;
+    final db = await DatabaseHelper.instance.database;
     final result = await db.rawQuery(
       'SELECT COUNT(*) as count FROM sync_queue WHERE status = ?',
       ['PENDING'],

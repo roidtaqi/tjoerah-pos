@@ -12,6 +12,7 @@ use App\Domains\Employee\Models\Shift;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -165,12 +166,14 @@ class EmployeeController extends Controller
         ) {
             if (isset($validated['user_id'])) {
                 $user = $this->accessibleUser($request, (int) $validated['user_id']);
-                $user->update(
-                    collect($validated)
+                $updateData = collect($validated)
                         ->only(['name', 'username', 'email', 'phone', 'password', 'pin', 'role', 'is_active'])
                         ->reject(fn ($value, $key) => $key === 'password' && blank($value))
-                        ->all(),
-                );
+                        ->all();
+                if (isset($updateData['pin'])) {
+                    $updateData['pin'] = Hash::make($updateData['pin']);
+                }
+                $user->update($updateData);
             } else {
                 $user = User::create([
                     'company_id' => $companyId,
@@ -179,7 +182,7 @@ class EmployeeController extends Controller
                     'email' => $validated['email'],
                     'phone' => $validated['phone'] ?? null,
                     'password' => $validated['password'],
-                    'pin' => $validated['pin'],
+                    'pin' => Hash::make($validated['pin']),
                     'role' => $validated['role'],
                     'is_active' => $validated['is_active'] ?? true,
                 ]);
@@ -276,6 +279,9 @@ class EmployeeController extends Controller
                     ->only(['name', 'username', 'email', 'phone', 'password', 'pin', 'role', 'is_active'])
                     ->reject(fn ($value, $key) => $key === 'password' && blank($value))
                     ->all();
+                if (isset($userData['pin'])) {
+                    $userData['pin'] = Hash::make($userData['pin']);
+                }
                 $employee->user->update($userData);
                 if (isset($outlet)) {
                     $employee->user->outlets()->sync([$outlet->id]);

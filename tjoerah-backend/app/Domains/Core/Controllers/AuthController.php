@@ -99,7 +99,21 @@ class AuthController extends Controller
             'pin' => 'required|digits_between:4,6',
         ]);
         $user = $this->findActiveUser($validated['identifier']);
-        if (! $user || ! hash_equals((string) $user->pin, (string) $validated['pin'])) {
+        if (! $user) {
+            return $this->invalidCredentials();
+        }
+
+        $isValid = false;
+        if (str_starts_with((string) $user->pin, '$2y$')) {
+            $isValid = Hash::check((string) $validated['pin'], (string) $user->pin);
+        } else {
+            $isValid = hash_equals((string) $user->pin, (string) $validated['pin']);
+            if ($isValid) {
+                $user->forceFill(['pin' => Hash::make($validated['pin'])])->save();
+            }
+        }
+
+        if (! $isValid) {
             return $this->invalidCredentials();
         }
 

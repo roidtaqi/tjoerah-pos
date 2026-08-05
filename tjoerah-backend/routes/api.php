@@ -185,6 +185,7 @@ Route::middleware('auth:api')->group(function () {
     Route::post('/shifts/end', [EmployeeController::class, 'endShift']);
 
     Route::get('/reports/sales', [ReportingController::class, 'sales']);
+    Route::get('/reports/sales/export', [ReportingController::class, 'exportSales']);
     Route::get('/reports/products', [ReportingController::class, 'products']);
     Route::get('/reports/inventory', [ReportingController::class, 'inventory']);
     Route::get('/reports/profitability', [ReportingController::class, 'profitability']);
