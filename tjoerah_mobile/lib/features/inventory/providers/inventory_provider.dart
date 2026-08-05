@@ -178,7 +178,7 @@ class InventoryNotifier extends AsyncNotifier<InventoryState> {
     return true;
   }
 
-  Future<void> _syncOfflineIncidents() async {
+  Future<String?> _syncOfflineIncidents() async {
     final db = await DatabaseHelper.instance.database;
     final incidents = await db.query(
       'offline_inventory_incidents',
@@ -186,6 +186,7 @@ class InventoryNotifier extends AsyncNotifier<InventoryState> {
       whereArgs: ['pending'],
     );
 
+    String? lastError;
     for (var incident in incidents) {
       final type = incident['type'].toString();
       final payload = jsonDecode(incident['payload'].toString());
@@ -196,21 +197,25 @@ class InventoryNotifier extends AsyncNotifier<InventoryState> {
             : '/inventory/adjustments';
         final response = await ApiClient.post(endpoint, payload);
 
-        if (response.statusCode == 201) {
+        if (response.statusCode == 200 || response.statusCode == 201) {
           await db.delete(
             'offline_inventory_incidents',
             where: 'id = ?',
             whereArgs: [incident['id']],
           );
+        } else {
+          lastError = 'Inventori tertahan: ${_responseMessage(response.body)}';
+          break;
         }
-      } catch (e) {
-        // Stop on first failure to keep order
+      } catch (_) {
+        lastError = 'Inventori tertahan karena server belum dapat dihubungi.';
         break;
       }
     }
+    return lastError;
   }
 
-  Future<void> syncPendingIncidents() => _syncOfflineIncidents();
+  Future<String?> syncPendingIncidents() => _syncOfflineIncidents();
 
   Future<void> _cacheItem(String responseBody) async {
     final item = Map<String, dynamic>.from(jsonDecode(responseBody) as Map);

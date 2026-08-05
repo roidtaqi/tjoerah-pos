@@ -322,7 +322,7 @@ class _CustomerOrderRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final date = AppDateFormatter.longDateTime(order.createdAt);
+    final date = AppDateFormatter.longDateTime(order.createdAt.toLocal());
     return Container(
       decoration: BoxDecoration(
         border: Border.all(color: Theme.of(context).colorScheme.outline),

@@ -420,6 +420,15 @@ class _SyncCard extends StatelessWidget {
                   style: theme.textTheme.titleMedium,
                 ),
                 const SizedBox(height: 3),
+                if (pending && state.pendingSummary.isNotEmpty) ...[
+                  Text(
+                    'Rincian: ${state.pendingSummary}.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                ],
                 Text(
                   state.error != null
                       ? state.error!

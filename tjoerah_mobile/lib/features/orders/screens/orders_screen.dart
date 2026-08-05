@@ -214,7 +214,9 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
                 padding: const EdgeInsets.only(bottom: 10),
                 child: _OrderRow(
                   order: order,
-                  date: AppDateFormatter.dayMonthTime(order.createdAt),
+                  date: AppDateFormatter.dayMonthTime(
+                    order.createdAt.toLocal(),
+                  ),
                   total: _currency.format(order.total),
                   onTap: () => _showDetail(order),
                 ),
@@ -277,7 +279,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
     AppBottomSheet.show<void>(
       context,
       title: order.receiptNumber,
-      subtitle: AppDateFormatter.dayMonthTime(order.createdAt),
+      subtitle: AppDateFormatter.dayMonthTime(order.createdAt.toLocal()),
       child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
         child: Column(
@@ -361,7 +363,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
                             const SizedBox(height: 3),
                             Text(
                               'Batch ${item.submissionBatch} · '
-                              '${AppDateFormatter.dayMonthTime(item.submittedAt ?? order.createdAt)}',
+                              '${AppDateFormatter.dayMonthTime((item.submittedAt ?? order.createdAt).toLocal())}',
                               style: Theme.of(context).textTheme.bodySmall,
                             ),
                           ],
@@ -1644,7 +1646,7 @@ class _CashSessionReport extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        '${shift.number} • dibuka ${AppDateFormatter.time(shift.startedAt)}',
+                        '${shift.number} • dibuka ${AppDateFormatter.time(shift.startedAt.toLocal())}',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
@@ -1850,8 +1852,10 @@ class _OrderRow extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        order.receiptNumber,
-                        maxLines: 1,
+                        order.isOpenBill
+                            ? order.openBillHeading
+                            : order.receiptNumber,
+                        maxLines: order.isOpenBill ? 2 : 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.titleMedium,
                       ),
@@ -1862,12 +1866,14 @@ class _OrderRow extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '${_orderTypeLabel(order.orderType)} · ${order.itemCount} item · $date',
+                  order.isOpenBill
+                      ? AppDateFormatter.longDateTime(order.createdAt.toLocal())
+                      : '${_orderTypeLabel(order.orderType)} · ${order.itemCount} item · $date',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodySmall,
                 ),
-                if (order.isPending) ...[
+                if (order.isPending && !order.isOpenBill) ...[
                   const SizedBox(height: 7),
                   const AppBadge(
                     text: 'Menunggu sinkron',
@@ -1885,15 +1891,6 @@ class _OrderRow extends StatelessWidget {
                       order.paymentMethods.firstOrNull,
                     ),
                     icon: _paymentIcon(order.paymentMethods.firstOrNull),
-                  ),
-                ],
-                if (order.isOpenBill) ...[
-                  const SizedBox(height: 7),
-                  const AppBadge(
-                    text: 'Belum dibayar',
-                    color: AppColors.infoSoft,
-                    textColor: AppColors.info,
-                    icon: Icons.bookmark_added_outlined,
                   ),
                 ],
                 if (order.isVoided) ...[

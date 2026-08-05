@@ -390,27 +390,17 @@ class _OpenBillPickerState extends ConsumerState<_OpenBillPicker> {
                 minTileHeight: 76,
                 leading: const Icon(Icons.bookmark_outline_rounded),
                 title: Text(
-                  order.openBillDisplayLabel,
+                  order.openBillHeading,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
                 subtitle: Text(
-                  '${order.receiptNumber} - ${order.itemCount} item - '
-                  '${AppDateFormatter.longDateTime(order.createdAt.toLocal())}',
+                  AppDateFormatter.longDateTime(order.createdAt.toLocal()),
                 ),
-                trailing: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      _posCurrency(order.total),
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    if (order.isPending)
-                      const Text(
-                        'Menunggu sinkron',
-                        style: TextStyle(fontSize: 11),
-                      ),
-                  ],
+                trailing: Text(
+                  _posCurrency(order.total),
+                  style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
                 enabled: order.serverId != null && !order.isPending,
                 onTap: () => Navigator.pop(context, order),

@@ -327,6 +327,10 @@ void main() {
       ],
     );
     expect(find.text('Operasional'), findsOneWidget);
+    expect(
+      find.text('Rincian: 1 pesanan • 1 inventori • 1 pelanggan.'),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
 
     tester.view.viewInsets = const FakeViewPadding(bottom: 320);
@@ -1101,7 +1105,12 @@ class _PreviewAuthNotifier extends AuthNotifier {
 
 class _PreviewSyncNotifier extends SyncNotifier {
   @override
-  SyncState build() => SyncState(pendingCount: 3);
+  SyncState build() => const SyncState(
+    pendingCount: 3,
+    pendingOrders: 1,
+    pendingInventory: 1,
+    pendingCustomers: 1,
+  );
 }
 
 class _PreviewPrinterNotifier extends PrinterNotifier {

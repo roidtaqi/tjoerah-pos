@@ -67,6 +67,19 @@ class OrderHistoryItem {
       ? tableName!.trim()
       : receiptNumber;
 
+  String get openBillHeading {
+    final parts = <String>[];
+    for (final value in [customerName, openBillLabel, tableName]) {
+      final normalized = value?.trim() ?? '';
+      if (normalized.isEmpty ||
+          parts.any((part) => part.toLowerCase() == normalized.toLowerCase())) {
+        continue;
+      }
+      parts.add(normalized);
+    }
+    return parts.isEmpty ? openBillDisplayLabel : parts.join(' • ');
+  }
+
   bool get isPending => syncStatus == 'pending';
   bool get isOpenBill => orderStatus == 'open' || orderStatus == 'held';
   bool get isPaid => const {

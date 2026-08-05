@@ -172,7 +172,15 @@ class CustomerNotifier extends AsyncNotifier<List<CustomerModel>> {
     state = AsyncValue.data(await _loadLocal());
   }
 
-  Future<void> _syncPending() async {
+  Future<String?> syncPendingCustomers() async {
+    try {
+      return await _syncPending();
+    } catch (_) {
+      return 'Pelanggan tertahan karena server belum dapat dihubungi.';
+    }
+  }
+
+  Future<String?> _syncPending() async {
     final database = await DatabaseHelper.instance.database;
     final pending = await database.query(
       'customers',
@@ -187,7 +195,9 @@ class CustomerNotifier extends AsyncNotifier<List<CustomerModel>> {
         notes: row['notes']?.toString(),
       );
       final response = await ApiClient.post('/customers', draft.toJson());
-      if (response.statusCode != 200 && response.statusCode != 201) break;
+      if (response.statusCode != 200 && response.statusCode != 201) {
+        return 'Pelanggan tertahan: ${_responseMessage(response.body)}';
+      }
       final remote = CustomerModel.fromJson(
         Map<String, dynamic>.from(jsonDecode(response.body) as Map),
       );
@@ -209,6 +219,25 @@ class CustomerNotifier extends AsyncNotifier<List<CustomerModel>> {
         );
       });
     }
+    return null;
+  }
+
+  String _responseMessage(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map) {
+        final errors = decoded['errors'];
+        if (errors is Map) {
+          for (final messages in errors.values) {
+            if (messages is List && messages.isNotEmpty) {
+              return messages.first.toString();
+            }
+          }
+        }
+        if (decoded['message'] != null) return decoded['message'].toString();
+      }
+    } catch (_) {}
+    return 'data ditolak oleh server.';
   }
 
   Future<void> _replacePendingOrderCustomer(

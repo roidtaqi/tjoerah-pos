@@ -14,15 +14,30 @@ import '../../pos/repositories/order_repository.dart';
 class SyncState {
   const SyncState({
     this.pendingCount = 0,
+    this.pendingOrders = 0,
+    this.pendingInventory = 0,
+    this.pendingCustomers = 0,
     this.isSyncing = false,
     this.lastSyncedAt,
     this.error,
   });
 
   final int pendingCount;
+  final int pendingOrders;
+  final int pendingInventory;
+  final int pendingCustomers;
   final bool isSyncing;
   final DateTime? lastSyncedAt;
   final String? error;
+
+  String get pendingSummary {
+    final parts = <String>[
+      if (pendingOrders > 0) '$pendingOrders pesanan',
+      if (pendingInventory > 0) '$pendingInventory inventori',
+      if (pendingCustomers > 0) '$pendingCustomers pelanggan',
+    ];
+    return parts.join(' • ');
+  }
 }
 
 class SyncNotifier extends Notifier<SyncState> {
@@ -50,6 +65,9 @@ class SyncNotifier extends Notifier<SyncState> {
       final prefs = await SharedPreferences.getInstance();
       state = SyncState(
         pendingCount: counts.fold(0, (sum, count) => sum + count),
+        pendingOrders: counts[0],
+        pendingInventory: counts[1],
+        pendingCustomers: counts[2],
         isSyncing: state.isSyncing,
         lastSyncedAt: DateTime.tryParse(prefs.getString(_lastSyncKey) ?? ''),
         error: error,
@@ -57,6 +75,9 @@ class SyncNotifier extends Notifier<SyncState> {
     } catch (_) {
       state = SyncState(
         pendingCount: state.pendingCount,
+        pendingOrders: state.pendingOrders,
+        pendingInventory: state.pendingInventory,
+        pendingCustomers: state.pendingCustomers,
         isSyncing: state.isSyncing,
         lastSyncedAt: state.lastSyncedAt,
         error: error ?? state.error,
@@ -81,15 +102,22 @@ class SyncNotifier extends Notifier<SyncState> {
     if (state.isSyncing) return;
     state = SyncState(
       pendingCount: state.pendingCount,
+      pendingOrders: state.pendingOrders,
+      pendingInventory: state.pendingInventory,
+      pendingCustomers: state.pendingCustomers,
       isSyncing: true,
       lastSyncedAt: state.lastSyncedAt,
     );
 
     String? error;
     try {
-      await ref.read(customerProvider.notifier).refresh();
+      final customerError = await ref
+          .read(customerProvider.notifier)
+          .syncPendingCustomers();
       final orderResult = await OrderRepository().syncOfflineOrders();
-      await ref.read(inventoryProvider.notifier).syncPendingIncidents();
+      final inventoryError = await ref
+          .read(inventoryProvider.notifier)
+          .syncPendingIncidents();
       final referenceResults = await Future.wait([
         SyncService.syncCatalog(),
         SyncService.syncInventory(),
@@ -97,18 +125,25 @@ class SyncNotifier extends Notifier<SyncState> {
       ]);
       await ref.read(customerProvider.notifier).refresh();
       ref.invalidate(orderHistoryProvider);
-      if (!orderResult.isComplete) {
-        error = orderResult.error == null
-            ? '${orderResult.pendingCount} transaksi masih menunggu sinkron.'
-            : '${orderResult.pendingCount} transaksi masih menunggu. '
-                  '${orderResult.error}';
-      } else if (referenceResults.any((success) => !success)) {
+      final errors = <String>[
+        if (!orderResult.isComplete)
+          orderResult.error == null
+              ? '${orderResult.pendingCount} pesanan masih menunggu sinkron.'
+              : '${orderResult.pendingCount} pesanan masih menunggu. '
+                    '${orderResult.error}',
+      ];
+      if (inventoryError != null) errors.add(inventoryError);
+      if (customerError != null) errors.add(customerError);
+      if (referenceResults.any((success) => !success)) {
         const labels = ['katalog', 'inventori', 'meja'];
         final failed = <String>[
           for (var index = 0; index < referenceResults.length; index++)
             if (!referenceResults[index]) labels[index],
         ];
-        error = 'Data ${failed.join(', ')} belum berhasil diperbarui.';
+        errors.add('Data ${failed.join(', ')} belum berhasil diperbarui.');
+      }
+      if (errors.isNotEmpty) {
+        error = errors.join(' ');
       } else {
         final now = DateTime.now();
         final prefs = await SharedPreferences.getInstance();
@@ -120,6 +155,9 @@ class SyncNotifier extends Notifier<SyncState> {
 
     state = SyncState(
       pendingCount: state.pendingCount,
+      pendingOrders: state.pendingOrders,
+      pendingInventory: state.pendingInventory,
+      pendingCustomers: state.pendingCustomers,
       isSyncing: false,
       lastSyncedAt: state.lastSyncedAt,
       error: error,

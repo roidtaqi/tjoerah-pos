@@ -194,6 +194,45 @@ void main() {
     expect(order.toPrintData().paymentMethodLabel, 'Belum dibayar');
   });
 
+  test('builds a readable open bill heading without duplicate labels', () {
+    final order = OrderHistoryItem(
+      id: 'open-heading',
+      serverId: 'server-open-heading',
+      receiptNumber: 'TJ-OPEN-HEADING',
+      orderType: 'dine_in',
+      paymentMethod: 'open_bill',
+      total: 75000,
+      createdAt: DateTime(2026, 8, 5, 13, 45),
+      syncStatus: 'synced',
+      items: [],
+      paymentBreakdown: {},
+      customerName: 'Ayu',
+      openBillLabel: 'Dekat pintu',
+      tableName: 'Meja 07',
+      orderStatus: 'open',
+    );
+
+    expect(order.openBillHeading, 'Ayu • Dekat pintu • Meja 07');
+
+    final duplicateLabel = OrderHistoryItem(
+      id: 'open-heading-duplicate',
+      receiptNumber: 'TJ-OPEN-DUPLICATE',
+      orderType: 'dine_in',
+      paymentMethod: 'open_bill',
+      total: 50000,
+      createdAt: DateTime(2026, 8, 5, 13, 45),
+      syncStatus: 'synced',
+      items: [],
+      paymentBreakdown: {},
+      customerName: 'Ayu',
+      openBillLabel: 'ayu',
+      tableName: 'Meja 04',
+      orderStatus: 'open',
+    );
+
+    expect(duplicateLabel.openBillHeading, 'Ayu • Meja 04');
+  });
+
   test(
     'parses cancellation audit and excludes voided order from paid status',
     () {
