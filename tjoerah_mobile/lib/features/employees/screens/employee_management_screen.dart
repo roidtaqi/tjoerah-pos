@@ -120,7 +120,7 @@ class _EmployeeManagementScreenState
           _status == 'all' ||
           (_status == 'active' && employee.isActive) ||
           (_status == 'inactive' && !employee.isActive);
-      final matchesRole = _role == 'all' || employee.roles.contains(_role);
+      final matchesRole = _role == 'all' || employee.role == _role;
       return matchesQuery && matchesStatus && matchesRole;
     }).toList();
 
@@ -223,9 +223,7 @@ class _EmployeeManagementScreenState
                         padding: const EdgeInsets.only(bottom: 10),
                         child: _EmployeeCard(
                           employee: employee,
-                          roleLabel: employee.roles
-                              .map((role) => _roleLabel(data, role))
-                              .join(' + '),
+                          roleLabel: _roleLabel(data, employee.role),
                           enabled: !_isMutating,
                           onEdit: () => _openForm(data, employee),
                           onDelete: () => _confirmDelete(employee),
@@ -458,7 +456,6 @@ class _EmployeeFormState extends State<_EmployeeForm> {
   late final TextEditingController _password;
   late final TextEditingController _pin;
   late String? _role;
-  late Set<String> _roles;
   late int? _outletId;
   late String _employmentStatus;
   late String? _gender;
@@ -505,7 +502,6 @@ class _EmployeeFormState extends State<_EmployeeForm> {
     _role =
         employee?.role ??
         widget.data.roles.where((role) => role.assignable).firstOrNull?.value;
-    _roles = {...?employee?.roles, ?_role};
     _outletId = employee?.outletId ?? widget.data.outlets.firstOrNull?.id;
     _employmentStatus =
         employee?.employmentStatus ??
@@ -664,10 +660,7 @@ class _EmployeeFormState extends State<_EmployeeForm> {
                   ),
                 )
                 .toList(),
-            onChanged: (value) => setState(() {
-              _role = value;
-              if (value != null) _roles.add(value);
-            }),
+            onChanged: (value) => setState(() => _role = value),
             validator: (value) => value == null ? 'Pilih role.' : null,
           ),
           if (_role != null) ...[
@@ -681,32 +674,6 @@ class _EmployeeFormState extends State<_EmployeeForm> {
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
-          const SizedBox(height: 14),
-          Text('Role tambahan', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: widget.data.roles.map((role) {
-              final selected = _roles.contains(role.value);
-              final isPrimary = role.value == _role;
-              return FilterChip(
-                label: Text(role.label),
-                selected: selected,
-                avatar: isPrimary
-                    ? const Icon(Icons.star_rounded, size: 18)
-                    : null,
-                tooltip: isPrimary ? 'Role utama' : role.description,
-                onSelected: (!role.assignable && !selected) || isPrimary
-                    ? null
-                    : (value) => setState(() {
-                        value
-                            ? _roles.add(role.value)
-                            : _roles.remove(role.value);
-                      }),
-              );
-            }).toList(),
-          ),
           const SizedBox(height: 12),
           TextFormField(
             controller: _username,
@@ -936,7 +903,6 @@ class _EmployeeFormState extends State<_EmployeeForm> {
         email: _email.text.trim(),
         username: _nullable(_username.text),
         role: _role!,
-        roles: _roles.toList(),
         outletId: _outletId!,
         attendanceShiftId: null,
         phone: _nullable(_phone.text),

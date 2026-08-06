@@ -1120,43 +1120,46 @@ class _PreviewPrinterNotifier extends PrinterNotifier {
 
 class _PreviewCashNotifier extends CashNotifier {
   @override
-  Future<CashOverview> build() async => CashOverview(
-    outletId: 1,
-    outletName: 'Tjoerah Coffee - Renon',
-    canAdjust: true,
-    currentShift: CashShift(
-      id: 1,
+  Future<CashOverview> build() async {
+    final today = DateTime.now();
+    return CashOverview(
       outletId: 1,
-      number: 'KAS-001',
-      status: 'open',
-      startedAt: DateTime(2026, 8, 5, 7, 30),
-      openedBy: 'Ayu Kasir',
-      summary: const CashSummary(
-        openingCash: 300000,
-        cashSales: 275000,
-        manualCashIn: 100000,
-        cashRefunds: 25000,
-        manualCashOut: 22000,
-        adjustmentsIn: 0,
-        adjustmentsOut: 0,
-        expectedCash: 628000,
-      ),
-      movements: [
-        CashMovement(
-          id: 1,
-          type: 'cash_out',
-          category: 'urgent_purchase',
-          amount: 22000,
-          signedAmount: -22000,
-          occurredAt: DateTime(2026, 8, 5, 11),
-          hasEvidence: true,
-          note: 'Membeli satu galon air',
-          userName: 'Ayu Kasir',
+      outletName: 'Tjoerah Coffee - Renon',
+      canAdjust: true,
+      currentShift: CashShift(
+        id: 1,
+        outletId: 1,
+        number: 'KAS-001',
+        status: 'open',
+        startedAt: DateTime(today.year, today.month, today.day, 7, 30),
+        openedBy: 'Ayu Kasir',
+        summary: const CashSummary(
+          openingCash: 300000,
+          cashSales: 275000,
+          manualCashIn: 100000,
+          cashRefunds: 25000,
+          manualCashOut: 22000,
+          adjustmentsIn: 0,
+          adjustmentsOut: 0,
+          expectedCash: 628000,
         ),
-      ],
-    ),
-    recentShifts: const [],
-  );
+        movements: [
+          CashMovement(
+            id: 1,
+            type: 'cash_out',
+            category: 'urgent_purchase',
+            amount: 22000,
+            signedAmount: -22000,
+            occurredAt: DateTime(today.year, today.month, today.day, 11),
+            hasEvidence: true,
+            note: 'Membeli satu galon air',
+            userName: 'Ayu Kasir',
+          ),
+        ],
+      ),
+      recentShifts: const [],
+    );
+  }
 }
 
 class _PreviewThemeNotifier extends ThemeModeNotifier {

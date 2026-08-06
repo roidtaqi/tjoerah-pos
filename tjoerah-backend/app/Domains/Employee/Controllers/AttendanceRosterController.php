@@ -86,36 +86,11 @@ class AttendanceRosterController extends Controller
             'date_to' => 'required|date|after_or_equal:date_from',
         ]);
         $outlet = $this->accessibleOutlet($request, (int) $validated['outlet_id']);
-        [$dateFrom, $dateTo, $dates] = $this->dateRange(
+        [$dateFrom, $dateTo] = $this->dateRange(
             $validated['date_from'],
             $validated['date_to'],
         );
-        $employees = Employee::where('outlet_id', $outlet->id)
-            ->where('is_active', true)
-            ->orderBy('name')
-            ->get(['id', 'name']);
         $dateToExclusive = CarbonImmutable::parse($dateTo)->addDay()->toDateString();
-        $existing = EmployeeSchedule::where('outlet_id', $outlet->id)
-            ->where('work_date', '>=', $dateFrom)
-            ->where('work_date', '<', $dateToExclusive)
-            ->get(['employee_id', 'work_date'])
-            ->mapWithKeys(fn (EmployeeSchedule $schedule) => [
-                $schedule->employee_id.':'.$schedule->work_date->toDateString() => true,
-            ]);
-        $missing = [];
-        foreach ($employees as $employee) {
-            foreach ($dates as $date) {
-                if (! $existing->has($employee->id.':'.$date)) {
-                    $missing[] = "{$employee->name} ({$date})";
-                }
-            }
-        }
-        if ($missing !== []) {
-            $preview = implode(', ', array_slice($missing, 0, 5));
-            throw ValidationException::withMessages([
-                'schedules' => 'Roster belum lengkap. Isi Shift atau Off untuk '.count($missing)." sel: {$preview}".(count($missing) > 5 ? ', dan lainnya.' : '.'),
-            ]);
-        }
 
         $count = DB::transaction(function () use ($request, $outlet, $dateFrom, $dateToExclusive) {
             $schedules = EmployeeSchedule::where('outlet_id', $outlet->id)
@@ -630,12 +605,8 @@ class AttendanceRosterController extends Controller
         $dateFrom = CarbonImmutable::parse($from)->startOfDay();
         $dateTo = CarbonImmutable::parse($to)->startOfDay();
         abort_if($dateFrom->diffInDays($dateTo) > 30, 422, 'Periode roster maksimal 31 hari.');
-        $dates = [];
-        for ($date = $dateFrom; $date->lte($dateTo); $date = $date->addDay()) {
-            $dates[] = $date->toDateString();
-        }
 
-        return [$dateFrom->toDateString(), $dateTo->toDateString(), $dates];
+        return [$dateFrom->toDateString(), $dateTo->toDateString()];
     }
 
     private function selfEmployee(Request $request): Employee

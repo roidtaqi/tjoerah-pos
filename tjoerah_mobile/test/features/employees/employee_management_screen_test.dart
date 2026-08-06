@@ -25,6 +25,7 @@ void main() {
     expect(find.text('Jabatan (opsional)'), findsOneWidget);
     expect(find.text('Username login (opsional)'), findsOneWidget);
     expect(find.text('Shift absensi'), findsNothing);
+    expect(find.text('Role tambahan'), findsNothing);
     expect(tester.takeException(), isNull);
 
     await tester.ensureVisible(find.text('Tambahkan karyawan'));

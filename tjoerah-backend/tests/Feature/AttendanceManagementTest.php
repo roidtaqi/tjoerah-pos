@@ -508,6 +508,50 @@ class AttendanceManagementTest extends TestCase
         $this->assertDatabaseCount('employee_schedule_audits', 21);
     }
 
+    public function test_owner_can_publish_a_partially_completed_weekly_roster(): void
+    {
+        [$cashier, $employee, $outlet, $company] = $this->attendanceFixture();
+        $owner = User::factory()->create([
+            'company_id' => $company->id,
+            'role' => 'owner',
+        ]);
+        $owner->outlets()->attach($outlet);
+
+        $this->actingAs($owner, 'api')
+            ->postJson('/api/attendance/schedules/bulk', [
+                'outlet_id' => $outlet->id,
+                'publication_status' => 'draft',
+                'assignments' => [[
+                    'employee_id' => $employee->id,
+                    'work_date' => '2026-08-03',
+                    'attendance_shift_id' => null,
+                    'status' => 'off',
+                ]],
+            ])->assertOk()
+            ->assertJsonPath('updated_schedules', 1);
+
+        $this->postJson('/api/attendance/schedules/publish', [
+            'outlet_id' => $outlet->id,
+            'date_from' => '2026-08-03',
+            'date_to' => '2026-08-09',
+        ])->assertOk()
+            ->assertJsonPath('published_schedules', 1);
+
+        $this->assertDatabaseHas('employee_schedules', [
+            'employee_id' => $employee->id,
+            'work_date' => '2026-08-03 00:00:00',
+            'status' => 'off',
+            'publication_status' => 'published',
+        ]);
+        $this->assertDatabaseCount('employee_schedules', 1);
+
+        $this->actingAs($cashier, 'api')
+            ->getJson('/api/attendance/my-schedule?date_from=2026-08-03&date_to=2026-08-09')
+            ->assertOk()
+            ->assertJsonCount(1)
+            ->assertJsonPath('0.status', 'off');
+    }
+
     public function test_employee_can_request_change_and_admin_can_approve_custom_hours(): void
     {
         [$cashier, $employee, $outlet, $company] = $this->attendanceFixture();

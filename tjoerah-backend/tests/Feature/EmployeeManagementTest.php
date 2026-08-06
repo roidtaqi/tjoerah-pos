@@ -35,7 +35,6 @@ class EmployeeManagementTest extends TestCase
             'password' => 'rahasia123',
             'pin' => '2468',
             'role' => 'cashier',
-            'roles' => ['cashier', 'barista'],
             'position' => 'Kasir',
             'employment_status' => 'permanent',
             'hire_date' => '2026-07-29',
@@ -48,7 +47,7 @@ class EmployeeManagementTest extends TestCase
         ])->assertCreated()
             ->assertJsonPath('user.role', 'cashier')
             ->assertJsonPath('user.roles.0.slug', 'cashier')
-            ->assertJsonPath('user.roles.1.slug', 'barista')
+            ->assertJsonCount(1, 'user.roles')
             ->assertJsonPath('attendance_shift.id', $shift->id)
             ->assertJsonPath('employment_status', 'permanent')
             ->json();
@@ -67,7 +66,7 @@ class EmployeeManagementTest extends TestCase
         ])
             ->assertOk()
             ->assertJsonPath('user.role', 'cashier')
-            ->assertJsonPath('user.roles.1.slug', 'barista');
+            ->assertJsonCount(1, 'user.roles');
 
         $this->actingAs($owner, 'api')
             ->patchJson("/api/employees/{$employee['id']}", [

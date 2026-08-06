@@ -334,14 +334,19 @@ class _AttendanceAdminScreenState extends ConsumerState<AttendanceAdminScreen> {
   }
 
   Future<void> _publishRoster(AttendanceAdminState data) async {
+    final draftCount = data.schedules
+        .where((schedule) => schedule.publicationStatus == 'draft')
+        .length;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Terbitkan roster?'),
+        title: const Text('Terbitkan jadwal yang sudah diisi?'),
         content: Text(
-          'Jadwal ${AppDateFormatter.shortDate(data.dateFrom)} sampai '
+          '$draftCount jadwal draft pada periode '
+          '${AppDateFormatter.shortDate(data.dateFrom)} sampai '
           '${AppDateFormatter.shortDate(data.dateTo)} akan terlihat oleh '
-          'karyawan. Setiap tanggal wajib berisi Shift atau Off.',
+          'karyawan. Hari yang belum diisi tetap kosong dan dapat '
+          'dilengkapi lalu diterbitkan kemudian.',
         ),
         actions: [
           TextButton(
@@ -1252,7 +1257,9 @@ class _ScheduleTabState extends State<_ScheduleTab> {
                       ],
                     ),
                     FilledButton.icon(
-                      onPressed: widget.enabled ? widget.onPublish : null,
+                      onPressed: widget.enabled && draftCount > 0
+                          ? widget.onPublish
+                          : null,
                       icon: const Icon(Icons.publish_outlined),
                       label: const Text('Terbitkan'),
                     ),

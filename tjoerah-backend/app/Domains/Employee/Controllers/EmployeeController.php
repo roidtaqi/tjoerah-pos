@@ -134,8 +134,6 @@ class EmployeeController extends Controller
             'password' => 'required_without:user_id|string|min:8|max:255',
             'pin' => ['required_without:user_id', 'digits_between:4,6'],
             'role' => ['required_without:user_id', Rule::in(array_keys($this->roleOptions()))],
-            'roles' => 'nullable|array|min:1',
-            'roles.*' => [Rule::in(array_keys($this->roleOptions()))],
             'position' => 'nullable|string|max:100',
             'employment_status' => ['required', Rule::in(['permanent', 'contract', 'part_time', 'intern'])],
             'hire_date' => 'nullable|date',
@@ -167,9 +165,9 @@ class EmployeeController extends Controller
             if (isset($validated['user_id'])) {
                 $user = $this->accessibleUser($request, (int) $validated['user_id']);
                 $updateData = collect($validated)
-                        ->only(['name', 'username', 'email', 'phone', 'password', 'pin', 'role', 'is_active'])
-                        ->reject(fn ($value, $key) => $key === 'password' && blank($value))
-                        ->all();
+                    ->only(['name', 'username', 'email', 'phone', 'password', 'pin', 'role', 'is_active'])
+                    ->reject(fn ($value, $key) => $key === 'password' && blank($value))
+                    ->all();
                 if (isset($updateData['pin'])) {
                     $updateData['pin'] = Hash::make($updateData['pin']);
                 }
@@ -244,8 +242,6 @@ class EmployeeController extends Controller
             'password' => 'nullable|string|min:8|max:255',
             'pin' => ['sometimes', 'digits_between:4,6'],
             'role' => ['sometimes', Rule::in(array_keys($this->roleOptions()))],
-            'roles' => 'sometimes|array|min:1',
-            'roles.*' => [Rule::in(array_keys($this->roleOptions()))],
             'position' => 'nullable|string|max:100',
             'employment_status' => ['sometimes', Rule::in(['permanent', 'contract', 'part_time', 'intern'])],
             'hire_date' => 'nullable|date',
@@ -259,7 +255,7 @@ class EmployeeController extends Controller
         ]);
         $roleSlugs = $this->selectedRoles(
             $validated,
-            $employee->user?->roles()->pluck('slug')->all() ?: [$employee->user?->role],
+            [$employee->user?->role],
         );
         foreach ($roleSlugs as $role) {
             $this->ensureRoleCanBeAssigned($request, $role, $employee);
@@ -288,8 +284,7 @@ class EmployeeController extends Controller
                 }
                 $targetOutlet = $outlet ?? $employee->outlet;
                 if ($targetOutlet && (
-                    array_key_exists('roles', $validated)
-                    || array_key_exists('role', $validated)
+                    array_key_exists('role', $validated)
                     || array_key_exists('outlet_id', $validated)
                 )) {
                     $this->syncUserRoles($employee->user, $roleSlugs, $targetOutlet);
@@ -451,18 +446,9 @@ class EmployeeController extends Controller
      */
     private function selectedRoles(array $validated, array $fallback = []): array
     {
-        $primary = $validated['role'] ?? null;
-        $roles = array_key_exists('roles', $validated)
-            ? $validated['roles']
-            : ($primary ? [] : $fallback);
-        if ($primary) {
-            array_unshift($roles, $primary);
-        }
-
-        return collect($roles)
+        return collect([$validated['role'] ?? ($fallback[0] ?? null)])
             ->filter()
             ->map(fn ($role) => (string) $role)
-            ->unique()
             ->values()
             ->all();
     }

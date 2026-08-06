@@ -68,6 +68,17 @@ void main() {
     expect(find.text('Draft'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
+    await tester.tap(find.text('Terbitkan'));
+    await tester.pumpAndSettle();
+    expect(find.text('Terbitkan jadwal yang sudah diisi?'), findsOneWidget);
+    expect(find.textContaining('1 jadwal draft'), findsOneWidget);
+    expect(
+      find.textContaining('Hari yang belum diisi tetap kosong'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Batal'));
+    await tester.pumpAndSettle();
+
     await tester.ensureVisible(find.text('Permintaan'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Permintaan'));

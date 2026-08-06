@@ -179,7 +179,6 @@ class EmployeeDraft {
     required this.name,
     required this.email,
     required this.role,
-    required this.roles,
     required this.outletId,
     required this.employmentStatus,
     required this.isActive,
@@ -202,7 +201,6 @@ class EmployeeDraft {
   final String name;
   final String email;
   final String role;
-  final List<String> roles;
   final int outletId;
   final int? attendanceShiftId;
   final String? username;
@@ -227,7 +225,6 @@ class EmployeeDraft {
       'email': email,
       'username': username,
       'role': role,
-      'roles': roles,
       'outlet_id': outletId,
       'attendance_shift_id': attendanceShiftId,
       'phone': phone,
