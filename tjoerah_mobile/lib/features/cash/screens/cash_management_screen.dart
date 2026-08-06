@@ -120,6 +120,9 @@ class _OpenCashView extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final summary = shift.summary;
+    final cashFundMovements = shift.movements
+        .where((movement) => movement.isCashFundMovement)
+        .toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -160,8 +163,8 @@ class _OpenCashView extends ConsumerWidget {
                   width: width,
                   height: 112,
                   child: AppMetricCard(
-                    title: 'Saldo sistem',
-                    value: _currency(summary.expectedCash),
+                    title: 'Saldo Uang Kas',
+                    value: _currency(summary.cashFundBalance),
                     icon: Icons.account_balance_wallet_outlined,
                     iconColor: AppColors.success,
                   ),
@@ -170,8 +173,8 @@ class _OpenCashView extends ConsumerWidget {
                   width: width,
                   height: 112,
                   child: AppMetricCard(
-                    title: 'Total masuk',
-                    value: _currency(summary.totalIn),
+                    title: 'Kas masuk manual',
+                    value: _currency(summary.cashFundIn),
                     icon: Icons.south_west_rounded,
                     iconColor: AppColors.info,
                   ),
@@ -180,8 +183,8 @@ class _OpenCashView extends ConsumerWidget {
                   width: width,
                   height: 112,
                   child: AppMetricCard(
-                    title: 'Total keluar',
-                    value: _currency(summary.totalOut),
+                    title: 'Kas keluar manual',
+                    value: _currency(summary.cashFundOut),
                     icon: Icons.north_east_rounded,
                     iconColor: AppColors.warning,
                   ),
@@ -189,6 +192,45 @@ class _OpenCashView extends ConsumerWidget {
               ],
             );
           },
+        ),
+        const SizedBox(height: 16),
+        AppCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Rincian tunai di kasir',
+                style: theme.textTheme.titleMedium,
+              ),
+              const SizedBox(height: 2),
+              Text(
+                'Uang Kas tetap terpisah dari hasil penjualan tunai.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 8),
+              _SummaryLine(
+                label: 'Saldo Uang Kas',
+                value: _currency(summary.cashFundBalance),
+              ),
+              _SummaryLine(
+                label: 'Penjualan tunai',
+                value: _currency(summary.cashSales),
+              ),
+              _SummaryLine(
+                label: 'Refund tunai',
+                value: '-${_currency(summary.cashRefunds)}',
+              ),
+              const Divider(height: 20),
+              _SummaryLine(
+                label: 'Total tunai di kasir',
+                value: _currency(summary.cashOnHand),
+                emphasized: true,
+                valueColor: theme.colorScheme.primary,
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 16),
         Row(
@@ -221,24 +263,24 @@ class _OpenCashView extends ConsumerWidget {
           ],
         ),
         const SizedBox(height: 24),
-        Text('Pergerakan kas', style: theme.textTheme.titleLarge),
+        Text('Riwayat Uang Kas', style: theme.textTheme.titleLarge),
         const SizedBox(height: 10),
         AppCard(
           padding: EdgeInsets.zero,
-          child: shift.movements.isEmpty
+          child: cashFundMovements.isEmpty
               ? const Padding(
                   padding: EdgeInsets.all(24),
-                  child: Center(child: Text('Belum ada pergerakan kas.')),
+                  child: Center(child: Text('Belum ada transaksi Uang Kas.')),
                 )
               : Column(
                   children: [
                     for (
                       var index = 0;
-                      index < shift.movements.length;
+                      index < cashFundMovements.length;
                       index++
                     ) ...[
-                      _MovementTile(movement: shift.movements[index]),
-                      if (index != shift.movements.length - 1)
+                      _MovementTile(movement: cashFundMovements[index]),
+                      if (index != cashFundMovements.length - 1)
                         const Divider(height: 1),
                     ],
                   ],
@@ -318,15 +360,28 @@ class _ShiftHistory extends StatelessWidget {
               leading: const Icon(Icons.history_rounded),
               title: Text(shifts[index].openedBy ?? shifts[index].number),
               subtitle: Text(_cashDate(shifts[index].startedAt, year: true)),
-              trailing: Text(_currency(shifts[index].summary.expectedCash)),
+              trailing: Text(_currency(shifts[index].summary.cashFundBalance)),
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                   child: Column(
                     children: [
                       _SummaryLine(
-                        label: 'Saldo sistem',
-                        value: _currency(shifts[index].summary.expectedCash),
+                        label: 'Saldo Uang Kas',
+                        value: _currency(shifts[index].summary.cashFundBalance),
+                      ),
+                      _SummaryLine(
+                        label: 'Penjualan tunai',
+                        value: _currency(shifts[index].summary.cashSales),
+                      ),
+                      _SummaryLine(
+                        label: 'Refund tunai',
+                        value: _currency(shifts[index].summary.cashRefunds),
+                      ),
+                      _SummaryLine(
+                        label: 'Total tunai di kasir',
+                        value: _currency(shifts[index].summary.cashOnHand),
+                        emphasized: true,
                       ),
                       if (shifts[index].summary.closingCash != null)
                         _SummaryLine(
@@ -352,18 +407,38 @@ class _ShiftHistory extends StatelessWidget {
 }
 
 class _SummaryLine extends StatelessWidget {
-  const _SummaryLine({required this.label, required this.value});
+  const _SummaryLine({
+    required this.label,
+    required this.value,
+    this.emphasized = false,
+    this.valueColor,
+  });
 
   final String label;
   final String value;
+  final bool emphasized;
+  final Color? valueColor;
 
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(top: 8),
     child: Row(
       children: [
-        Expanded(child: Text(label)),
-        Text(value, style: const TextStyle(fontWeight: FontWeight.w700)),
+        Expanded(
+          child: Text(
+            label,
+            style: emphasized
+                ? const TextStyle(fontWeight: FontWeight.w700)
+                : null,
+          ),
+        ),
+        Text(
+          value,
+          style: TextStyle(
+            color: valueColor,
+            fontWeight: emphasized ? FontWeight.w800 : FontWeight.w700,
+          ),
+        ),
       ],
     ),
   );
@@ -403,7 +478,7 @@ Future<void> _showOpenDialog(BuildContext context, WidgetRef ref) async {
   final value = await showDialog<double>(
     context: context,
     builder: (dialogContext) => AlertDialog(
-      title: const Text('Buka kas'),
+      title: const Text('Buka Uang Kas'),
       content: Form(
         key: formKey,
         child: TextFormField(
@@ -412,12 +487,12 @@ Future<void> _showOpenDialog(BuildContext context, WidgetRef ref) async {
           keyboardType: TextInputType.number,
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
           decoration: const InputDecoration(
-            labelText: 'Uang awal',
+            labelText: 'Saldo awal Uang Kas',
             prefixText: 'Rp ',
             prefixIcon: Icon(Icons.account_balance_wallet_outlined),
           ),
           validator: (raw) => double.tryParse(raw ?? '') == null
-              ? 'Masukkan jumlah uang awal'
+              ? 'Masukkan saldo awal Uang Kas'
               : null,
         ),
       ),
@@ -431,7 +506,7 @@ Future<void> _showOpenDialog(BuildContext context, WidgetRef ref) async {
             if (!formKey.currentState!.validate()) return;
             Navigator.pop(dialogContext, double.parse(controller.text));
           },
-          child: const Text('Buka kas'),
+          child: const Text('Buka Uang Kas'),
         ),
       ],
     ),
@@ -662,7 +737,7 @@ Future<void> _showCloseDialog(
 ) async {
   final draft = await showDialog<(double, String?)>(
     context: context,
-    builder: (_) => _CloseCashDialog(expected: shift.summary.expectedCash),
+    builder: (_) => _CloseCashDialog(expected: shift.summary.cashOnHand),
   );
   if (draft == null || !context.mounted) return;
   await _runAction(
@@ -720,8 +795,9 @@ class _CloseCashDialogState extends State<_CloseCashDialog> {
             mainAxisSize: MainAxisSize.min,
             children: [
               _SummaryLine(
-                label: 'Saldo sistem',
+                label: 'Total tunai di kasir',
                 value: _currency(widget.expected),
+                emphasized: true,
               ),
               const SizedBox(height: 14),
               TextFormField(
@@ -730,7 +806,7 @@ class _CloseCashDialogState extends State<_CloseCashDialog> {
                 keyboardType: TextInputType.number,
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 decoration: const InputDecoration(
-                  labelText: 'Uang fisik',
+                  labelText: 'Total uang fisik',
                   prefixText: 'Rp ',
                   prefixIcon: Icon(Icons.payments_outlined),
                 ),

@@ -198,9 +198,15 @@ class CashLedgerService
         $sum = fn (array $types) => (float) $movements
             ->whereIn('type', $types)
             ->sum('amount');
-        $cashIn = $sum(['opening', 'sale', 'cash_in', 'adjustment_in']);
-        $cashOut = $sum(['refund', 'cash_out', 'adjustment_out']);
-        $expected = round($cashIn - $cashOut, 2);
+        $cashFundBalance = round(
+            $sum(['opening', 'cash_in', 'adjustment_in'])
+                - $sum(['cash_out', 'adjustment_out']),
+            2,
+        );
+        $cashOnHand = round(
+            $cashFundBalance + $sum(['sale']) - $sum(['refund']),
+            2,
+        );
 
         return [
             'movement_count' => $movements->count(),
@@ -211,11 +217,14 @@ class CashLedgerService
             'manual_cash_out' => $sum(['cash_out']),
             'adjustments_in' => $sum(['adjustment_in']),
             'adjustments_out' => $sum(['adjustment_out']),
-            'expected_cash' => $expected,
+            'cash_fund_balance' => $cashFundBalance,
+            'cash_on_hand' => $cashOnHand,
+            // Kept for older app versions that still read expected_cash.
+            'expected_cash' => $cashOnHand,
             'closing_cash' => $shift->closing_cash === null ? null : (float) $shift->closing_cash,
             'difference' => $shift->closing_cash === null
                 ? null
-                : round((float) $shift->closing_cash - $expected, 2),
+                : round((float) $shift->closing_cash - $cashOnHand, 2),
         ];
     }
 

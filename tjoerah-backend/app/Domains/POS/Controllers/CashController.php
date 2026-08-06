@@ -115,10 +115,10 @@ class CashController extends Controller
             'note' => 'nullable|string|max:1000',
         ]);
         $summary = $this->cashLedger->summary($shift);
-        $difference = round((float) $validated['closing_cash'] - (float) $summary['expected_cash'], 2);
+        $difference = round((float) $validated['closing_cash'] - (float) $summary['cash_on_hand'], 2);
         if (abs($difference) > 0.009 && blank($validated['note'] ?? null)) {
             throw ValidationException::withMessages([
-                'note' => 'Jelaskan selisih antara uang fisik dan saldo sistem.',
+                'note' => 'Jelaskan selisih antara uang fisik dan total tunai di kasir.',
             ]);
         }
         $shift->update([

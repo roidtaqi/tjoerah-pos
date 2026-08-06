@@ -58,6 +58,8 @@ class CashLedgerTest extends TestCase
             ->assertJsonPath('current_shift.summary.opening_cash', 100000)
             ->assertJsonPath('current_shift.summary.cash_sales', 35000)
             ->assertJsonPath('current_shift.summary.manual_cash_out', 20000)
+            ->assertJsonPath('current_shift.summary.cash_fund_balance', 80000)
+            ->assertJsonPath('current_shift.summary.cash_on_hand', 115000)
             ->assertJsonPath('current_shift.summary.expected_cash', 115000);
 
         $this->postJson("/api/cash/sessions/{$shiftId}/close", [
@@ -68,6 +70,8 @@ class CashLedgerTest extends TestCase
             'closing_cash' => 114000,
             'note' => 'Selisih kas sedang diperiksa oleh kasir.',
         ])->assertOk()
+            ->assertJsonPath('data.summary.cash_fund_balance', 80000)
+            ->assertJsonPath('data.summary.cash_on_hand', 115000)
             ->assertJsonPath('data.summary.expected_cash', 115000)
             ->assertJsonPath('data.summary.difference', -1000);
     }

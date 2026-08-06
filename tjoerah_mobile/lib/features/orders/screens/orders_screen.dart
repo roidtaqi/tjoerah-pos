@@ -1604,7 +1604,7 @@ class _CashSessionReport extends StatelessWidget {
     return overview.when(
       loading: () => const _CashReportStatus(
         icon: Icons.hourglass_top_rounded,
-        title: 'Laporan kas berjalan',
+        title: 'Uang Kas berjalan',
         message: 'Memuat sesi kas aktif...',
       ),
       error: (_, _) => _CashReportStatus(
@@ -1640,7 +1640,7 @@ class _CashSessionReport extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Laporan kas berjalan',
+                        'Uang Kas berjalan',
                         style: theme.textTheme.titleSmall?.copyWith(
                           fontWeight: FontWeight.w700,
                         ),
@@ -1659,13 +1659,13 @@ class _CashSessionReport extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text(
-                      'Saldo akhir',
+                      'Saldo Uang Kas',
                       style: theme.textTheme.labelMedium?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
                     Text(
-                      currency.format(shift.summary.expectedCash),
+                      currency.format(shift.summary.cashFundBalance),
                       style: theme.textTheme.titleMedium?.copyWith(
                         color: theme.colorScheme.primary,
                         fontWeight: FontWeight.w800,

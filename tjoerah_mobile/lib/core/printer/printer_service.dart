@@ -435,23 +435,34 @@ class PrinterService {
 
       final cashShift = report['cash_shift'];
       if (cashShift is Map) {
+        final cashFundBalance = cashShift['cash_fund_balance'] == null
+            ? _asDouble(cashShift['opening_cash']) +
+                  _asDouble(cashShift['manual_cash_in']) +
+                  _asDouble(cashShift['adjustments_in']) -
+                  _asDouble(cashShift['manual_cash_out']) -
+                  _asDouble(cashShift['adjustments_out'])
+            : _asDouble(cashShift['cash_fund_balance']);
+        final cashOnHand = cashShift['cash_on_hand'] == null
+            ? cashFundBalance +
+                  _asDouble(cashShift['cash_sales']) -
+                  _asDouble(cashShift['cash_refunds'])
+            : _asDouble(cashShift['cash_on_hand']);
         document.text(_separator(width), align: PosAlign.center);
-        document.text('REKONSILIASI UANG KAS', size: 1, align: PosAlign.center);
+        document.text(
+          'RINCIAN TUNAI DI KASIR',
+          size: 1,
+          align: PosAlign.center,
+        );
         document.text('Sesi: ${cashShift['number']}');
         document.text('Dibuka: ${cashShift['started_at']}');
         document.text('Petugas: ${cashShift['opened_by'] ?? '-'}');
         document.columns(
-          'Saldo awal',
+          'Saldo awal kas',
           _money(_asDouble(cashShift['opening_cash'])),
           width,
         );
         document.columns(
-          'Penjualan tunai',
-          _money(_asDouble(cashShift['cash_sales'])),
-          width,
-        );
-        document.columns(
-          'Kas masuk lain',
+          'Kas masuk manual',
           _money(
             _asDouble(cashShift['manual_cash_in']) +
                 _asDouble(cashShift['adjustments_in']),
@@ -459,23 +470,25 @@ class PrinterService {
           width,
         );
         document.columns(
-          'Refund tunai',
-          _money(_asDouble(cashShift['cash_refunds'])),
-          width,
-        );
-        document.columns(
-          'Kas keluar lain',
+          'Kas keluar manual',
           _money(
             _asDouble(cashShift['manual_cash_out']) +
                 _asDouble(cashShift['adjustments_out']),
           ),
           width,
         );
+        document.columns('SALDO UANG KAS', _money(cashFundBalance), width);
         document.columns(
-          'SALDO SISTEM',
-          _money(_asDouble(cashShift['expected_cash'])),
+          'Penjualan tunai',
+          _money(_asDouble(cashShift['cash_sales'])),
           width,
         );
+        document.columns(
+          'Refund tunai',
+          _money(_asDouble(cashShift['cash_refunds'])),
+          width,
+        );
+        document.columns('TOTAL TUNAI KASIR', _money(cashOnHand), width);
         if (cashShift['closing_cash'] != null) {
           document.columns(
             'Uang fisik',

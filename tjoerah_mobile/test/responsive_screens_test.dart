@@ -395,11 +395,12 @@ void main() {
       expect(find.text('QRIS'), findsOneWidget);
       expect(find.text('Kartu debit'), findsOneWidget);
       await tester.scrollUntilVisible(
-        find.text('Rekonsiliasi uang kas'),
+        find.text('Rincian tunai di kasir'),
         240,
         scrollable: find.byType(Scrollable).first,
       );
-      expect(find.text('Saldo kas sistem'), findsOneWidget);
+      expect(find.text('Saldo Uang Kas'), findsOneWidget);
+      expect(find.text('Total tunai di kasir'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );
@@ -425,9 +426,9 @@ void main() {
     expect(find.text('Tunai'), findsWidgets);
     expect(find.text('QRIS'), findsOneWidget);
     expect(find.text('Kartu debit'), findsOneWidget);
-    expect(find.text('Laporan kas berjalan'), findsOneWidget);
-    expect(find.text('Saldo akhir'), findsOneWidget);
-    expect(find.text('Rp 628.000'), findsOneWidget);
+    expect(find.text('Uang Kas berjalan'), findsOneWidget);
+    expect(find.text('Saldo Uang Kas'), findsOneWidget);
+    expect(find.text('Rp 378.000'), findsOneWidget);
     expect(find.text('TJ-OLD-001'), findsNothing);
     expect(tester.takeException(), isNull);
 
@@ -1141,6 +1142,8 @@ class _PreviewCashNotifier extends CashNotifier {
           manualCashOut: 22000,
           adjustmentsIn: 0,
           adjustmentsOut: 0,
+          cashFundBalance: 378000,
+          cashOnHand: 628000,
           expectedCash: 628000,
         ),
         movements: [

@@ -88,6 +88,8 @@ class CashSummary {
     required this.manualCashOut,
     required this.adjustmentsIn,
     required this.adjustmentsOut,
+    required this.cashFundBalance,
+    required this.cashOnHand,
     required this.expectedCash,
     this.closingCash,
     this.difference,
@@ -100,27 +102,57 @@ class CashSummary {
   final double manualCashOut;
   final double adjustmentsIn;
   final double adjustmentsOut;
+  final double cashFundBalance;
+  final double cashOnHand;
   final double expectedCash;
   final double? closingCash;
   final double? difference;
 
-  double get totalIn => openingCash + cashSales + manualCashIn + adjustmentsIn;
-  double get totalOut => cashRefunds + manualCashOut + adjustmentsOut;
+  double get cashFundIn => manualCashIn + adjustmentsIn;
+  double get cashFundOut => manualCashOut + adjustmentsOut;
 
-  factory CashSummary.fromJson(Map<String, dynamic> json) => CashSummary(
-    openingCash: _number(json['opening_cash']),
-    cashSales: _number(json['cash_sales']),
-    manualCashIn: _number(json['manual_cash_in']),
-    cashRefunds: _number(json['cash_refunds']),
-    manualCashOut: _number(json['manual_cash_out']),
-    adjustmentsIn: _number(json['adjustments_in']),
-    adjustmentsOut: _number(json['adjustments_out']),
-    expectedCash: _number(json['expected_cash']),
-    closingCash: json['closing_cash'] == null
-        ? null
-        : _number(json['closing_cash']),
-    difference: json['difference'] == null ? null : _number(json['difference']),
-  );
+  factory CashSummary.fromJson(Map<String, dynamic> json) {
+    final openingCash = _number(json['opening_cash']);
+    final cashSales = _number(json['cash_sales']);
+    final manualCashIn = _number(json['manual_cash_in']);
+    final cashRefunds = _number(json['cash_refunds']);
+    final manualCashOut = _number(json['manual_cash_out']);
+    final adjustmentsIn = _number(json['adjustments_in']);
+    final adjustmentsOut = _number(json['adjustments_out']);
+    final fallbackFundBalance =
+        openingCash +
+        manualCashIn +
+        adjustmentsIn -
+        manualCashOut -
+        adjustmentsOut;
+    final fallbackCashOnHand = json.containsKey('expected_cash')
+        ? _number(json['expected_cash'])
+        : fallbackFundBalance + cashSales - cashRefunds;
+    final cashOnHand = json.containsKey('cash_on_hand')
+        ? _number(json['cash_on_hand'])
+        : fallbackCashOnHand;
+
+    return CashSummary(
+      openingCash: openingCash,
+      cashSales: cashSales,
+      manualCashIn: manualCashIn,
+      cashRefunds: cashRefunds,
+      manualCashOut: manualCashOut,
+      adjustmentsIn: adjustmentsIn,
+      adjustmentsOut: adjustmentsOut,
+      cashFundBalance: json.containsKey('cash_fund_balance')
+          ? _number(json['cash_fund_balance'])
+          : fallbackFundBalance,
+      cashOnHand: cashOnHand,
+      expectedCash: cashOnHand,
+      closingCash: json['closing_cash'] == null
+          ? null
+          : _number(json['closing_cash']),
+      difference: json['difference'] == null
+          ? null
+          : _number(json['difference']),
+    );
+  }
 }
 
 class CashMovement {
@@ -149,6 +181,14 @@ class CashMovement {
   final String? userName;
 
   bool get isOut => signedAmount < 0;
+  bool get isCashFundMovement => const {
+    'opening',
+    'cash_in',
+    'cash_out',
+    'adjustment_in',
+    'adjustment_out',
+    'closing_note',
+  }.contains(type);
 
   factory CashMovement.fromJson(Map<String, dynamic> json) => CashMovement(
     id: _integer(json['id']),

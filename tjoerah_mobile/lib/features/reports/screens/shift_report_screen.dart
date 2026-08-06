@@ -268,6 +268,8 @@ class _ShiftReportScreenState extends ConsumerState<ShiftReportScreen> {
             'manual_cash_out': cashShift.summary.manualCashOut,
             'adjustments_in': cashShift.summary.adjustmentsIn,
             'adjustments_out': cashShift.summary.adjustmentsOut,
+            'cash_fund_balance': cashShift.summary.cashFundBalance,
+            'cash_on_hand': cashShift.summary.cashOnHand,
             'expected_cash': cashShift.summary.expectedCash,
             'closing_cash': cashShift.summary.closingCash,
             'difference': cashShift.summary.difference,
@@ -311,7 +313,7 @@ class _CashReconciliationCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Rekonsiliasi uang kas',
+                  'Rincian tunai di kasir',
                   style: theme.textTheme.titleMedium,
                 ),
                 const SizedBox(height: 3),
@@ -324,26 +326,33 @@ class _CashReconciliationCard extends StatelessWidget {
           ),
           Divider(color: theme.colorScheme.outline),
           _ReportLine(
-            label: 'Saldo awal',
+            label: 'Saldo awal Uang Kas',
             value: currency.format(summary.openingCash),
+          ),
+          _ReportLine(
+            label: 'Uang Kas masuk',
+            value: currency.format(summary.cashFundIn),
+          ),
+          _ReportLine(
+            label: 'Uang Kas keluar',
+            value: currency.format(summary.cashFundOut),
+          ),
+          _ReportLine(
+            label: 'Saldo Uang Kas',
+            value: currency.format(summary.cashFundBalance),
+            emphasized: true,
           ),
           _ReportLine(
             label: 'Penjualan tunai',
             value: currency.format(summary.cashSales),
           ),
           _ReportLine(
-            label: 'Kas masuk lain',
-            value: currency.format(
-              summary.manualCashIn + summary.adjustmentsIn,
-            ),
+            label: 'Refund tunai',
+            value: currency.format(summary.cashRefunds),
           ),
           _ReportLine(
-            label: 'Kas keluar & refund',
-            value: currency.format(summary.totalOut),
-          ),
-          _ReportLine(
-            label: 'Saldo kas sistem',
-            value: currency.format(summary.expectedCash),
+            label: 'Total tunai di kasir',
+            value: currency.format(summary.cashOnHand),
             emphasized: true,
           ),
           if (summary.closingCash != null)
