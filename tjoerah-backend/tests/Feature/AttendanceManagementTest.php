@@ -28,6 +28,7 @@ class AttendanceManagementTest extends TestCase
 
     public function test_employee_can_check_in_and_out_with_photo_location_and_server_time(): void
     {
+        $this->assertSame('UTC', config('app.timezone'));
         Storage::fake('local');
         [$cashier, $employee, $outlet] = $this->attendanceFixture();
         CarbonImmutable::setTestNow('2026-07-24 00:20:00 UTC');
@@ -47,6 +48,8 @@ class AttendanceManagementTest extends TestCase
             'photo' => UploadedFile::fake()->image('check-in.jpg', 480, 640),
         ], ['Accept' => 'application/json'])
             ->assertCreated()
+            ->assertJsonPath('attendance.check_in_at', '2026-07-24T00:20:00.000000Z')
+            ->assertJsonPath('server_time', '2026-07-24T00:20:00.000000Z')
             ->assertJsonPath('attendance.punctuality_status', 'late')
             ->assertJsonPath('attendance.late_minutes', 10)
             ->assertJsonPath('attendance.review_status', 'approved')

@@ -65,7 +65,9 @@ return [
     |
     */
 
-    'timezone' => env('APP_TIMEZONE', 'UTC'),
+    // Persist and serialize timestamps in UTC. Outlet-local business rules use
+    // the timezone stored on the outlet or its attendance policy.
+    'timezone' => 'UTC',
 
     /*
     |--------------------------------------------------------------------------

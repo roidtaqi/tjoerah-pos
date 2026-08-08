@@ -232,9 +232,9 @@ class EmployeeScheduleModel {
       employeeId: _asInt(json['employee_id']),
       outletId: _asInt(json['outlet_id']),
       workDate: DateTime.parse(json['work_date'].toString()),
-      startAt: DateTime.parse(json['start_at'].toString()),
-      lateAfterAt: _nullableDate(json['late_after_at']),
-      endAt: DateTime.parse(json['end_at'].toString()),
+      startAt: _requiredInstant(json['start_at']),
+      lateAfterAt: _nullableInstant(json['late_after_at']),
+      endAt: _requiredInstant(json['end_at']),
       shiftName: json['shift_name']?.toString() ?? 'Reguler',
       status: json['status']?.toString() ?? 'scheduled',
       notes: _nullableString(json['notes']),
@@ -248,7 +248,7 @@ class EmployeeScheduleModel {
             )
           : null,
       publicationStatus: json['publication_status']?.toString() ?? 'published',
-      publishedAt: _nullableDate(json['published_at']),
+      publishedAt: _nullableInstant(json['published_at']),
       isCustomTime: _asBool(json['is_custom_time']),
       changeReason: _nullableString(json['change_reason']),
       revision: _asInt(json['revision'], fallback: 1),
@@ -318,7 +318,7 @@ class ShiftChangeRequestModel {
       reason: json['reason']?.toString() ?? '',
       status: json['status']?.toString() ?? 'pending',
       responseNotes: _nullableString(json['response_notes']),
-      reviewedAt: _nullableDate(json['reviewed_at']),
+      reviewedAt: _nullableInstant(json['reviewed_at']),
       employee: _employeeFromJson(json['employee']),
       schedule: _scheduleFromJson(json['schedule']),
       requestedAttendanceShift: json['requested_attendance_shift'] is Map
@@ -367,7 +367,7 @@ class EmployeeScheduleAuditModel {
       id: _asInt(json['id']),
       action: json['action']?.toString() ?? 'updated',
       reason: _nullableString(json['reason']),
-      createdAt: DateTime.parse(json['created_at'].toString()),
+      createdAt: _requiredInstant(json['created_at']),
       actorName: actor is Map ? _nullableString(actor['name']) : null,
     );
   }
@@ -415,11 +415,11 @@ class AttendanceRecord {
       employeeId: _asInt(json['employee_id']),
       outletId: _asInt(json['outlet_id']),
       workDate: _nullableDate(json['work_date']),
-      scheduledStartAt: _nullableDate(json['scheduled_start_at']),
-      scheduledLateAfterAt: _nullableDate(json['scheduled_late_after_at']),
-      scheduledEndAt: _nullableDate(json['scheduled_end_at']),
-      checkInAt: _nullableDate(json['check_in_at']),
-      checkOutAt: _nullableDate(json['check_out_at']),
+      scheduledStartAt: _nullableInstant(json['scheduled_start_at']),
+      scheduledLateAfterAt: _nullableInstant(json['scheduled_late_after_at']),
+      scheduledEndAt: _nullableInstant(json['scheduled_end_at']),
+      checkInAt: _nullableInstant(json['check_in_at']),
+      checkOutAt: _nullableInstant(json['check_out_at']),
       punctualityStatus: _nullableString(json['punctuality_status']),
       lateMinutes: _asInt(json['late_minutes']),
       earlyLeaveMinutes: _asInt(json['early_leave_minutes']),
@@ -516,9 +516,9 @@ class AttendanceContextModel {
               Map<String, dynamic>.from(json['attendance_shift'] as Map),
             )
           : null,
-      scheduledStartAt: DateTime.parse(json['scheduled_start_at'].toString()),
-      scheduledLateAfterAt: _nullableDate(json['scheduled_late_after_at']),
-      scheduledEndAt: DateTime.parse(json['scheduled_end_at'].toString()),
+      scheduledStartAt: _requiredInstant(json['scheduled_start_at']),
+      scheduledLateAfterAt: _nullableInstant(json['scheduled_late_after_at']),
+      scheduledEndAt: _requiredInstant(json['scheduled_end_at']),
       activeAttendance: active is Map
           ? AttendanceRecord.fromJson(Map<String, dynamic>.from(active))
           : null,
@@ -550,7 +550,7 @@ class AttendanceContextModel {
             ),
           )
           .toList(),
-      serverTime: DateTime.parse(json['server_time'].toString()),
+      serverTime: _requiredInstant(json['server_time']),
     );
   }
 
@@ -677,6 +677,23 @@ String? _nullableString(dynamic value) {
 DateTime? _nullableDate(dynamic value) {
   final text = _nullableString(value);
   return text == null ? null : DateTime.tryParse(text);
+}
+
+DateTime _requiredInstant(dynamic value) {
+  final parsed = _nullableInstant(value);
+  if (parsed == null) {
+    throw FormatException('Timestamp server tidak valid: $value');
+  }
+  return parsed;
+}
+
+DateTime? _nullableInstant(dynamic value) {
+  final text = _nullableString(value);
+  if (text == null) return null;
+
+  final hasOffset =
+      text.endsWith('Z') || RegExp(r'[+-]\d{2}:?\d{2}$').hasMatch(text);
+  return DateTime.tryParse(hasOffset ? text : '${text}Z')?.toUtc();
 }
 
 AttendanceEmployee? _employeeFromJson(dynamic value) {
