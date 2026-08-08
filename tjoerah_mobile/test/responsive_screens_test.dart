@@ -1126,7 +1126,12 @@ class _PreviewCashNotifier extends CashNotifier {
     return CashOverview(
       outletId: 1,
       outletName: 'Tjoerah Coffee - Renon',
-      canAdjust: true,
+      canOpen: false,
+      canRecordMovement: true,
+      canClose: true,
+      canEmergencyClose: false,
+      monitorOnly: false,
+      joinedSharedShift: false,
       currentShift: CashShift(
         id: 1,
         outletId: 1,

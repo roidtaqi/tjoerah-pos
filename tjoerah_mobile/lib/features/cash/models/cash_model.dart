@@ -2,27 +2,53 @@ class CashOverview {
   const CashOverview({
     required this.outletId,
     required this.outletName,
-    required this.canAdjust,
+    required this.canOpen,
+    required this.canRecordMovement,
+    required this.canClose,
+    required this.canEmergencyClose,
+    required this.monitorOnly,
+    required this.joinedSharedShift,
     required this.recentShifts,
     this.currentShift,
   });
 
   final int outletId;
   final String outletName;
-  final bool canAdjust;
+  final bool canOpen;
+  final bool canRecordMovement;
+  final bool canClose;
+  final bool canEmergencyClose;
+  final bool monitorOnly;
+  final bool joinedSharedShift;
   final CashShift? currentShift;
   final List<CashShift> recentShifts;
 
   factory CashOverview.fromJson(Map<String, dynamic> json) {
     final outlet = _map(json['outlet']);
     final current = json['current_shift'];
+    final currentShift = current is Map
+        ? CashShift.fromJson(Map<String, dynamic>.from(current))
+        : null;
+    final permissions = _map(json['permissions']);
+    final legacyManager = json['can_adjust'] == true;
     return CashOverview(
       outletId: _integer(outlet['id']),
       outletName: outlet['name']?.toString() ?? 'Outlet',
-      canAdjust: json['can_adjust'] == true,
-      currentShift: current is Map
-          ? CashShift.fromJson(Map<String, dynamic>.from(current))
-          : null,
+      canOpen: permissions.containsKey('can_open')
+          ? permissions['can_open'] == true
+          : !legacyManager && currentShift == null,
+      canRecordMovement: permissions.containsKey('can_record_movement')
+          ? permissions['can_record_movement'] == true
+          : !legacyManager && currentShift != null,
+      canClose: permissions.containsKey('can_close')
+          ? permissions['can_close'] == true
+          : !legacyManager && currentShift != null,
+      canEmergencyClose: permissions['can_emergency_close'] == true,
+      monitorOnly: permissions.containsKey('monitor_only')
+          ? permissions['monitor_only'] == true
+          : legacyManager,
+      joinedSharedShift: permissions['joined_shared_shift'] == true,
+      currentShift: currentShift,
       recentShifts: _list(json['recent_shifts'])
           .whereType<Map>()
           .map((item) => CashShift.fromJson(Map<String, dynamic>.from(item)))

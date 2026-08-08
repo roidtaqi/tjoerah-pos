@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_layout.dart';
+import '../../../shared/components/app_badge.dart';
 import '../../../shared/components/app_button.dart';
 import '../../../shared/components/app_card.dart';
 import '../../../shared/components/app_metric_card.dart';
@@ -90,12 +91,35 @@ class _ClosedCashView extends ConsumerWidget {
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
-              const SizedBox(height: 20),
-              AppButton(
-                text: 'Buka kas',
-                icon: Icons.lock_open_outlined,
-                onPressed: () => _showOpenDialog(context, ref),
-              ),
+              const SizedBox(height: 14),
+              if (overview.canOpen)
+                AppButton(
+                  text: 'Buka kas',
+                  icon: Icons.lock_open_outlined,
+                  onPressed: () => _showOpenDialog(context, ref),
+                )
+              else
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.visibility_outlined,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Text(
+                          'Menunggu kasir membuka Uang Kas untuk outlet ini.',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
             ],
           ),
         ),
@@ -126,28 +150,54 @@ class _OpenCashView extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Kas aktif', style: theme.textTheme.headlineSmall),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${overview.outletName} - ${shift.openedBy ?? 'Pengguna'}',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Text('Kas aktif', style: theme.textTheme.headlineSmall),
+                if (overview.monitorOnly)
+                  AppBadge(
+                    text: 'Pantauan manager',
+                    icon: Icons.visibility_outlined,
+                    color: theme.colorScheme.secondaryContainer,
+                    textColor: theme.colorScheme.onSecondaryContainer,
+                  )
+                else if (overview.joinedSharedShift)
+                  AppBadge(
+                    text: 'Sesi bersama',
+                    icon: Icons.group_outlined,
+                    color: theme.colorScheme.primaryContainer,
+                    textColor: theme.colorScheme.onPrimaryContainer,
                   ),
-                ],
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              _activeShiftDescription(overview, shift),
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
-            FilledButton.tonalIcon(
-              onPressed: () => _showCloseDialog(context, ref, shift),
-              icon: const Icon(Icons.lock_outline_rounded),
-              label: const Text('Tutup kas'),
-            ),
+            if (overview.canClose || overview.canEmergencyClose) ...[
+              const SizedBox(height: 12),
+              if (overview.canClose)
+                FilledButton.tonalIcon(
+                  onPressed: () => _showCloseDialog(context, ref, shift),
+                  icon: const Icon(Icons.lock_outline_rounded),
+                  label: const Text('Tutup kas'),
+                )
+              else
+                FilledButton.tonalIcon(
+                  onPressed: () =>
+                      _showEmergencyCloseDialog(context, ref, shift),
+                  icon: const Icon(Icons.emergency_outlined),
+                  label: const Text('Tutup darurat'),
+                ),
+            ],
           ],
         ),
         const SizedBox(height: 18),
@@ -233,35 +283,45 @@ class _OpenCashView extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: FilledButton.icon(
-                onPressed: () => _showMovementDialog(
-                  context,
-                  ref,
-                  type: 'cash_in',
-                  canAdjust: overview.canAdjust,
+        if (overview.canRecordMovement)
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: () =>
+                      _showMovementDialog(context, ref, type: 'cash_in'),
+                  icon: const Icon(Icons.add_rounded),
+                  label: const Text('Uang masuk'),
                 ),
-                icon: const Icon(Icons.add_rounded),
-                label: const Text('Uang masuk'),
               ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: () => _showMovementDialog(
-                  context,
-                  ref,
-                  type: 'cash_out',
-                  canAdjust: overview.canAdjust,
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () =>
+                      _showMovementDialog(context, ref, type: 'cash_out'),
+                  icon: const Icon(Icons.remove_rounded),
+                  label: const Text('Uang keluar'),
                 ),
-                icon: const Icon(Icons.remove_rounded),
-                label: const Text('Uang keluar'),
               ),
+            ],
+          )
+        else
+          AppCard(
+            child: Row(
+              children: [
+                Icon(
+                  Icons.visibility_outlined,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    'Mode pantau: transaksi kas hanya dapat dicatat oleh kasir.',
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
         const SizedBox(height: 24),
         Text('Riwayat Uang Kas', style: theme.textTheme.titleLarge),
         const SizedBox(height: 10),
@@ -524,11 +584,10 @@ Future<void> _showMovementDialog(
   BuildContext context,
   WidgetRef ref, {
   required String type,
-  required bool canAdjust,
 }) async {
   final draft = await showDialog<_MovementDraft>(
     context: context,
-    builder: (_) => _MovementDialog(type: type, canAdjust: canAdjust),
+    builder: (_) => _MovementDialog(type: type),
   );
   if (draft == null || !context.mounted) return;
   await _runAction(
@@ -547,10 +606,9 @@ Future<void> _showMovementDialog(
 }
 
 class _MovementDialog extends StatefulWidget {
-  const _MovementDialog({required this.type, required this.canAdjust});
+  const _MovementDialog({required this.type});
 
   final String type;
-  final bool canAdjust;
 
   @override
   State<_MovementDialog> createState() => _MovementDialogState();
@@ -560,7 +618,7 @@ class _MovementDialogState extends State<_MovementDialog> {
   final _formKey = GlobalKey<FormState>();
   final _amount = TextEditingController();
   final _note = TextEditingController();
-  late String _type = widget.type;
+  late final String _type = widget.type;
   late String _category = _categories(widget.type).first.$1;
   String? _photoPath;
 
@@ -586,27 +644,6 @@ class _MovementDialogState extends State<_MovementDialog> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (widget.canAdjust)
-                  SegmentedButton<bool>(
-                    segments: const [
-                      ButtonSegment(value: false, label: Text('Transaksi')),
-                      ButtonSegment(value: true, label: Text('Koreksi')),
-                    ],
-                    selected: {_type.startsWith('adjustment_')},
-                    onSelectionChanged: (selection) {
-                      final adjustment = selection.first;
-                      setState(() {
-                        _type = adjustment
-                            ? (widget.type.endsWith('out')
-                                  ? 'adjustment_out'
-                                  : 'adjustment_in')
-                            : widget.type;
-                        _category = _categories(_type).first.$1;
-                      });
-                    },
-                    showSelectedIcon: false,
-                  ),
-                if (widget.canAdjust) const SizedBox(height: 14),
                 DropdownButtonFormField<String>(
                   initialValue: options.any((item) => item.$1 == _category)
                       ? _category
@@ -749,10 +786,35 @@ Future<void> _showCloseDialog(
   );
 }
 
+Future<void> _showEmergencyCloseDialog(
+  BuildContext context,
+  WidgetRef ref,
+  CashShift shift,
+) async {
+  final draft = await showDialog<(double, String?)>(
+    context: context,
+    builder: (_) =>
+        _CloseCashDialog(expected: shift.summary.cashOnHand, emergency: true),
+  );
+  if (draft == null || !context.mounted) return;
+  await _runAction(
+    context,
+    () => ref
+        .read(cashProvider.notifier)
+        .emergencyCloseShift(
+          shiftId: shift.id,
+          closingCash: draft.$1,
+          reason: draft.$2!,
+        ),
+    'Kas berhasil ditutup secara darurat.',
+  );
+}
+
 class _CloseCashDialog extends StatefulWidget {
-  const _CloseCashDialog({required this.expected});
+  const _CloseCashDialog({required this.expected, this.emergency = false});
 
   final double expected;
+  final bool emergency;
 
   @override
   State<_CloseCashDialog> createState() => _CloseCashDialogState();
@@ -786,55 +848,76 @@ class _CloseCashDialogState extends State<_CloseCashDialog> {
   Widget build(BuildContext context) {
     final hasDifference = _value != null && _difference.abs() >= 0.01;
     return AlertDialog(
-      title: const Text('Tutup kas'),
+      title: Text(widget.emergency ? 'Tutup kas darurat' : 'Tutup kas'),
       content: SizedBox(
         width: 400,
         child: Form(
           key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _SummaryLine(
-                label: 'Total tunai di kasir',
-                value: _currency(widget.expected),
-                emphasized: true,
-              ),
-              const SizedBox(height: 14),
-              TextFormField(
-                controller: _amount,
-                autofocus: true,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(
-                  labelText: 'Total uang fisik',
-                  prefixText: 'Rp ',
-                  prefixIcon: Icon(Icons.payments_outlined),
-                ),
-                validator: (raw) => double.tryParse(raw ?? '') == null
-                    ? 'Masukkan hasil hitung uang fisik'
-                    : null,
-              ),
-              if (_value != null) ...[
-                const SizedBox(height: 10),
-                _SummaryLine(label: 'Selisih', value: _currency(_difference)),
-              ],
-              if (hasDifference) ...[
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _note,
-                  minLines: 2,
-                  maxLines: 4,
-                  decoration: const InputDecoration(
-                    labelText: 'Penjelasan selisih',
-                    prefixIcon: Icon(Icons.notes_rounded),
-                    alignLabelWithHint: true,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (widget.emergency) ...[
+                  Text(
+                    'Gunakan hanya bila kasir pembuka tidak dapat menutup sesi. '
+                    'Tindakan ini akan tercatat di audit.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
                   ),
-                  validator: (raw) => (raw ?? '').trim().length < 3
-                      ? 'Jelaskan penyebab selisih'
+                  const SizedBox(height: 12),
+                ],
+                _SummaryLine(
+                  label: 'Total tunai di kasir',
+                  value: _currency(widget.expected),
+                  emphasized: true,
+                ),
+                const SizedBox(height: 14),
+                TextFormField(
+                  controller: _amount,
+                  autofocus: true,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(
+                    labelText: 'Total uang fisik',
+                    prefixText: 'Rp ',
+                    prefixIcon: Icon(Icons.payments_outlined),
+                  ),
+                  validator: (raw) => double.tryParse(raw ?? '') == null
+                      ? 'Masukkan hasil hitung uang fisik'
                       : null,
                 ),
+                if (_value != null) ...[
+                  const SizedBox(height: 10),
+                  _SummaryLine(label: 'Selisih', value: _currency(_difference)),
+                ],
+                if (hasDifference || widget.emergency) ...[
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _note,
+                    minLines: 2,
+                    maxLines: 4,
+                    decoration: InputDecoration(
+                      labelText: widget.emergency
+                          ? 'Alasan penutupan darurat'
+                          : 'Penjelasan selisih',
+                      prefixIcon: const Icon(Icons.notes_rounded),
+                      alignLabelWithHint: true,
+                    ),
+                    validator: (raw) {
+                      final length = (raw ?? '').trim().length;
+                      if (widget.emergency && length < 5) {
+                        return 'Alasan minimal 5 karakter';
+                      }
+                      if (!widget.emergency && length < 3) {
+                        return 'Jelaskan penyebab selisih';
+                      }
+                      return null;
+                    },
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),
@@ -848,10 +931,10 @@ class _CloseCashDialogState extends State<_CloseCashDialog> {
             if (!_formKey.currentState!.validate()) return;
             Navigator.pop(context, (
               _value!,
-              hasDifference ? _note.text.trim() : null,
+              hasDifference || widget.emergency ? _note.text.trim() : null,
             ));
           },
-          child: const Text('Tutup kas'),
+          child: Text(widget.emergency ? 'Tutup darurat' : 'Tutup kas'),
         ),
       ],
     );
@@ -914,8 +997,20 @@ String _categoryLabel(String category) {
     'cash_sale' => 'Penjualan tunai',
     'customer_refund' => 'Refund pelanggan',
     'cash_reconciliation' => 'Rekonsiliasi kas',
+    'emergency_cash_close' => 'Penutupan darurat',
     _ => category.replaceAll('_', ' '),
   };
+}
+
+String _activeShiftDescription(CashOverview overview, CashShift shift) {
+  final openedBy = shift.openedBy ?? 'Kasir';
+  if (overview.monitorOnly) {
+    return '${overview.outletName} - dibuka oleh $openedBy - pembaruan otomatis';
+  }
+  if (overview.joinedSharedShift) {
+    return '${overview.outletName} - dibuka oleh $openedBy - Anda bergabung';
+  }
+  return '${overview.outletName} - dibuka oleh $openedBy';
 }
 
 String _currency(double value) => NumberFormat.currency(

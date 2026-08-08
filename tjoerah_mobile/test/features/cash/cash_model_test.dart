@@ -37,4 +37,36 @@ void main() {
     expect(summary.cashFundBalance, 80000);
     expect(summary.cashOnHand, 115000);
   });
+
+  test('cash overview reads shared-session permissions', () {
+    final overview = CashOverview.fromJson({
+      'outlet': {'id': 2, 'name': 'Tjoerah Renon'},
+      'current_shift': {
+        'id': 8,
+        'outlet_id': 2,
+        'shift_number': 'KAS-008',
+        'status': 'open',
+        'started_at': '2026-08-08T07:30:00+08:00',
+        'opened_by': {'name': 'Ayu'},
+        'summary': <String, dynamic>{},
+        'movements': <dynamic>[],
+      },
+      'permissions': {
+        'can_open': false,
+        'can_record_movement': true,
+        'can_close': false,
+        'can_emergency_close': false,
+        'monitor_only': false,
+        'joined_shared_shift': true,
+      },
+      'recent_shifts': <dynamic>[],
+    });
+
+    expect(overview.currentShift?.openedBy, 'Ayu');
+    expect(overview.canOpen, isFalse);
+    expect(overview.canRecordMovement, isTrue);
+    expect(overview.canClose, isFalse);
+    expect(overview.joinedSharedShift, isTrue);
+    expect(overview.monitorOnly, isFalse);
+  });
 }

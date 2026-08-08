@@ -83,9 +83,14 @@ Route::middleware('auth:api')->group(function () {
     Route::get('/receipts/{order}', [ReceiptController::class, 'show']);
 
     Route::get('/cash/overview', [CashController::class, 'overview']);
-    Route::post('/cash/sessions/open', [CashController::class, 'open']);
-    Route::post('/cash/sessions/{shift}/close', [CashController::class, 'close']);
-    Route::post('/cash/movements', [CashController::class, 'movement']);
+    Route::post('/cash/sessions/open', [CashController::class, 'open'])
+        ->middleware('role:cashier');
+    Route::post('/cash/sessions/{shift}/close', [CashController::class, 'close'])
+        ->middleware('role:cashier');
+    Route::post('/cash/sessions/{shift}/emergency-close', [CashController::class, 'emergencyClose'])
+        ->middleware('role:owner,admin');
+    Route::post('/cash/movements', [CashController::class, 'movement'])
+        ->middleware('role:cashier');
     Route::get('/cash/movements/{cashMovement}/evidence', [CashController::class, 'evidence']);
 
     Route::get('/transaction-settings', [TransactionSettingsController::class, 'show']);

@@ -106,6 +106,121 @@ class CashLedgerTest extends TestCase
         ]);
     }
 
+    public function test_cashiers_share_one_open_cash_session_per_outlet(): void
+    {
+        [$openingCashier, $outlet] = $this->context();
+        $joiningCashier = User::factory()->create([
+            'company_id' => $openingCashier->company_id,
+            'role' => 'cashier',
+        ]);
+
+        $this->actingAs($openingCashier, 'api');
+        $opened = $this->postJson('/api/cash/sessions/open', [
+            'outlet_id' => $outlet->id,
+            'opening_cash' => 100000,
+        ])->assertCreated();
+        $shiftId = $opened->json('data.id');
+
+        $this->actingAs($joiningCashier, 'api');
+        $this->getJson("/api/cash/overview?outlet_id={$outlet->id}")
+            ->assertOk()
+            ->assertJsonPath('current_shift.id', $shiftId)
+            ->assertJsonPath('permissions.can_open', false)
+            ->assertJsonPath('permissions.can_record_movement', true)
+            ->assertJsonPath('permissions.can_close', false)
+            ->assertJsonPath('permissions.joined_shared_shift', true);
+
+        $this->postJson('/api/cash/sessions/open', [
+            'outlet_id' => $outlet->id,
+            'opening_cash' => 999999,
+        ])->assertOk()
+            ->assertJsonPath('data.id', $shiftId)
+            ->assertJsonPath('data.summary.opening_cash', 100000);
+
+        $this->postJson('/api/cash/movements', [
+            'outlet_id' => $outlet->id,
+            'type' => 'cash_in',
+            'category' => 'change_fund',
+            'amount' => 10000,
+            'note' => 'Tambahan uang kembalian',
+        ])->assertCreated()->assertJsonPath('shift.id', $shiftId);
+
+        $this->postJson("/api/cash/sessions/{$shiftId}/close", [
+            'closing_cash' => 110000,
+        ])->assertForbidden();
+
+        $this->assertDatabaseCount('shifts', 1);
+        $this->assertDatabaseHas('cash_movements', [
+            'shift_id' => $shiftId,
+            'user_id' => $joiningCashier->id,
+            'type' => 'cash_in',
+            'amount' => 10000,
+        ]);
+
+        $this->actingAs($openingCashier, 'api');
+        $this->postJson("/api/cash/sessions/{$shiftId}/close", [
+            'closing_cash' => 110000,
+        ])->assertOk();
+    }
+
+    public function test_manager_only_monitors_and_can_emergency_close_with_a_reason(): void
+    {
+        [$cashier, $outlet] = $this->context();
+        $manager = User::factory()->create([
+            'company_id' => $cashier->company_id,
+            'role' => 'owner',
+        ]);
+
+        $this->actingAs($cashier, 'api');
+        $shiftId = $this->postJson('/api/cash/sessions/open', [
+            'outlet_id' => $outlet->id,
+            'opening_cash' => 50000,
+        ])->assertCreated()->json('data.id');
+
+        $this->actingAs($manager, 'api');
+        $this->getJson("/api/cash/overview?outlet_id={$outlet->id}")
+            ->assertOk()
+            ->assertJsonPath('current_shift.id', $shiftId)
+            ->assertJsonPath('permissions.monitor_only', true)
+            ->assertJsonPath('permissions.can_open', false)
+            ->assertJsonPath('permissions.can_record_movement', false)
+            ->assertJsonPath('permissions.can_close', false)
+            ->assertJsonPath('permissions.can_emergency_close', true);
+
+        $this->postJson('/api/cash/sessions/open', [
+            'outlet_id' => $outlet->id,
+            'opening_cash' => 10000,
+        ])->assertForbidden();
+        $this->postJson('/api/cash/movements', [
+            'outlet_id' => $outlet->id,
+            'type' => 'cash_out',
+            'category' => 'other_out',
+            'amount' => 5000,
+            'note' => 'Tidak boleh dilakukan manager',
+        ])->assertForbidden();
+        $this->postJson("/api/cash/sessions/{$shiftId}/close", [
+            'closing_cash' => 50000,
+        ])->assertForbidden();
+
+        $this->postJson("/api/cash/sessions/{$shiftId}/emergency-close", [
+            'closing_cash' => 50000,
+        ])->assertUnprocessable()->assertJsonValidationErrors('reason');
+
+        $this->postJson("/api/cash/sessions/{$shiftId}/emergency-close", [
+            'closing_cash' => 50000,
+            'reason' => 'Kasir pembuka tidak dapat melanjutkan shift.',
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'closed')
+            ->assertJsonPath('data.closed_by.id', $manager->id);
+
+        $this->assertDatabaseHas('cash_movements', [
+            'shift_id' => $shiftId,
+            'user_id' => $manager->id,
+            'type' => 'closing_note',
+            'category' => 'emergency_cash_close',
+        ]);
+    }
+
     public function test_open_bill_requires_a_clear_identity(): void
     {
         [$user, $outlet, $product] = $this->context();

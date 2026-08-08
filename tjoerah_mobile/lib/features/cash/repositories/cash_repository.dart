@@ -65,6 +65,19 @@ class CashRepository {
     if (response.statusCode != 200) throw StateError(_message(body));
   }
 
+  Future<void> emergencyCloseShift({
+    required int shiftId,
+    required double closingCash,
+    required String reason,
+  }) async {
+    final response = await ApiClient.post(
+      '/cash/sessions/$shiftId/emergency-close',
+      {'closing_cash': closingCash, 'reason': reason.trim()},
+    );
+    final body = _body(response.body);
+    if (response.statusCode != 200) throw StateError(_message(body));
+  }
+
   Map<String, dynamic> _body(String raw) {
     try {
       final decoded = jsonDecode(raw);

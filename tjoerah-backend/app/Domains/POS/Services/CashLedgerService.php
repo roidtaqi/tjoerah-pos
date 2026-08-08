@@ -2,20 +2,23 @@
 
 namespace App\Domains\POS\Services;
 
+use App\Domains\Core\Models\Outlet;
 use App\Domains\Employee\Models\Shift;
+use App\Domains\POS\Events\CashShiftUpdated;
 use App\Domains\POS\Models\CashMovement;
 use App\Domains\POS\Models\Order;
 use App\Domains\POS\Models\Refund;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Throwable;
 
 class CashLedgerService
 {
-    public function currentShift(int $outletId, int $userId): ?Shift
+    public function currentShift(int $outletId): ?Shift
     {
         return Shift::query()
             ->where('outlet_id', $outletId)
-            ->where('opened_by', $userId)
             ->where('status', 'open')
             ->latest('started_at')
             ->first();
@@ -36,9 +39,9 @@ class CashLedgerService
             $employeeId,
             $shiftNumber,
         ) {
+            Outlet::query()->whereKey($outletId)->lockForUpdate()->firstOrFail();
             $existing = Shift::query()
                 ->where('outlet_id', $outletId)
-                ->where('opened_by', $userId)
                 ->where('status', 'open')
                 ->lockForUpdate()
                 ->latest('started_at')
@@ -169,7 +172,7 @@ class CashLedgerService
         if ($userId <= 0) {
             return null;
         }
-        $shift = $this->currentShift($order->outlet_id, $userId)
+        $shift = $this->currentShift($order->outlet_id)
             ?? $this->openShift($order->outlet_id, $userId, 0)['shift'];
 
         return $this->createMovement([
@@ -242,7 +245,7 @@ class CashLedgerService
             }
         }
 
-        return $this->currentShift($order->outlet_id, $userId)
+        return $this->currentShift($order->outlet_id)
             ?? $this->openShift($order->outlet_id, $userId, 0)['shift'];
     }
 
@@ -286,10 +289,39 @@ class CashLedgerService
     private function createMovement(array $attributes): CashMovement
     {
         $sourceKey = $attributes['source_key'] ?? null;
-        if ($sourceKey) {
-            return CashMovement::firstOrCreate(['source_key' => $sourceKey], $attributes);
+        $movement = $sourceKey
+            ? CashMovement::firstOrCreate(['source_key' => $sourceKey], $attributes)
+            : CashMovement::create($attributes);
+
+        if ($movement->wasRecentlyCreated) {
+            $this->broadcastShiftUpdate(
+                (int) $movement->outlet_id,
+                $movement->shift_id === null ? null : (int) $movement->shift_id,
+                (string) $movement->type,
+                $movement->user_id === null ? null : (int) $movement->user_id,
+            );
         }
 
-        return CashMovement::create($attributes);
+        return $movement;
+    }
+
+    public function broadcastShiftUpdate(
+        int $outletId,
+        ?int $shiftId,
+        string $action,
+        ?int $actorId,
+    ): void {
+        DB::afterCommit(static function () use ($outletId, $shiftId, $action, $actorId): void {
+            try {
+                event(new CashShiftUpdated($outletId, $shiftId, $action, $actorId));
+            } catch (Throwable $exception) {
+                Log::warning('Cash shift changed but the realtime update could not be broadcast.', [
+                    'outlet_id' => $outletId,
+                    'shift_id' => $shiftId,
+                    'action' => $action,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        });
     }
 }
